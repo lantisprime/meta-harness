@@ -145,3 +145,21 @@ async def test_workspace_root_stamped_from_tool_registry(tmp_path):
     # no registry → no root claimed (never guess)
     result = await make_worker(handler).run(Task(objective="do"))
     assert result.workspace_root == ""
+
+
+def test_strip_think_removes_reasoning_blocks():
+    """Regression (2026-07-09): MiniMax-M3's <think> blocks made every
+    correct classify answer fail verification — the whole tuning suite
+    scored pass^3=0.00. The answer after the block is what gets verified."""
+    from metaharness.harness.local import strip_think
+
+    assert strip_think(
+        '<think>The review mentions "fast checkout" - positive.</think>\n\npositive'
+    ) == "positive"
+    assert strip_think(
+        "<think>\nreasoning…\n</think>\nfirst\n<think>more</think>\nsecond"
+    ) == "first\nsecond"
+    assert strip_think("no blocks here") == "no blocks here"
+    # unclosed block (max_tokens mid-thought): half a thought is not an answer
+    assert strip_think("real answer\n<think>I wonder if") == "real answer"
+    assert strip_think("<think>only a thought, never closed") == ""

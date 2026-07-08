@@ -133,6 +133,14 @@ tr:last-child td{border-bottom:0}
 .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;
   margin-top:12px;padding-top:10px;border-top:1px solid var(--hair)}
 
+/* card arranging: ‹ › appear on hover, order persists per browser */
+.card-move{float:right;display:inline-flex;gap:2px;opacity:0;transition:opacity .15s}
+.card:hover .card-move{opacity:1}
+@media (prefers-reduced-motion: reduce){.card-move{transition:none}}
+.card-move button{width:22px;height:22px;border-radius:7px;background:var(--hair);
+  color:var(--mut2);font-size:14px;line-height:1;font-family:var(--sans)}
+.card-move button:hover{background:var(--accent-soft);color:var(--accent)}
+
 /* Home: the calm landing — a single next-action card answers "what do I do
    right now?" (structure-lab handoff pattern) */
 .next-action{background:var(--dark);color:var(--on-dark);border-radius:20px;
@@ -678,6 +686,10 @@ async function renderHome(){
 
     const latest = runs[runs.length - 1];
     const tuned = tuning.find(s => s.active && s.promoted) || tuning.find(s => s.promoted);
+    const latestSearch = tuning.filter(s => s.report && !s.running)
+      .sort((a, b) => (b.report.finished_at || 0) - (a.report.finished_at || 0))[0];
+    const searchLine = latestSearch
+      ? `<div class="small dim" style="margin-top:8px">${esc(tuningSummary(latestSearch))}</div>` : '';
     document.getElementById('home-rows').innerHTML = `
       <div class="card"><h2>Latest result</h2>
         <div class="sub">The most recent thing the harness did</div>
@@ -695,6 +707,7 @@ async function renderHome(){
             <div class="rr-meta">${esc(tuned.suite)} suite · approved</div></div>
           <div class="rr-story">every claim was checked on questions the search never saw</div></div>`
           : '<div class="empty">no tuned configuration live yet</div>'}
+        ${searchLine}
         <div style="margin-top:10px"><button class="btn ghost" onclick="showView('console')">Tune the harness</button></div></div>
       <div class="card wide"><h2>New here?</h2>
         <div class="sub">Three ways to get oriented</div>
@@ -1603,6 +1616,23 @@ const FINDING_BADGE = {
   info: ['dim', 'note'],
 };
 const TUNE = { suite: 'mixed' };
+
+/* One plain-language sentence wrapping up a suite's last search — shared by
+   the tuning card and the Home landing. */
+function tuningSummary(s){
+  if(!s.report || s.running) return '';
+  const rep = s.report;
+  const experiments = s.candidates.filter(c => c.status === 'evaluated').length;
+  const outcome = s.pending ? `${s.pending.candidate} is waiting for your decision`
+    : rep.promoted ? `${rep.best_id} won and was promoted`
+    : rep.stopped === 'error' ? 'the search crashed — see the note in the Console'
+    : 'nothing beat the current setup';
+  const g = rep.gate;
+  return `Last ${s.suite} search${rep.finished_at ? ' finished ' + ago(rep.finished_at) : ''}: `
+    + `${experiments} experiment${experiments === 1 ? '' : 's'} over ${rep.rounds_run} round${rep.rounds_run === 1 ? '' : 's'} — ${outcome}`
+    + (g ? ` (held-out ${g.overall_incumbent.toFixed(2)} → ${g.overall_candidate.toFixed(2)})` : '') + '.';
+}
+
 function renderTuning(suites){
   const busy = suites.some(s => s.running);
   const controls = `<div class="chainline">
@@ -1667,21 +1697,9 @@ function renderTuning(suites){
         ${f.evidence && !f.story.includes(f.evidence) ? `<div class="rr-meta">${esc(f.evidence)}</div>` : ''}</div>
         ${badge(cls, label)}</div>`;
     }).join('');
-    // plain-language wrap-up of the last search, with freshness
-    let summary = '';
-    if(s.report && !s.running){
-      const rep = s.report;
-      const experiments = s.candidates.filter(c => c.status === 'evaluated').length;
-      const outcome = s.pending ? `${esc(s.pending.candidate)} is waiting for your decision`
-        : rep.promoted ? `${esc(rep.best_id)} won and was promoted`
-        : rep.stopped === 'error' ? 'the search crashed — see the note below'
-        : 'nothing beat the current setup';
-      const g2 = rep.gate;
-      summary = `<div class="small dim" style="margin:2px 0 8px">Last search${
-        rep.finished_at ? ' finished <b>' + esc(ago(rep.finished_at)) + '</b>' : ''}:
-        ${experiments} experiment${experiments === 1 ? '' : 's'} over ${rep.rounds_run} round${rep.rounds_run === 1 ? '' : 's'}
-        — ${outcome}${g2 ? ` (held-out ${g2.overall_incumbent.toFixed(2)} → ${g2.overall_candidate.toFixed(2)})` : ''}.</div>`;
-    }
+    const summaryText = tuningSummary(s);
+    const summary = summaryText
+      ? `<div class="small dim" style="margin:2px 0 8px">${esc(summaryText)}</div>` : '';
     return `<div class="small" style="margin:8px 0 4px"><b>${esc(s.suite)} suite</b>
       ${s.running ? badge('act', 'searching…') : ''}</div>` + summary + pend + rows + gate
       + (findings ? `<div class="small" style="margin:12px 0 2px"><b>What this means</b></div>` + findings : '');
@@ -1722,12 +1740,21 @@ document.getElementById('tuning').addEventListener('click', async ev => {
   }
   const act = ev.target.closest('button[data-advise-act]');
   if(act){
-    if(act.dataset.adviseAct === 'start_tune'){
+    const action = act.dataset.adviseAct;
+    if(action === 'start_tune'){
       const r = await post('/api/optimization/runs', {suite: TUNE.suite});
       toast(r.ok ? `Tuning started on the ${TUNE.suite} suite` : 'Could not start — a search may already be running');
       refreshConsole();
-    } else if(act.dataset.adviseAct === 'approve_promotion'){
-      toast('Scroll up to the Promote banner — the decision buttons live there');
+    } else if(action === 'approve_promotion'){
+      const banner = document.querySelector('#tuning button[data-tune-approve]');
+      if(banner){ banner.scrollIntoView({behavior: 'smooth', block: 'center'}); toast('The decision buttons are in the Promote banner'); }
+      else toast('Nothing is awaiting approval right now');
+    } else if(action === 'open_settings'){
+      showView('settings');
+    } else if(action === 'prefill_goal'){
+      showView('wizard');
+    } else if(action === 'add_coverage'){
+      toast('Suite extension isn’t built yet — the built-in questions live in optimization/suites.py');
     } else {
       toast('That suggestion needs a human — see the Help tab for how');
     }
@@ -1789,6 +1816,37 @@ setInterval(() => {
   if(document.getElementById('view-console').style.display !== 'none') refreshConsole();
   if(document.getElementById('view-home').style.display !== 'none') renderHome();
 }, 3000);
+
+/* Console cards can be arranged (‹ › on hover); the order sticks per browser. */
+function initCardArranging(){
+  const grid = document.querySelector('#view-console .grid');
+  const cards = [...grid.children];
+  cards.forEach(card => card.dataset.cardId = card.querySelector('h2').textContent.trim());
+  const saved = JSON.parse(localStorage.getItem('console-card-order') || '[]');
+  if(saved.length){
+    const byId = {};
+    cards.forEach(c => byId[c.dataset.cardId] = c);
+    saved.forEach(id => { if(byId[id]) grid.appendChild(byId[id]); });
+  }
+  cards.forEach(card => {
+    const ctl = document.createElement('span');
+    ctl.className = 'card-move';
+    ctl.innerHTML = '<button title="Move card earlier" data-move="-1">‹</button>'
+                  + '<button title="Move card later" data-move="1">›</button>';
+    card.querySelector('h2').appendChild(ctl);
+  });
+  grid.addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-move]');
+    if(!b) return;
+    const card = b.closest('.card');
+    const sib = b.dataset.move === '-1' ? card.previousElementSibling : card.nextElementSibling;
+    if(!sib) return;
+    grid.insertBefore(b.dataset.move === '-1' ? card : sib, b.dataset.move === '-1' ? sib : card);
+    localStorage.setItem('console-card-order',
+      JSON.stringify([...grid.children].map(c => c.dataset.cardId)));
+  });
+}
+initCardArranging();
 
 /* ================= SETTINGS: wizard-driven configuration ================= */
 const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null };

@@ -821,3 +821,21 @@ def test_goal_step_has_prompt_assistant(page, server):
     page.fill("#goal", "fix the disk thing on db-1")
     page.click("#advise-goal-btn")
     page.wait_for_selector("#goal-advice .advisor, #goal-advice .empty")
+
+
+def test_console_cards_can_be_rearranged(page, server):
+    """Cards move with the hover ‹ › controls and the order persists in
+    localStorage for the next visit."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-console")
+    page.wait_for_selector("#tiles .tile")
+    ids = page.evaluate("() => [...document.querySelectorAll('#view-console .grid .card')]"
+                        ".map(c => c.dataset.cardId)")
+    page.hover("#view-console .grid .card:first-child")
+    page.click("#view-console .grid .card:first-child button[data-move='1']")
+    ids2 = page.evaluate("() => [...document.querySelectorAll('#view-console .grid .card')]"
+                         ".map(c => c.dataset.cardId)")
+    assert ids2[0] == ids[1] and ids2[1] == ids[0]
+    saved = page.evaluate("() => JSON.parse(localStorage.getItem('console-card-order'))")
+    assert saved == ids2

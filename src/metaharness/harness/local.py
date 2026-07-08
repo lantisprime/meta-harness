@@ -61,6 +61,26 @@ def _build_messages(task: Task, system_prompt: str = "") -> list[dict[str, str]]
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def strip_think(text: str) -> str:
+    """Drop <think>…</think> reasoning blocks that hybrid-thinking models
+    (MiniMax, Qwen3, DeepSeek-R1) emit inline before the answer — the answer
+    is what gets parsed and verified, never the deliberation. An UNCLOSED
+    block (max_tokens mid-thought) drops everything from the tag on: half a
+    thought must not masquerade as the answer.
+
+    Bug this guards against (2026-07-09): MiniMax-M3 answered every classify
+    task correctly after a think block, and the harness-tuning verifier
+    scored the whole suite pass^3=0.00 because raw text was compared against
+    the expected label."""
+    stripped = _THINK_RE.sub("", text)
+    if "<think>" in stripped:
+        stripped = stripped.split("<think>", 1)[0]
+    return stripped.strip()
+
+
 def parse_output(text: str, expect_json: bool) -> Any:
     """Best-effort structured parse: fenced JSON, bare JSON, else raw text."""
     if not expect_json:
@@ -206,7 +226,7 @@ class OpenAICompatWorker(BaseRunner):
             if self._client is None:
                 await client.aclose()
 
-        text = message.get("content") or ""
+        text = strip_think(message.get("content") or "")
         if not text and message.get("reasoning_content"):
             # thinking model hit max_tokens mid-reasoning; surface what exists
             text = message["reasoning_content"]
