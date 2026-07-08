@@ -1,0 +1,614 @@
+"""The web console: a wizard-driven main view (Agents → Goal → Plan → Run → Done)
+plus a Console view with the observability panels.
+
+Design language follows the user's Structure Lab console (structure-discovery-lab
+webapp): #f5f5f7 canvas, white 16px-radius cards with hairline borders, Newsreader
+serif for display headings, Hanken Grotesk for body, IBM Plex Mono for data,
+#0071e3 accent, eyebrow labels, left stepper, pill nav, blurred sticky header.
+"""
+
+DASHBOARD_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>metaharness · Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,500;0,600;1,500&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#0071e3; --accent-soft:#e8f0fd; --accent-dark:#0058b0; --accent-dark2:#3a5a8c;
+  --bg:#f5f5f7; --card:#fff; --line:#e8e8ed; --line2:#e2e2e7; --hair:#f0f0f3;
+  --dark:#1d1d1f; --on-dark:#f5f5f7; --dark-mut:#c9c9ce; --dark-faint:#a1a1a6;
+  --ink:#1d1d1f; --ink2:#424245; --mut:#6e6e73; --mut2:#86868b; --faint:#a1a1a6;
+  --green:#248a3d; --amber:#b0670a; --red:#c1121f;
+  --serif:"Newsreader",Georgia,serif;
+  --sans:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--ink);
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:0;background:none}
+.mono{font-family:var(--mono)}
+
+header{position:sticky;top:0;z-index:40;
+  background:rgba(245,245,247,.82);backdrop-filter:saturate(160%) blur(16px);
+  -webkit-backdrop-filter:saturate(160%) blur(16px);border-bottom:1px solid var(--line)}
+.bar{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:18px;padding:13px 24px}
+.logo{display:flex;align-items:center;gap:10px}
+.logo .sq{width:29px;height:29px;border-radius:8px;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px}
+.logo .name{font-family:var(--serif);font-weight:600;font-size:18px;letter-spacing:-.01em}
+nav.pills{display:flex;gap:2px}
+nav.pills button{padding:6px 13px;border-radius:999px;color:var(--mut);font-size:13.5px;font-weight:500}
+nav.pills button.on{background:var(--accent-soft);color:var(--accent)}
+.spacer{flex:1}
+.updated{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+main{max-width:1080px;margin:0 auto;padding:30px 24px 90px}
+.view{animation:fadeUp .34s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.eyebrow{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;
+  font-size:12px;color:var(--faint)}
+h1.greet{font-family:var(--serif);font-weight:500;font-size:30px;line-height:1.12;
+  letter-spacing:-.02em;margin:6px 0 22px;max-width:640px}
+
+/* wizard */
+.wiz-grid{display:grid;grid-template-columns:206px 1fr;gap:26px}
+.stepper{position:sticky;top:86px;align-self:start;display:flex;flex-direction:column;gap:2px}
+.stepper .s{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px}
+.stepper .s.on{background:#fff;border:1px solid var(--line)}
+.stepper .s .n{width:24px;height:24px;border-radius:999px;flex:0 0 auto;display:flex;
+  align-items:center;justify-content:center;font-size:12px;font-family:var(--mono);
+  background:var(--hair);color:var(--mut2)}
+.stepper .s.on .n{background:var(--accent);color:#fff}
+.stepper .s.done .n{background:var(--green);color:#fff}
+.stepper .s .l{font-size:13.5px;color:var(--mut);font-weight:500}
+.stepper .s.on .l{color:var(--ink);font-weight:600}
+.wiz-body{min-height:380px}
+.guide{display:flex;gap:12px;background:var(--accent-soft);border-radius:16px;
+  padding:15px 20px;margin-bottom:18px}
+.guide b{color:var(--accent);font-size:13.5px;display:block}
+.guide p{color:#4a545e;font-size:13px;margin-top:2px}
+.wiz-nav{display:flex;justify-content:space-between;gap:12px;margin-top:20px}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+  padding:20px;overflow-x:auto}
+.card h2{font-family:var(--serif);font-weight:600;font-size:18px;margin-bottom:2px}
+.card .sub{color:var(--mut2);font-size:12.5px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:16px}
+.card.wide{grid-column:1 / -1}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
+.tile .val{font-family:var(--mono);font-size:25px;line-height:1.1}
+.tile .val.green{color:var(--green)} .tile .val.red{color:var(--red)}
+.tile .lab{color:var(--mut2);font-size:12.5px;margin-top:6px}
+
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;color:var(--mut2);font-weight:600;padding:5px 10px 5px 0;
+  border-bottom:1px solid var(--line);white-space:nowrap;font-size:12px}
+td{padding:7px 10px 7px 0;border-bottom:1px solid var(--hair);vertical-align:top}
+tr:last-child td{border-bottom:0}
+
+.badge{display:inline-block;padding:3px 11px;border-radius:999px;font-size:11.5px;
+  font-weight:600;white-space:nowrap}
+.badge.ok{background:#248a3d1c;color:var(--green)}
+.badge.warn{background:#b0670a1c;color:var(--amber)}
+.badge.bad{background:#c1121f14;color:var(--red)}
+.badge.act{background:var(--accent-soft);color:var(--accent)}
+.badge.dim{background:#8e8e9322;color:var(--mut2)}
+.btn{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;
+  border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600}
+.btn.ghost{background:#fff;color:var(--accent);border:1px solid var(--line2)}
+.btn.reject{background:#fff;color:var(--red);border:1px solid var(--line2)}
+.btn:disabled{opacity:.45;cursor:default}
+.dim{color:var(--mut2)} .faint{color:var(--faint)} .small{font-size:12px}
+.green{color:var(--green)} .red{color:var(--red)} .amber{color:var(--amber)}
+.bar-h{background:var(--accent);height:8px;border-radius:4px;min-width:2px;display:inline-block;
+  vertical-align:middle;margin-right:8px}
+.empty{color:var(--mut2);font-size:13.5px;font-style:italic;padding:8px 0}
+.chainline{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:13.5px}
+.headhash{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--mut2);margin-bottom:6px}
+.field input,.field textarea,.field select{width:100%;border:1px solid var(--line2);
+  border-radius:10px;padding:10px 13px;font-family:inherit;font-size:13.5px;
+  background:#fafafc;outline:none;color:var(--ink)}
+.field input:focus,.field textarea:focus{border-color:var(--accent);background:#fff}
+.field textarea{min-height:90px;resize:vertical}
+.field input.mono,.field select{font-family:var(--mono);font-size:12.5px}
+
+.tierrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
+.tierrow:last-child{border-bottom:0}
+.tierrow .tn{font-family:var(--mono);font-size:12px;text-transform:uppercase;
+  letter-spacing:.05em;width:76px;color:var(--mut)}
+.tierrow .tm{font-weight:600;font-size:13.5px}
+.tierrow .td{color:var(--mut2);font-size:12px}
+
+.planstep{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--hair)}
+.planstep:last-child{border-bottom:0}
+.planstep .n{width:24px;height:24px;border-radius:999px;flex:0 0 auto;display:flex;
+  align-items:center;justify-content:center;font-size:12px;font-family:var(--mono);
+  background:var(--accent-soft);color:var(--accent)}
+.planstep .n.done{background:var(--green);color:#fff}
+.planstep .n.now{background:var(--accent);color:#fff}
+.planstep .n.fail{background:var(--red);color:#fff}
+.planstep .pt{font-weight:600;font-size:13.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.planstep .pd{color:var(--mut2);font-size:12.5px;margin-top:2px}
+.planstep .out{font-size:12.5px;white-space:pre-wrap;background:var(--hair);
+  border-radius:10px;padding:10px 12px;margin-top:8px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-soft);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
+  vertical-align:-1px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(8px);
+  background:var(--dark);color:var(--on-dark);padding:11px 18px;border-radius:12px;
+  font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.22);opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s;z-index:90;max-width:80vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:820px){.wiz-grid{grid-template-columns:1fr}
+  .stepper{position:static;flex-direction:row;overflow-x:auto;gap:6px}
+  .stepper .s .l{display:none}}
+@media(max-width:960px){.tiles{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.tiles,.grid{grid-template-columns:1fr}h1.greet{font-size:24px}}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="logo"><div class="sq">mh</div><div class="name">metaharness</div></div>
+  <nav class="pills">
+    <button id="nav-wizard" class="on" onclick="showView('wizard')">Run</button>
+    <button id="nav-console" onclick="showView('console')">Console</button>
+  </nav>
+  <div class="spacer"></div>
+  <span class="updated" id="updated"></span>
+</div></header>
+
+<main>
+<!-- ================= WIZARD ================= -->
+<div id="view-wizard" class="view">
+  <div class="eyebrow">Meta agent harness</div>
+  <h1 class="greet" id="wiz-greet">What should the harness do for you?</h1>
+  <div class="wiz-grid">
+    <div class="stepper" id="stepper"></div>
+    <div class="wiz-body" id="wiz-body"></div>
+  </div>
+</div>
+
+<!-- ================= CONSOLE ================= -->
+<div id="view-console" class="view" style="display:none">
+  <div class="eyebrow">Observability</div>
+  <h1 class="greet">Everything the harness knows, live.</h1>
+  <div class="tiles" id="tiles"></div>
+  <div class="grid">
+    <div class="card"><h2>Runs</h2>
+      <div class="sub">Click a run to see step outputs</div>
+      <div id="runs" class="empty">loading…</div></div>
+    <div class="card"><h2>Registered workers</h2>
+      <div class="sub">Identities admitted via signed challenge–response</div>
+      <div id="workers" class="empty">loading…</div></div>
+    <div class="card"><h2>Provenance chain</h2>
+      <div class="sub">Hash-chained, signed action log — verified on every refresh</div>
+      <div id="provenance" class="empty">loading…</div></div>
+    <div class="card"><h2>Capability matrix</h2>
+      <div class="sub">Observed pass rates per model × task type — this routes traffic</div>
+      <div id="matrix" class="empty">loading…</div></div>
+    <div class="card"><h2>Playbook</h2>
+      <div class="sub">Curated advice from the slow learning loop</div>
+      <div id="playbook" class="empty">loading…</div></div>
+    <div class="card"><h2>Failure clusters</h2>
+      <div class="sub">MAST-labelled failures, clustered before fixing</div>
+      <div id="failures" class="empty">loading…</div></div>
+    <div class="card wide"><h2>Recent spans</h2>
+      <div class="sub">Live OpenTelemetry timeline</div>
+      <div id="spans" class="empty">loading…</div></div>
+  </div>
+</div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const get = async p => (await fetch(p)).json();
+const post = (p, body) => fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+const badge = (cls, text) => `<span class="badge ${cls}">${esc(text)}</span>`;
+const statusBadge = s => badge({completed:'ok', failed:'bad', awaiting_approval:'warn', running:'act'}[s] || 'dim', String(s).replace('_',' '));
+function toast(msg){ const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2600); }
+
+/* ---------- view switching ---------- */
+function showView(v){
+  document.getElementById('view-wizard').style.display = v === 'wizard' ? '' : 'none';
+  document.getElementById('view-console').style.display = v === 'console' ? '' : 'none';
+  document.getElementById('nav-wizard').classList.toggle('on', v === 'wizard');
+  document.getElementById('nav-console').classList.toggle('on', v === 'console');
+  if(v === 'console') refreshConsole();
+}
+
+/* ---------- wizard state machine ---------- */
+const STEPS = ['Agents','Goal','Plan','Run','Done'];
+const wiz = { step: 0, goal: '', context: {}, plan: null, planSource: '', runId: null, run: null, poller: null };
+
+function renderStepper(){
+  document.getElementById('stepper').innerHTML = STEPS.map((label, i) =>
+    `<div class="s ${i === wiz.step ? 'on' : ''} ${i < wiz.step ? 'done' : ''}">
+       <div class="n">${i < wiz.step ? '✓' : i + 1}</div><div class="l">${label}</div></div>`).join('');
+}
+
+function setStep(n){
+  wiz.step = n;
+  renderStepper();
+  [renderAgentsStep, renderGoalStep, renderPlanStep, renderRunStep, renderDoneStep][n]();
+  document.getElementById('wiz-greet').textContent = [
+    'First: which models do the work?',
+    'What should the harness do for you?',
+    'Review the plan before it runs.',
+    'The harness is working.',
+    'Done. Here is what came back.',
+  ][n];
+}
+
+/* ---------- step 1: agents ---------- */
+async function renderAgentsStep(){
+  const body = document.getElementById('wiz-body');
+  body.innerHTML = '<div class="card"><div class="empty">loading agents…</div></div>';
+  const workers = await get('/api/workers');
+  const agents = workers.filter(w => w.worker_id !== 'orchestrator' && w.active);
+  const byTier = {};
+  agents.forEach(w => (w.tiers || []).forEach(t => { byTier[t] = w; }));
+  const tiers = ['small','mid','frontier'].map(t => {
+    const w = byTier[t];
+    return `<div class="tierrow"><div class="tn">${t}</div>
+      <div style="flex:1">${w
+        ? `<div class="tm">${esc(w.display_name)}</div><div class="td mono">${esc(w.worker_id)} · key ${esc(w.public_key_b64.slice(0,12))}…</div>`
+        : '<div class="td">no agent — this tier can\\'t take work</div>'}</div>
+      ${w ? badge('ok','ready') : badge('dim','empty')}</div>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="guide"><div><b>Agents do the work; tiers set the cost ladder.</b>
+      <p>The harness routes each step to the cheapest tier likely to succeed and escalates on verified failure.
+      The frontier agent also plans your workflows. Defaults are fine — just continue.</p></div></div>
+    <div class="card"><h2>Tier assignments</h2><div class="sub">Who answers when the router calls</div>${tiers}</div>
+    <div class="card" style="margin-top:16px"><h2>Add or replace an agent</h2>
+      <div class="sub">Point a tier at a local OpenAI-compatible endpoint (Ollama, LM Studio, vLLM)</div>
+      <div class="field"><label>Endpoint base URL</label>
+        <div style="display:flex;gap:8px">
+          <input id="wurl" class="mono" value="http://localhost:1234/v1" style="flex:1">
+          <button class="btn ghost" onclick="probeUrl()">Probe</button></div></div>
+      <div class="field"><label>Model</label><select id="wmodel"><option value="">probe first…</option></select></div>
+      <div class="field" style="display:flex;gap:10px">
+        <span style="flex:1"><label>Worker id</label><input id="wid" class="mono" placeholder="my-gemma"></span>
+        <span style="width:130px"><label>Tier</label><select id="wtier">
+          <option value="small">small</option><option value="mid">mid</option>
+          <option value="frontier">frontier</option></select></span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn ghost" onclick="addWorker()">Register agent</button>
+        <span class="small dim" id="wmsg"></span></div></div>
+    <div class="wiz-nav"><span></span>
+      <button class="btn" ${Object.keys(byTier).length ? '' : 'disabled'} onclick="setStep(1)">Continue →</button></div>`;
+}
+
+async function probeUrl(){
+  const msg = document.getElementById('wmsg');
+  msg.textContent = 'probing…';
+  const data = await get('/api/probe?base_url=' + encodeURIComponent(document.getElementById('wurl').value.trim()));
+  const sel = document.getElementById('wmodel');
+  if(!data.reachable){ msg.textContent = 'endpoint unreachable'; sel.innerHTML = '<option value="">—</option>'; return; }
+  sel.innerHTML = data.models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  msg.textContent = `${data.models.length} model(s) found`;
+}
+
+async function addWorker(){
+  const msg = document.getElementById('wmsg');
+  const body = {
+    worker_id: document.getElementById('wid').value.trim(),
+    tier: document.getElementById('wtier').value,
+    kind: 'openai_compat',
+    base_url: document.getElementById('wurl').value.trim(),
+    model: document.getElementById('wmodel').value,
+  };
+  if(!body.worker_id){ msg.textContent = 'give the worker an id'; return; }
+  if(!body.model){ msg.textContent = 'probe and pick a model first'; return; }
+  msg.textContent = 'registering…';
+  const r = await post('/api/workers', body);
+  if(!r.ok){ msg.textContent = 'failed: ' + (await r.text()).slice(0,140); return; }
+  toast(`Registered ${body.worker_id} on ${body.tier} tier`);
+  renderAgentsStep();
+}
+
+/* ---------- step 2: goal ---------- */
+function renderGoalStep(){
+  document.getElementById('wiz-body').innerHTML = `
+    <div class="guide"><div><b>Describe the outcome, not the steps.</b>
+      <p>The harness decomposes your goal into typed steps itself. Put any data the task needs
+      (a report, a complaint, a document) into context — steps reference it by key.
+      Mention checkable expectations ("exactly low or high") and the plan gets verifiable checks.</p></div></div>
+    <div class="card">
+      <div class="field"><label>Goal</label>
+        <textarea id="goal" placeholder="e.g. Read the incident report in context, classify severity as exactly low or high, summarize it for on-call, and draft the page for my approval.">${esc(wiz.goal)}</textarea></div>
+      <div class="field"><label>Context (JSON, optional)</label>
+        <input id="goalctx" class="mono" placeholder='{"report": "db-1 disk full, checkout failing"}'
+          value="${esc(Object.keys(wiz.context).length ? JSON.stringify(wiz.context) : '')}"></div>
+      <span class="small dim" id="goalmsg"></span></div>
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="setStep(0)">← Agents</button>
+      <button class="btn" id="planbtn" onclick="makePlan()">Plan workflow →</button></div>`;
+}
+
+async function makePlan(){
+  const msg = document.getElementById('goalmsg');
+  const btn = document.getElementById('planbtn');
+  wiz.goal = document.getElementById('goal').value.trim();
+  if(!wiz.goal){ msg.textContent = 'describe a goal first'; return; }
+  const ctxRaw = document.getElementById('goalctx').value.trim();
+  wiz.context = {};
+  if(ctxRaw){ try{ wiz.context = JSON.parse(ctxRaw); }catch(e){ msg.textContent = 'context is not valid JSON'; return; } }
+  btn.disabled = true;
+  msg.innerHTML = '<span class="spin"></span> the frontier agent is planning — this can take a minute on local models…';
+  const r = await post('/api/plans', {goal: wiz.goal, context: wiz.context});
+  btn.disabled = false;
+  if(!r.ok){ msg.textContent = 'planning failed: ' + (await r.text()).slice(0,140); return; }
+  const data = await r.json();
+  wiz.plan = data.workflow; wiz.planSource = data.plan_source;
+  setStep(2);
+}
+
+/* ---------- step 3: plan review ---------- */
+function renderPlanStep(){
+  const p = wiz.plan;
+  const note = wiz.planSource === 'planner'
+    ? badge('act','planned by ' + 'frontier agent')
+    : badge('warn','fallback: single step') + ' <span class="small dim">the planner could not produce a valid multi-step plan</span>';
+  document.getElementById('wiz-body').innerHTML = `
+    <div class="guide"><div><b>Nothing has run yet.</b>
+      <p>Check the steps below. Steps marked HITL will pause and wait for your approval
+      before running. If the plan looks wrong, go back and rephrase the goal.</p></div></div>
+    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">${note}</div>
+      ${p.steps.map((s, i) => `
+        <div class="planstep"><div class="n">${i + 1}</div>
+          <div style="flex:1"><div class="pt">${esc(s.id)}
+            ${badge('dim', s.task_type)}${s.hitl ? badge('warn','HITL — waits for you') : ''}
+            ${s.success_check ? badge('ok','verifiable') : ''}</div>
+          <div class="pd">${esc(s.objective)}</div>
+          ${s.depends_on.length ? `<div class="pd mono">after: ${esc(s.depends_on.join(', '))}</div>` : ''}</div></div>`).join('')}
+    </div>
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="setStep(1)">← Rephrase goal</button>
+      <button class="btn" onclick="startRun()">Run this plan →</button></div>`;
+}
+
+async function startRun(){
+  const r = await post('/api/runs', {workflow: wiz.plan, context: Object.assign({goal: wiz.goal}, wiz.context), wait: false});
+  if(!r.ok){ toast('start failed: ' + (await r.text()).slice(0,120)); return; }
+  const state = await r.json();
+  wiz.runId = state.run_id; wiz.run = state;
+  setStep(3);
+  wiz.poller = setInterval(pollRun, 2000);
+}
+
+/* ---------- step 4: run ---------- */
+async function pollRun(){
+  try{
+    const detail = await get('/api/runs/' + wiz.runId);
+    wiz.run = detail.state; wiz.journal = detail.journal;
+    if(wiz.step === 3) renderRunStep();
+    if(['completed','failed'].includes(wiz.run.status)){
+      clearInterval(wiz.poller); wiz.poller = null;
+      setStep(4);
+    }
+  }catch(e){ /* transient poll failure */ }
+}
+
+function stepStatus(s){
+  const run = wiz.run || {completed:{}};
+  if(run.completed[s.id]) return {cls:'done', icon:'✓', label:badge(run.completed[s.id].verdict === 'pass' ? 'ok' : 'dim', run.completed[s.id].verdict)};
+  if(run.failed_step === s.id) return {cls:'fail', icon:'✕', label:badge('bad','failed')};
+  if(run.awaiting === s.id) return {cls:'now', icon:'…', label:badge('warn','waiting for you')};
+  const started = (wiz.journal || []).some(e => e.kind === 'step.started' && e.step_id === s.id);
+  if(started && run.status === 'running') return {cls:'now', icon:'', label:'<span class="spin"></span> <span class="small dim">running…</span>'};
+  return {cls:'', icon:'', label:badge('dim','queued')};
+}
+
+function renderRunStep(){
+  const p = wiz.plan; const run = wiz.run || {};
+  const hitl = run.status === 'awaiting_approval'
+    ? `<div class="guide"><div><b>Approval needed: ${esc(run.awaiting)}</b>
+        <p>This step is gated — it runs only if you approve it.</p>
+        <div style="margin-top:10px;display:flex;gap:10px">
+          <button class="btn" onclick="resolveHitl(true)">Approve ${esc(run.awaiting)}</button>
+          <button class="btn reject" onclick="resolveHitl(false)">Reject</button></div></div></div>`
+    : '';
+  document.getElementById('wiz-body').innerHTML = hitl + `
+    <div class="card"><h2>${esc(p.name)}</h2>
+      <div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status || 'running')}</div>
+      ${p.steps.map((s, i) => {
+        const st = stepStatus(s);
+        const rec = (run.completed || {})[s.id];
+        return `<div class="planstep"><div class="n ${st.cls}">${st.icon || i + 1}</div>
+          <div style="flex:1"><div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
+          <div class="pd">${esc(s.objective)}</div>
+          ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          </div></div>`;
+      }).join('')}</div>`;
+}
+
+async function resolveHitl(approved){
+  const r = await post(`/api/runs/${wiz.runId}/approval`, {step_id: wiz.run.awaiting, approved, wait: false});
+  if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,120)); return; }
+  toast(approved ? 'Approved — continuing' : 'Rejected — run will stop');
+  renderRunStep();
+}
+
+/* ---------- step 5: done ---------- */
+function renderDoneStep(){
+  const run = wiz.run || {}; const p = wiz.plan;
+  const ok = run.status === 'completed';
+  document.getElementById('wiz-body').innerHTML = `
+    <div class="guide"><div><b>${ok ? 'Run completed.' : 'Run failed at ' + esc(run.failed_step || '?') + '.'}</b>
+      <p>${ok ? 'Every step below ran, was signed by its worker, and is journaled — the Console tab shows the provenance chain and what the router learned.'
+              : 'The journal in the Console tab shows every attempt and why it failed. Rephrasing the goal often fixes fallback plans.'}</p></div></div>
+    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status)}</div>
+      ${p.steps.map((s, i) => {
+        const rec = (run.completed || {})[s.id];
+        return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : i + 1)}</div>
+          <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : badge('dim','did not run')}</div>
+          ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          </div></div>`;
+      }).join('')}</div>
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="showView('console')">Inspect in Console</button>
+      <button class="btn" onclick="resetWizard()">Start another run →</button></div>`;
+}
+
+function resetWizard(){
+  wiz.goal = ''; wiz.context = {}; wiz.plan = null; wiz.runId = null; wiz.run = null;
+  if(wiz.poller){ clearInterval(wiz.poller); wiz.poller = null; }
+  setStep(1);
+}
+
+/* ---------- console view (unchanged panels) ---------- */
+const openRuns = new Set();
+function toggleRun(runId){ openRuns.has(runId) ? openRuns.delete(runId) : openRuns.add(runId); refreshConsole(); }
+
+async function resolveApproval(runId, stepId, approved){
+  const r = await post(`/api/runs/${runId}/approval`, {step_id: stepId, approved, wait: false});
+  toast(r.ok ? `${approved ? 'Approved' : 'Rejected'} ${stepId}` : 'Approval failed');
+  refreshConsole();
+}
+
+function renderTiles(runs, workers, prov, playbook){
+  const active = runs.filter(r => ['running','awaiting_approval'].includes(r.status)).length;
+  const chainOk = prov.chain.ok;
+  return `
+    <div class="tile"><div class="val">${runs.length}</div>
+      <div class="lab">runs (${active} active, ${runs.filter(r=>r.status==='completed').length} completed)</div></div>
+    <div class="tile"><div class="val">${workers.filter(w=>w.active).length}</div>
+      <div class="lab">active worker identities</div></div>
+    <div class="tile"><div class="val ${chainOk?'green':'red'}">${chainOk?'✔':'✘'} ${prov.total}</div>
+      <div class="lab">provenance entries — chain ${chainOk?'intact':'BROKEN'}</div></div>
+    <div class="tile"><div class="val">${playbook.filter(b=>b.active).length}</div>
+      <div class="lab">active playbook bullets</div></div>`;
+}
+
+function renderRuns(runs){
+  if(!runs.length) return '<div class="empty">no runs yet</div>';
+  return '<table><tr><th>run</th><th>workflow</th><th>status</th><th>steps</th><th></th></tr>' +
+    runs.slice().reverse().map(r => {
+      const steps = Object.entries(r.completed).map(([id, rec]) =>
+        `<span class="mono small">${esc(id)}</span> ${badge(rec.verdict==='pass'?'ok':'dim', rec.verdict)}`).join('<br>');
+      const hitl = r.status === 'awaiting_approval'
+        ? `<button class="btn" onclick="event.stopPropagation();resolveApproval('${r.run_id}','${esc(r.awaiting)}',true)">Approve</button>`
+        : '';
+      const fail = r.failed_step ? `<br><span class="red mono small">at ${esc(r.failed_step)}</span>` : '';
+      const open = openRuns.has(r.run_id);
+      const outputs = open ? Object.entries(r.completed).map(([id, rec]) =>
+        `<div style="margin:8px 0"><b class="mono small">${esc(id)}</b> ${badge(rec.verdict==='pass'?'ok':'dim', rec.verdict)}
+         <div class="small" style="white-space:pre-wrap;background:var(--hair);border-radius:10px;padding:10px 12px;margin-top:5px">${esc(
+           typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div></div>`).join('') : '';
+      return `<tr onclick="toggleRun('${r.run_id}')" style="cursor:pointer">
+        <td class="mono small">${open ? '▾' : '▸'} ${esc(r.run_id)}</td><td>${esc(r.workflow)}</td>
+        <td>${statusBadge(r.status)}${fail}</td>
+        <td>${steps || '<span class="faint">—</span>'}</td><td>${hitl}</td></tr>` +
+        (open ? `<tr><td colspan="5" style="padding:4px 0 14px">${outputs ||
+          '<span class="empty">no outputs recorded yet</span>'}</td></tr>` : '');
+    }).join('') + '</table>';
+}
+
+function renderWorkers(ws){
+  if(!ws.length) return '<div class="empty">none registered</div>';
+  return '<table><tr><th>worker</th><th>public key</th><th>tiers</th><th>status</th></tr>' +
+    ws.map(w => `<tr>
+      <td><b>${esc(w.display_name)}</b><br><span class="mono small faint">${esc(w.worker_id)}</span></td>
+      <td class="mono small faint">${esc(w.public_key_b64.slice(0,16))}…${w.key_rotations?`<br>rotated ×${w.key_rotations}`:''}</td>
+      <td class="small">${esc((w.tiers||[]).join(', ')||'—')}</td>
+      <td>${badge(w.active?'ok':'bad', w.active?'active':'deactivated')}</td></tr>`).join('') + '</table>';
+}
+
+function renderProvenance(p){
+  const chain = p.chain.ok
+    ? `${badge('ok','chain intact')} <span class="dim small">${p.chain.checked} entries verified</span>`
+    : `${badge('bad','chain broken')} <span class="red small">${esc(p.chain.reason)} at #${p.chain.problem_index}</span>`;
+  const rows = p.entries.slice(-10).reverse().map(e =>
+    `<tr><td class="mono small faint">#${e.index}</td><td class="mono small">${esc(e.actor_id)}</td>
+     <td class="small">${esc(e.action)}</td><td class="mono small faint">${esc(e.entry_hash.slice(0,12))}…</td></tr>`).join('');
+  return `<div class="chainline">${chain}</div>
+    <div class="headhash">head ${esc(p.head_hash.slice(0,28))}…</div>` +
+    (rows ? `<table style="margin-top:8px"><tr><th>#</th><th>actor</th><th>action</th><th>hash</th></tr>${rows}</table>` : '');
+}
+
+function renderMatrix(m){
+  const models = Object.keys(m);
+  if(!models.length) return '<div class="empty">no observations yet — run tasks or evals to populate</div>';
+  return models.map(model => {
+    const rows = Object.entries(m[model]).map(([t, c]) =>
+      `<tr><td class="small">${esc(t)}</td>
+       <td><span class="bar-h" style="width:${Math.round(c.pass_rate*110)}px"></span>
+       <span class="mono small">${(c.pass_rate*100).toFixed(0)}%</span></td>
+       <td class="small faint">${c.samples} samples</td></tr>`).join('');
+    return `<div class="mono small" style="margin:8px 0 4px">${esc(model)}</div><table>${rows}</table>`;
+  }).join('');
+}
+
+function renderPlaybook(bullets){
+  if(!bullets.length) return '<div class="empty">no bullets yet — the slow loop adds them as failure clusters grow</div>';
+  return '<table><tr><th>advice</th><th>scope</th><th>score</th></tr>' + bullets.map(b => {
+    const score = (b.helpful + 1) / (b.helpful + b.harmful + 2);
+    return `<tr${b.active?'':' class="faint"'}><td class="small">${esc(b.text)}
+      ${b.active?'':badge('dim','deprecated')}<br><span class="mono small faint">${esc(b.origin||'manual')}</span></td>
+      <td class="small">${esc(b.task_type||'all')}</td>
+      <td class="mono small">${(score*100).toFixed(0)}% <span class="faint">(+${b.helpful}/−${b.harmful})</span></td></tr>`;
+  }).join('') + '</table>';
+}
+
+function renderFailures(f){
+  const types = Object.keys(f);
+  if(!types.length) return '<div class="empty">no failures observed</div>';
+  return '<table><tr><th>task type</th><th>MAST mode</th><th>count</th></tr>' +
+    types.flatMap(t => Object.entries(f[t]).map(([mode, n]) =>
+      `<tr><td class="small">${esc(t)}</td><td class="mono small">${esc(mode)}</td>
+       <td class="mono small">${n}</td></tr>`)).join('') + '</table>';
+}
+
+function renderSpans(spans){
+  if(!spans.length) return '<div class="empty">no spans yet</div>';
+  return '<table><tr><th>span</th><th>duration</th><th>attributes</th></tr>' +
+    spans.slice(-22).reverse().map(s => {
+      const attrs = Object.entries(s.attributes).map(([k,v]) => `${esc(k)}=${esc(v)}`).join('  ');
+      return `<tr><td class="mono small">${esc(s.name)}</td>
+        <td><span class="bar-h" style="width:${Math.min(130, Math.max(2, s.duration_ms))}px"></span>
+        <span class="mono small">${s.duration_ms.toFixed(1)}ms</span></td>
+        <td class="mono small faint">${attrs}</td></tr>`;
+    }).join('') + '</table>';
+}
+
+async function refreshConsole(){
+  try{
+    const [runs, workers, prov, matrix, playbook, failures, spans] = await Promise.all([
+      get('/api/runs'), get('/api/workers'), get('/api/provenance'),
+      get('/api/matrix'), get('/api/playbook'), get('/api/failures'), get('/api/spans'),
+    ]);
+    document.getElementById('tiles').innerHTML = renderTiles(runs, workers, prov, playbook);
+    document.getElementById('runs').innerHTML = renderRuns(runs);
+    document.getElementById('workers').innerHTML = renderWorkers(workers);
+    document.getElementById('provenance').innerHTML = renderProvenance(prov);
+    document.getElementById('matrix').innerHTML = renderMatrix(matrix);
+    document.getElementById('playbook').innerHTML = renderPlaybook(playbook);
+    document.getElementById('failures').innerHTML = renderFailures(failures);
+    document.getElementById('spans').innerHTML = renderSpans(spans);
+    document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+  }catch(e){ document.getElementById('updated').textContent = 'refresh failed'; }
+}
+
+setInterval(() => {
+  if(document.getElementById('view-console').style.display !== 'none') refreshConsole();
+}, 3000);
+
+setStep(0);
+</script>
+</body>
+</html>
+"""
