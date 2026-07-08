@@ -50,7 +50,7 @@ async def client(wired_state):
 async def test_dashboard_served(client):
     resp = await client.get("/")
     assert resp.status_code == 200
-    assert "metaharness" in resp.text and "Capability matrix" in resp.text
+    assert "metaharness" in resp.text and "Who’s good at what" in resp.text
 
 
 async def test_full_run_over_http(client):

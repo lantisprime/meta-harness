@@ -455,6 +455,26 @@ def test_console_run_ledger_reads_plain_language(page, server):
     assert row.locator(".badge", has_text="done").count() >= 1
 
 
+def test_console_panels_speak_plain_language(page, server):
+    """Every console panel leads with words a person would say: humanized
+    headings, MAST failure codes mapped to plain phrases (with a prettified
+    fallback for codes the map doesn't know), and agent rows that demote the
+    public key to a meta line."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-console")
+    for heading in ("Agents", "Audit trail", "Who’s good at what",
+                    "Lessons learned", "Why runs fail", "Under the hood"):
+        page.wait_for_selector(f".card h2:has-text('{heading}')")
+    # MAST mapping: known code -> plain phrase, unknown code -> prettified words
+    assert page.evaluate("mastPlain('step_repetition')") == "kept repeating a step"
+    assert page.evaluate("mastPlain('brand_new.mode-x')") == "brand new mode x"
+    # agent rows: display name leads, key demoted to the mono meta line
+    page.wait_for_selector("#workers .lrow")
+    meta = page.locator("#workers .rr-meta").first.inner_text()
+    assert "identity key" in meta
+
+
 def test_console_approval_survives_hostile_step_id(page, server):
     """Regression (codex review P1): step ids are user-authored, so an id
     containing a quote must not break the console's Approve button. The fix

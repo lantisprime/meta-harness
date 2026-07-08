@@ -112,9 +112,11 @@ tr:last-child td{border-bottom:0}
 .chainline{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:13.5px}
 .headhash{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 
-/* run ledger (Console) — one plain-language row per run */
-.runrow{display:flex;gap:14px;align-items:center;padding:12px 2px;
-  border-bottom:1px solid var(--hair);cursor:pointer}
+/* ledger rows (Console) — one plain-language row per thing */
+.lrow{display:flex;gap:14px;align-items:center;padding:12px 2px;
+  border-bottom:1px solid var(--hair)}
+.lrow:last-child{border-bottom:0}
+.runrow{cursor:pointer}
 .runrow:hover .rr-title{color:var(--accent)}
 .rr-main{flex:1;min-width:0}
 .rr-title{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;
@@ -305,23 +307,23 @@ details.jt details.jt,.jrow{margin-left:16px}
     <div class="card"><h2>Runs</h2>
       <div class="sub">Newest first — click one to see what each step produced</div>
       <div id="runs" class="empty">loading…</div></div>
-    <div class="card"><h2>Registered workers</h2>
-      <div class="sub">Identities admitted via signed challenge–response</div>
+    <div class="card"><h2>Agents</h2>
+      <div class="sub">Everyone allowed to work here proved who they are first</div>
       <div id="workers" class="empty">loading…</div></div>
-    <div class="card"><h2>Provenance chain</h2>
-      <div class="sub">Hash-chained, signed action log — verified on every refresh</div>
+    <div class="card"><h2>Audit trail</h2>
+      <div class="sub">Every action is signed and chained to the one before it — re-checked on every refresh</div>
       <div id="provenance" class="empty">loading…</div></div>
-    <div class="card"><h2>Capability matrix</h2>
-      <div class="sub">Observed pass rates per model × task type — this routes traffic</div>
+    <div class="card"><h2>Who’s good at what</h2>
+      <div class="sub">Pass rates observed per agent — this is how work gets routed to the right one</div>
       <div id="matrix" class="empty">loading…</div></div>
-    <div class="card"><h2>Playbook</h2>
-      <div class="sub">Curated advice from the slow learning loop</div>
+    <div class="card"><h2>Lessons learned</h2>
+      <div class="sub">Advice the harness gives itself, earned from past runs</div>
       <div id="playbook" class="empty">loading…</div></div>
-    <div class="card"><h2>Failure clusters</h2>
-      <div class="sub">MAST-labelled failures, clustered before fixing</div>
+    <div class="card"><h2>Why runs fail</h2>
+      <div class="sub">Failures grouped by what actually went wrong, so fixes target the pattern</div>
       <div id="failures" class="empty">loading…</div></div>
-    <div class="card wide"><h2>Recent spans</h2>
-      <div class="sub">Live OpenTelemetry timeline</div>
+    <div class="card wide"><h2>Under the hood</h2>
+      <div class="sub">Live timing of recent operations, straight from the tracer — intentionally technical</div>
       <div id="spans" class="empty">loading…</div></div>
   </div>
 </div>
@@ -1193,7 +1195,7 @@ function renderRuns(runs){
         `<div class="rr-out"><div class="rr-out-h">${esc(stepName(id))} ${verdictBadge(rec.verdict)}</div>
          ${humanizeOutput(rec.output)}</div>`).join('')
        || '<div class="empty">nothing recorded yet — outputs appear here as steps finish</div>') + '</div>';
-    return `<div class="runrow" data-run="${esc(r.run_id)}">
+    return `<div class="lrow runrow" data-run="${esc(r.run_id)}">
       <div class="rr-main">
         <div class="rr-title">${open ? '▾' : '▸'} ${esc(runTitle(r))}</div>
         <div class="rr-meta">${esc(r.run_id)}${kind ? ' · ' + esc(kind) : ''}${r.updated_at ? ' · ' + esc(ago(r.updated_at)) : ''}</div></div>
@@ -1212,63 +1214,90 @@ document.getElementById('runs').addEventListener('click', ev => {
 });
 
 function renderWorkers(ws){
-  if(!ws.length) return '<div class="empty">none registered</div>';
-  return '<table><tr><th>worker</th><th>public key</th><th>tiers</th><th>status</th></tr>' +
-    ws.map(w => `<tr>
-      <td><b>${esc(w.display_name)}</b><br><span class="mono small faint">${esc(w.worker_id)}</span></td>
-      <td class="mono small faint">${esc(w.public_key_b64.slice(0,16))}…${w.key_rotations?`<br>rotated ×${w.key_rotations}`:''}</td>
-      <td class="small">${esc((w.tiers||[]).join(', ')||'—')}</td>
-      <td>${badge(w.active?'ok':'bad', w.active?'active':'deactivated')}</td></tr>`).join('') + '</table>';
+  if(!ws.length) return '<div class="empty">no agents yet — add one in Settings</div>';
+  return ws.map(w => `
+    <div class="lrow">
+      <div class="rr-main">
+        <div class="rr-title" style="white-space:normal">${esc(w.display_name)}
+          ${(w.tiers||[]).map(t => badge('act', t + ' tier')).join(' ')}</div>
+        <div class="rr-meta">${esc(w.worker_id)} · identity key ${esc(w.public_key_b64.slice(0,10))}…${
+          w.key_rotations ? ` · key rotated ×${w.key_rotations}` : ''}</div></div>
+      ${badge(w.active ? 'ok' : 'dim', w.active ? 'ready' : 'retired')}</div>`).join('');
 }
+
+const actionPlain = a => String(a || '').replace(/[._]/g, ' ');
 
 function renderProvenance(p){
   const chain = p.chain.ok
-    ? `${badge('ok','chain intact')} <span class="dim small">${p.chain.checked} entries verified</span>`
-    : `${badge('bad','chain broken')} <span class="red small">${esc(p.chain.reason)} at #${p.chain.problem_index}</span>`;
+    ? `${badge('ok','intact')} <span class="small">All ${p.chain.checked} recorded actions check out — nothing has been altered.</span>`
+    : `${badge('bad','broken')} <span class="red small">The chain fails at entry #${p.chain.problem_index} (${esc(p.chain.reason)}) — don’t trust anything after that point.</span>`;
   const rows = p.entries.slice(-10).reverse().map(e =>
-    `<tr><td class="mono small faint">#${e.index}</td><td class="mono small">${esc(e.actor_id)}</td>
-     <td class="small">${esc(e.action)}</td><td class="mono small faint">${esc(e.entry_hash.slice(0,12))}…</td></tr>`).join('');
-  return `<div class="chainline">${chain}</div>
-    <div class="headhash">head ${esc(p.head_hash.slice(0,28))}…</div>` +
-    (rows ? `<table style="margin-top:8px"><tr><th>#</th><th>actor</th><th>action</th><th>hash</th></tr>${rows}</table>` : '');
+    `<div class="lrow" style="padding:7px 2px">
+       <div class="rr-main"><div class="small"><b>${esc(e.actor_id)}</b> <span class="dim">·</span> ${esc(actionPlain(e.action))}</div>
+         <div class="rr-meta">#${e.index} · ${esc(e.entry_hash.slice(0,12))}…</div></div></div>`).join('');
+  return `<div class="chainline">${chain}</div>` + rows +
+    `<div class="headhash" style="margin-top:8px">chain head ${esc(p.head_hash.slice(0,28))}…</div>`;
 }
+
+const taskPlain = t => String(t || '').replace(/[._-]/g, ' ');
 
 function renderMatrix(m){
   const models = Object.keys(m);
-  if(!models.length) return '<div class="empty">no observations yet — run tasks or evals to populate</div>';
+  if(!models.length) return '<div class="empty">nothing observed yet — the harness learns who’s good at what as runs finish</div>';
   return models.map(model => {
     const rows = Object.entries(m[model]).map(([t, c]) =>
-      `<tr><td class="small">${esc(t)}</td>
+      `<tr><td class="small">${esc(taskPlain(t))}</td>
        <td><span class="bar-h" style="width:${Math.round(c.pass_rate*110)}px"></span>
        <span class="mono small">${(c.pass_rate*100).toFixed(0)}%</span></td>
-       <td class="small faint">${c.samples} samples</td></tr>`).join('');
-    return `<div class="mono small" style="margin:8px 0 4px">${esc(model)}</div><table>${rows}</table>`;
+       <td class="small faint">${c.samples === 1 ? 'from 1 try' : `from ${c.samples} tries`}</td></tr>`).join('');
+    return `<div class="small" style="margin:8px 0 4px"><b>${esc(model)}</b></div><table>${rows}</table>`;
   }).join('');
 }
 
 function renderPlaybook(bullets){
-  if(!bullets.length) return '<div class="empty">no bullets yet — the slow loop adds them as failure clusters grow</div>';
-  return '<table><tr><th>advice</th><th>scope</th><th>score</th></tr>' + bullets.map(b => {
+  if(!bullets.length) return '<div class="empty">no lessons yet — the harness writes them as failure patterns emerge</div>';
+  return '<table><tr><th>lesson</th><th>applies to</th><th>track record</th></tr>' + bullets.map(b => {
     const score = (b.helpful + 1) / (b.helpful + b.harmful + 2);
     return `<tr${b.active?'':' class="faint"'}><td class="small">${esc(b.text)}
-      ${b.active?'':badge('dim','deprecated')}<br><span class="mono small faint">${esc(b.origin||'manual')}</span></td>
-      <td class="small">${esc(b.task_type||'all')}</td>
-      <td class="mono small">${(score*100).toFixed(0)}% <span class="faint">(+${b.helpful}/−${b.harmful})</span></td></tr>`;
+      ${b.active?'':badge('dim','retired')}<br><span class="rr-meta">${esc(b.origin||'added by hand')}</span></td>
+      <td class="small">${esc(taskPlain(b.task_type)||'everything')}</td>
+      <td class="mono small">${(score*100).toFixed(0)}% <span class="faint">helped ${b.helpful}× · hurt ${b.harmful}×</span></td></tr>`;
   }).join('') + '</table>';
 }
 
+/* MAST failure modes, in words a person would actually say */
+const MAST_PLAIN = {
+  disobey_task_spec: 'ignored what the task asked for',
+  disobey_role_spec: 'acted outside its role',
+  step_repetition: 'kept repeating a step',
+  lose_history: 'lost track of earlier context',
+  unaware_termination: 'stopped without noticing work remained',
+  ignore_input: 'ignored another agent’s input',
+  withheld_info: 'failed to pass information along',
+  mismatched_assumption: 'agents assumed different things',
+  premature_termination: 'gave up too early',
+  no_verification: 'the result was never checked',
+  incorrect_verification: 'the check itself was wrong',
+  tool_error: 'a tool call failed',
+  schema_invalid: 'output didn’t match the required format',
+  budget_exceeded: 'ran out of budget',
+  unknown: 'cause not identified',
+};
+const mastPlain = m => MAST_PLAIN[m] || taskPlain(m);
+
 function renderFailures(f){
   const types = Object.keys(f);
-  if(!types.length) return '<div class="empty">no failures observed</div>';
-  return '<table><tr><th>task type</th><th>MAST mode</th><th>count</th></tr>' +
+  if(!types.length) return '<div class="empty">no failures yet — when one happens it lands here, labelled</div>';
+  return '<table><tr><th>while doing</th><th>what went wrong</th><th>times</th></tr>' +
     types.flatMap(t => Object.entries(f[t]).map(([mode, n]) =>
-      `<tr><td class="small">${esc(t)}</td><td class="mono small">${esc(mode)}</td>
-       <td class="mono small">${n}</td></tr>`)).join('') + '</table>';
+      `<tr><td class="small">${esc(taskPlain(t))}</td>
+       <td class="small"><span title="${esc(mode)}">${esc(mastPlain(mode))}</span></td>
+       <td class="mono small">${n}×</td></tr>`)).join('') + '</table>';
 }
 
 function renderSpans(spans){
-  if(!spans.length) return '<div class="empty">no spans yet</div>';
-  return '<table><tr><th>span</th><th>duration</th><th>attributes</th></tr>' +
+  if(!spans.length) return '<div class="empty">quiet right now — operations appear here as they happen</div>';
+  return '<table><tr><th>operation</th><th>took</th><th>details</th></tr>' +
     spans.slice(-22).reverse().map(s => {
       const attrs = Object.entries(s.attributes).map(([k,v]) => `${esc(k)}=${esc(v)}`).join('  ');
       return `<tr><td class="mono small">${esc(s.name)}</td>
