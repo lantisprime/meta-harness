@@ -138,8 +138,12 @@ class TaskExecutor:
                         # BEFORE any dependent step consumes the output
                         try:
                             verification = await self.judge(variant, result)
-                        except Exception:  # a broken judge must never fail the task
-                            pass
+                        except Exception as exc:  # a broken judge must never fail the task,
+                            # but a silent one is undiagnosable — record why it broke
+                            self._record("judge.error", {
+                                "task_id": task.id, "attempt": n,
+                                "error": f"{type(exc).__name__}: {exc}"[:300],
+                            })
                     # capability matrix learns from checkable outcomes only
                     # (deterministic or rubric-judged; scorer says which)
                     if verification.verdict in (Verdict.PASS, Verdict.FAIL):

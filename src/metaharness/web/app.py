@@ -145,8 +145,15 @@ def create_app(state: HarnessState) -> FastAPI:
         async def _run() -> None:
             try:
                 await state.engine.advance(run_id)
-            except Exception:  # surfaced via run state / journal, never crashes the app
-                pass
+            except Exception as exc:  # never crashes the app — but journal it,
+                # or the run sits in "running" forever with no trail
+                try:
+                    state.engine.journal(run_id).append(
+                        "run.advance_error", run_id,
+                        payload={"error": f"{type(exc).__name__}: {exc}"[:300]},
+                    )
+                except Exception:
+                    pass
         asyncio.get_running_loop().create_task(_run())
 
     @app.post("/api/runs/{run_id}/approval")

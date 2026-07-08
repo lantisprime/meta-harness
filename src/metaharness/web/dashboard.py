@@ -177,6 +177,11 @@ tr:last-child td{border-bottom:0}
 .planstep .pd{color:var(--mut2);font-size:12.5px;margin-top:2px}
 .planstep .out{font-size:12.5px;white-space:pre-wrap;background:var(--hair);
   border-radius:10px;padding:10px 12px;margin-top:8px}
+.attempts{margin-top:8px;font-size:12px;border-left:3px solid var(--hair);padding-left:10px}
+.attempts .att{margin-top:4px;color:var(--mut2)}
+.attempts .att b{font-family:var(--mono);font-weight:600}
+.attempts .att.fail b{color:var(--red)}
+.attempts .att.pass b{color:var(--green)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-soft);
   border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
   vertical-align:-1px}
@@ -797,6 +802,17 @@ function stepStatus(s){
   return {cls:'', icon:'', label:badge('dim','queued')};
 }
 
+function attemptRows(stepId){
+  // per-attempt verdicts + verifier reasons from the run journal — the
+  // "why did this step fail 3 times" panel
+  const atts = (wiz.journal || []).filter(e => e.kind === 'step.attempt' && e.step_id === stepId);
+  if(!atts.length) return '';
+  return `<div class="attempts">${atts.map(e => {
+    const p = e.payload || {};
+    return `<div class="att ${esc(p.verdict)}"><b>#${p.n} ${esc(p.verdict)}</b> · ${esc(p.model)}${p.scorer ? ' · ' + esc(p.scorer) : ''}${p.detail ? ' — ' + esc(p.detail) : ''}</div>`;
+  }).join('')}</div>`;
+}
+
 function renderRunStep(){
   const p = wiz.plan; const run = wiz.run || {};
   const hitl = run.status === 'awaiting_approval'
@@ -816,6 +832,7 @@ function renderRunStep(){
           <div style="flex:1"><div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
           <div class="pd">${esc(s.objective)}</div>
           ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
           </div></div>`;
       }).join('')}</div>`;
 }
@@ -853,6 +870,7 @@ function renderDoneStep(){
         return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : (skip ? '⤳' : i + 1))}</div>
           <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : (skip ? badge('dim', 'skipped — ' + skip) : badge('dim','did not run'))}</div>
           ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
           </div></div>`;
       }).join('')}</div>
     <div class="card" style="margin-top:16px"><h2>Not done yet?</h2>

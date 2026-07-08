@@ -182,6 +182,21 @@ class WorkflowEngine:
                     journal.append("run.finished", run_id,
                                    payload={"status": "failed", "reason": f"step {step.id} crashed: {exc}"})
                     return state
+                for att in outcome.attempts:
+                    # every attempt is journaled with its verdict + verifier
+                    # reason, so "failed after 3 attempts" is diagnosable from
+                    # the run journal alone (judge reasons included)
+                    journal.append(
+                        "step.attempt", run_id, step_id=step.id,
+                        payload={
+                            "n": att.n,
+                            "model": att.result.model,
+                            "tier": att.result.tier.value,
+                            "verdict": att.verification.verdict.value,
+                            "scorer": att.verification.scorer,
+                            "detail": att.verification.detail[:300],
+                        },
+                    )
                 record = StepRecord(
                     step_id=step.id,
                     verdict=outcome.final_verdict,

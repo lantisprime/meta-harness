@@ -351,3 +351,47 @@ async def test_branch_taken_runs_and_gate_not_asked_for_skipped(tmp_path):
     assert run.status is RunStatus.COMPLETED  # never parked at archive's gate
     assert "page" in run.completed
     assert "archive" in run.skipped
+
+
+# -- per-attempt journaling (v0.4: diagnosability) ------------------------------------
+
+
+async def test_step_attempts_journaled_with_verdict_and_detail(tmp_path):
+    """Bug: a step 'failed after 3 attempts' with no per-attempt trail in the run
+    journal — judge reasons lived only in the provenance chain. Every attempt is
+    now journaled as step.attempt {n, model, tier, verdict, scorer, detail}."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    state = engine.start(spec, context={"ticket": "db-1 disk full"})
+    state = await engine.advance(state.run_id)
+
+    atts = engine.journal(state.run_id).entries("step.attempt")
+    assert atts, "completed steps must journal their attempts"
+    by_step = {e.step_id for e in atts}
+    assert {"classify", "summarize"} <= by_step
+    payload = atts[0].payload
+    assert {"n", "model", "tier", "verdict", "scorer", "detail"} <= set(payload)
+    assert payload["verdict"] == "pass"
+
+
+async def test_failed_step_attempts_journaled(tmp_path):
+    """A failing step journals one step.attempt per retry, with the verifier's
+    reason, BEFORE the step.failed entry."""
+
+    def always_wrong(task: Task):
+        return "low"  # success_check demands "high"
+
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("w", always_wrong)}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    state = engine.start(spec, context={"ticket": "db-1 disk full"})
+    state = await engine.advance(state.run_id)
+
+    assert state.status is RunStatus.FAILED and state.failed_step == "classify"
+    entries = engine.journal(state.run_id).entries()
+    kinds = [e.kind for e in entries]
+    atts = [e for e in entries if e.kind == "step.attempt"]
+    assert len(atts) >= 2, "each retry journals its own attempt"
+    assert all(e.payload["verdict"] == "fail" for e in atts)
+    assert all(e.payload["detail"] for e in atts), "verifier reason is never empty"
+    assert kinds.index("step.attempt") < kinds.index("step.failed")

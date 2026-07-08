@@ -110,3 +110,28 @@ async def test_planning_tasks_are_exempt_from_judging():
                                           task_type=TaskType.PLANNING))
     assert outcome.final_verdict is Verdict.UNVERIFIED
     assert calls == []
+
+
+async def test_broken_judge_is_recorded_not_silent():
+    """Bug: a judge that raised was swallowed by a bare except — the task kept
+    its UNVERIFIED verdict with zero trace of why. The executor now records a
+    judge.error provenance entry (task still never fails because of the judge)."""
+    from metaharness.identity import ProvenanceLog
+
+    async def exploding_judge(task, result):
+        raise RuntimeError("judge runner unreachable")
+
+    orch_kp = KeyPair.generate()
+    provenance = ProvenanceLog()
+    executor = TaskExecutor(
+        Router({Tier.SMALL: ScriptedWorker("w", lambda t: "some output")}),
+        provenance=provenance,
+        orchestrator_keypair=orch_kp,
+        judge=exploding_judge,
+    )
+    outcome = await executor.execute(Task(objective="do a thing"))
+
+    assert outcome.final_verdict is Verdict.UNVERIFIED  # judge break ≠ task fail
+    errors = [e for e in provenance.entries() if e.action == "judge.error"]
+    assert len(errors) == 1
+    assert "judge runner unreachable" in errors[0].detail["error"]
