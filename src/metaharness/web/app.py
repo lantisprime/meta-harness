@@ -186,9 +186,18 @@ def create_app(state: HarnessState) -> FastAPI:
                 active_suite = _json.loads(active_path.read_text(encoding="utf-8")).get("suite")
 
         out: list[dict[str, Any]] = []
-        for suite_dir in _tuning_suite_dirs():
+        listed = {d.name: d for d in _tuning_suite_dirs()}
+        # a just-started search must show up IMMEDIATELY, even before its
+        # first candidate (minutes of real inference) creates the suite dir
+        for name in sorted(set(listed) | _tuning_running):
+            suite_dir = listed.get(name)
+            if suite_dir is None:
+                out.append({"suite": name, "running": True, "active": False,
+                            "candidates": [], "frontier": [], "promoted": None,
+                            "pending": None, "report": None, "findings": []})
+                continue
             ledger = CandidateLedger(suite_dir)
-            if not ledger.candidates() and suite_dir.name not in _tuning_running:
+            if not ledger.candidates() and name not in _tuning_running:
                 continue
             frontier = [c.id for c in ledger.frontier()]
             report = ledger.load_report()

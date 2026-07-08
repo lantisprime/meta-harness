@@ -1629,7 +1629,9 @@ function renderTuning(suites){
     })() : '';
     const promotedId = s.promoted ? s.promoted.candidate : null;
     // key must stay colon-free: the pager handler splits data-page on ':'
-    const rows = paginate('tuning-' + s.suite, s.candidates.slice().reverse(), cs => cs.map(c => {
+    const rows = !s.candidates.length
+      ? '<div class="empty">measuring the current setup first — experiments appear here as each one finishes (minutes per experiment on local models)</div>'
+      : paginate('tuning-' + s.suite, s.candidates.slice().reverse(), cs => cs.map(c => {
       const seed = (c.hypothesis || '').startsWith('seed');
       const marks = [
         c.id === promotedId ? badge('ok', s.active ? 'promoted — in use' : 'promoted — applies at restart') : '',
