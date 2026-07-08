@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from metaharness.config import HarnessConfig
 from metaharness.core.budget import Budget
 from metaharness.core.executor import TaskExecutor
 from metaharness.core.types import Tier
@@ -38,6 +39,13 @@ class HarnessState:
     executor: Optional[TaskExecutor] = None
     engine: Optional[WorkflowEngine] = None
     budget: Optional[Budget] = None
+    config: HarnessConfig = field(default_factory=HarnessConfig)
+    config_path: Optional[object] = None  # Path; set when config should persist
+
+    def save_config(self) -> None:
+        """Write-through for the durable config, mirroring matrix/playbook."""
+        if self.config_path is not None:
+            self.config.save(self.config_path)
 
     def __post_init__(self) -> None:
         if self.learning is None:

@@ -51,6 +51,30 @@ async def _discover(endpoints: list[str]) -> list[tuple[str, str, float]]:
     return found
 
 
+def _load_configured_runners(state) -> dict:
+    """Wire every enabled agent from ~/.metaharness/config.json. Configured
+    agents are explicit user intent, so they claim their tiers before
+    discovery/mocks fill the gaps. A bad entry fails the boot loudly."""
+    from metaharness.config import CONFIG_PATH, HarnessConfig
+    from metaharness.core.types import Tier
+    from metaharness.factory import build_agent_runner
+    from metaharness.identity import KeyPair
+
+    state.config = HarnessConfig.load(CONFIG_PATH)
+    state.config_path = CONFIG_PATH
+    runners = {}
+    for agent in state.config.agents:
+        if not agent.enabled:
+            continue
+        kp = KeyPair.generate()
+        runner = build_agent_runner(agent, state.config, keypair=kp)
+        state.register_worker(runner, kp, tiers=[agent.tier],
+                              task_types=agent.task_types or None)
+        runners[Tier(agent.tier)] = runner
+        print(f"  {agent.tier:9s} ← {runner.model}  [configured: {agent.worker_id}]")
+    return runners
+
+
 def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = None,
                        critique: bool = False):
     from metaharness.core.types import Tier
@@ -59,10 +83,10 @@ def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = Non
     from metaharness.web import HarnessState
 
     state = HarnessState()
+    runners = _load_configured_runners(state)
     found = asyncio.run(_discover(endpoints))
     found.sort(key=lambda item: item[2])
     prefer = prefer or {}
-    runners = {}
     if found:
         # explicit --pick substrings win; otherwise smallest → SMALL,
         # largest → FRONTIER, a middle pick → MID
@@ -80,6 +104,8 @@ def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = Non
                 picks[tier] = match
         seen: set[str] = set()
         for tier, (base_url, model, size) in picks.items():
+            if tier in runners:  # configured agent already claimed this tier
+                continue
             worker_id = f"local-{tier.value}"
             kp = KeyPair.generate()
             runner = OpenAICompatWorker(
@@ -125,8 +151,10 @@ def _build_mock_state():
     from metaharness.web import HarnessState
 
     state = HarnessState()
-    runners = {}
+    runners = _load_configured_runners(state)
     for tier in Tier:
+        if tier in runners:
+            continue
         kp = KeyPair.generate()
         runner = MockLLMWorker(f"w-{tier.value}", tier, keypair=kp)
         state.register_worker(runner, kp, tiers=[tier.value])

@@ -1,4 +1,5 @@
 """Worker harnesses: the uniform Runner interface, local workers, enrichment."""
+from metaharness.harness.coding import CLI_ADAPTERS, CodingAgentWorker, available_clis
 from metaharness.harness.enrichment import (
     SchemaGuard,
     SelfCritique,
@@ -36,4 +37,7 @@ __all__ = [
     "OpenAICompatWorker",
     "probe_endpoint",
     "parse_output",
+    "CodingAgentWorker",
+    "CLI_ADAPTERS",
+    "available_clis",
 ]

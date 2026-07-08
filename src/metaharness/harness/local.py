@@ -35,9 +35,9 @@ async def probe_endpoint(base_url: str, timeout_s: float = 3.0) -> Optional[list
         return None
 
 
-def _build_messages(task: Task) -> list[dict[str, str]]:
+def _build_messages(task: Task, system_prompt: str = "") -> list[dict[str, str]]:
     """Render the Task's explicit delegation contract into chat messages."""
-    system_parts = ["You are a worker agent executing one well-scoped task."]
+    system_parts = [system_prompt or "You are a worker agent executing one well-scoped task."]
     if task.boundaries:
         system_parts.append("Boundaries:\n" + "\n".join(f"- {b}" for b in task.boundaries))
     if task.output_schema:
@@ -97,11 +97,13 @@ class OpenAICompatWorker(BaseRunner):
         extra_body: Optional[dict[str, Any]] = None,
         cost_per_1k_tokens: float = 0.0,  # local inference is free by default
         timeout_s: float = 120.0,
+        system_prompt: str = "",  # persona/role prefix; task contract still appended
         client: Optional[httpx.AsyncClient] = None,  # injectable for tests
     ) -> None:
         super().__init__(worker_id=worker_id, tier=tier, model=model, keypair=keypair)
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.system_prompt = system_prompt
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.thinking = thinking
@@ -113,7 +115,7 @@ class OpenAICompatWorker(BaseRunner):
     def _body(self, task: Task) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.model,
-            "messages": _build_messages(task),
+            "messages": _build_messages(task, self.system_prompt),
             "temperature": self.temperature,
         }
         if self.max_tokens is not None:
