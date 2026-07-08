@@ -495,6 +495,40 @@ def test_console_panels_speak_plain_language(page, server):
     assert "identity key" in meta
 
 
+def test_console_cards_paginate(page, server):
+    """Long cards page instead of growing forever: 8 runs per page, a pager
+    with Newer/Older and an 'x–y of N' counter, page position kept across the
+    live refresh, and pager clicks never toggle a run row open."""
+    import httpx
+    base, _ = server
+    wf = ("name: page-filler\nsteps:\n"
+          "  - id: noop\n    task_type: transform\n    objective: Tiny.\n")
+    for i in range(10):
+        httpx.post(base + "/api/runs", json={
+            "workflow_yaml": wf,
+            "context": {"goal": f"pagination probe number {i}"}})
+
+    page.goto(base)
+    page.click("#nav-console")
+    page.wait_for_selector("#runs .pager")
+    assert page.locator("#runs .runrow").count() == 8
+    info = page.locator("#runs .pager-info").inner_text()
+    assert info.startswith("1–8 of ")
+    # newest first: the last run posted leads page one
+    first = page.locator("#runs .rr-title").first.inner_text()
+    assert "Pagination probe number 9" in first
+
+    page.click("#runs button[data-page='runs:1']")          # Older →
+    page.wait_for_selector("#runs .pager-info:has-text('9–')")
+    assert "Pagination probe number 9" not in page.locator("#runs .rr-title").first.inner_text()
+    # paging is not a row click — nothing expanded
+    assert page.locator("#runs .rr-detail").count() == 0
+
+    page.click("#runs button[data-page='runs:-1']")         # ← Newer
+    page.wait_for_selector("#runs .pager-info:has-text('1–8')")
+    assert "Pagination probe number 9" in page.locator("#runs .rr-title").first.inner_text()
+
+
 def test_console_ledger_survives_non_string_goal(page, server):
     """Regression (codex review P2): /api/runs context is arbitrary JSON, so a
     run posted with a non-string goal must not crash the ledger — the title

@@ -130,6 +130,10 @@ tr:last-child td{border-bottom:0}
 .guide .fx{font-family:var(--serif);font-style:italic;font-size:19px;
   color:var(--accent);line-height:1.3}
 .guide .cta{align-self:center;margin-left:auto;flex:0 0 auto}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:12px;padding-top:10px;border-top:1px solid var(--hair)}
+.pager .pager-info{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.pager button:disabled{opacity:.35;cursor:default}
 
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--mut2);margin-bottom:6px}
@@ -1156,9 +1160,27 @@ function resetWizard(){
   setStep(1);
 }
 
-/* ---------- console view (unchanged panels) ---------- */
+/* ---------- console view ---------- */
 const openRuns = new Set();
 function toggleRun(runId){ openRuns.has(runId) ? openRuns.delete(runId) : openRuns.add(runId); refreshConsole(); }
+
+/* Pagination, shared by every console card. Page state survives the 3s live
+   refresh; the current page self-clamps when the data shrinks. */
+const PAGE_SIZE = 8;
+const pages = {};
+function paginate(key, items, renderItems, opts = {}){
+  const size = opts.size || PAGE_SIZE;
+  const nPages = Math.max(1, Math.ceil(items.length / size));
+  const cur = Math.min(pages[key] || 0, nPages - 1);
+  pages[key] = cur;
+  const body = renderItems(items.slice(cur * size, (cur + 1) * size));
+  if(nPages < 2) return body;
+  const [back, fwd] = opts.timeOrdered ? ['← Newer', 'Older →'] : ['← Prev', 'Next →'];
+  return body + `<div class="pager">
+    <button class="pill" data-page="${key}:-1" ${cur === 0 ? 'disabled' : ''}>${back}</button>
+    <span class="pager-info">${cur * size + 1}–${Math.min(items.length, (cur + 1) * size)} of ${items.length}</span>
+    <button class="pill" data-page="${key}:1" ${cur >= nPages - 1 ? 'disabled' : ''}>${fwd}</button></div>`;
+}
 
 async function resolveApproval(runId, stepId, approved){
   const r = await post(`/api/runs/${runId}/approval`, {step_id: stepId, approved, wait: false});
@@ -1187,7 +1209,7 @@ const verdictBadge = v => badge(v === 'pass' ? 'ok' : v === 'fail' ? 'bad' : 'di
 
 function renderRuns(runs){
   if(!runs.length) return '<div class="empty">no runs yet — start one from the Run tab</div>';
-  return runs.slice().reverse().map(r => {
+  return paginate('runs', runs.slice().reverse(), rows => rows.map(r => {
     const open = openRuns.has(r.run_id);
     const kind = runKind(r);
     const hitl = r.status === 'awaiting_approval'
@@ -1205,7 +1227,7 @@ function renderRuns(runs){
         <div class="rr-meta">${esc(r.run_id)}${kind ? ' · ' + esc(kind) : ''}${r.updated_at ? ' · ' + esc(ago(r.updated_at)) : ''}</div></div>
       <div class="rr-story">${esc(runStory(r))}</div>
       ${statusBadge(r.status)}${hitl}</div>${detail}`;
-  }).join('');
+  }).join(''), {timeOrdered: true});
 }
 
 /* Delegated clicks: step ids are user-authored, so they ride in data-* attributes
@@ -1217,16 +1239,25 @@ document.getElementById('runs').addEventListener('click', ev => {
   if(row) toggleRun(row.dataset.run);
 });
 
+/* Pager buttons, anywhere in the console */
+document.getElementById('view-console').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-page]');
+  if(!b) return;
+  const [key, delta] = b.dataset.page.split(':');
+  pages[key] = Math.max(0, (pages[key] || 0) + Number(delta));
+  refreshConsole();
+});
+
 function renderWorkers(ws){
   if(!ws.length) return '<div class="empty">no agents yet — add one in Settings</div>';
-  return ws.map(w => `
+  return paginate('workers', ws, rows => rows.map(w => `
     <div class="lrow">
       <div class="rr-main">
         <div class="rr-title" style="white-space:normal">${esc(w.display_name)}
           ${(w.tiers||[]).map(t => badge('act', t + ' tier')).join(' ')}</div>
         <div class="rr-meta">${esc(w.worker_id)} · identity key ${esc(w.public_key_b64.slice(0,10))}…${
           w.key_rotations ? ` · key rotated ×${w.key_rotations}` : ''}</div></div>
-      ${badge(w.active ? 'ok' : 'dim', w.active ? 'ready' : 'retired')}</div>`).join('');
+      ${badge(w.active ? 'ok' : 'dim', w.active ? 'ready' : 'retired')}</div>`).join(''));
 }
 
 const actionPlain = a => String(a || '').replace(/[._]/g, ' ');
@@ -1235,10 +1266,11 @@ function renderProvenance(p){
   const chain = p.chain.ok
     ? `${badge('ok','intact')} <span class="small">All ${p.chain.checked} recorded actions check out — nothing has been altered.</span>`
     : `${badge('bad','broken')} <span class="red small">The chain fails at entry #${p.chain.problem_index} (${esc(p.chain.reason)}) — don’t trust anything after that point.</span>`;
-  const rows = p.entries.slice(-10).reverse().map(e =>
+  const rows = paginate('audit', p.entries.slice().reverse(), es => es.map(e =>
     `<div class="lrow" style="padding:7px 2px">
        <div class="rr-main"><div class="small"><b>${esc(e.actor_id)}</b> <span class="dim">·</span> ${esc(actionPlain(e.action))}</div>
-         <div class="rr-meta">#${e.index} · ${esc(e.entry_hash.slice(0,12))}…</div></div></div>`).join('');
+         <div class="rr-meta">#${e.index} · ${esc(e.entry_hash.slice(0,12))}…</div></div></div>`).join(''),
+    {timeOrdered: true});
   return `<div class="chainline">${chain}</div>` + rows +
     `<div class="headhash" style="margin-top:8px">chain head ${esc(p.head_hash.slice(0,28))}…</div>`;
 }
@@ -1248,25 +1280,26 @@ const taskPlain = t => String(t || '').replace(/[._-]/g, ' ');
 function renderMatrix(m){
   const models = Object.keys(m);
   if(!models.length) return '<div class="empty">nothing observed yet — the harness learns who’s good at what as runs finish</div>';
-  return models.map(model => {
+  return paginate('matrix', models, ms => ms.map(model => {
     const rows = Object.entries(m[model]).map(([t, c]) =>
       `<tr><td class="small">${esc(taskPlain(t))}</td>
        <td><span class="bar-h" style="width:${Math.round(c.pass_rate*110)}px"></span>
        <span class="mono small">${(c.pass_rate*100).toFixed(0)}%</span></td>
        <td class="small faint">${c.samples === 1 ? 'from 1 try' : `from ${c.samples} tries`}</td></tr>`).join('');
     return `<div class="small" style="margin:8px 0 4px"><b>${esc(model)}</b></div><table>${rows}</table>`;
-  }).join('');
+  }).join(''), {size: 3});
 }
 
 function renderPlaybook(bullets){
   if(!bullets.length) return '<div class="empty">no lessons yet — the harness writes them as failure patterns emerge</div>';
-  return '<table><tr><th>lesson</th><th>applies to</th><th>track record</th></tr>' + bullets.map(b => {
-    const score = (b.helpful + 1) / (b.helpful + b.harmful + 2);
-    return `<tr${b.active?'':' class="faint"'}><td class="small">${esc(b.text)}
-      ${b.active?'':badge('dim','retired')}<br><span class="rr-meta">${esc(b.origin||'added by hand')}</span></td>
-      <td class="small">${esc(taskPlain(b.task_type)||'everything')}</td>
-      <td class="mono small">${(score*100).toFixed(0)}% <span class="faint">helped ${b.helpful}× · hurt ${b.harmful}×</span></td></tr>`;
-  }).join('') + '</table>';
+  return paginate('playbook', bullets, bs =>
+    '<table><tr><th>lesson</th><th>applies to</th><th>track record</th></tr>' + bs.map(b => {
+      const score = (b.helpful + 1) / (b.helpful + b.harmful + 2);
+      return `<tr${b.active?'':' class="faint"'}><td class="small">${esc(b.text)}
+        ${b.active?'':badge('dim','retired')}<br><span class="rr-meta">${esc(b.origin||'added by hand')}</span></td>
+        <td class="small">${esc(taskPlain(b.task_type)||'everything')}</td>
+        <td class="mono small">${(score*100).toFixed(0)}% <span class="faint">helped ${b.helpful}× · hurt ${b.harmful}×</span></td></tr>`;
+    }).join('') + '</table>');
 }
 
 /* MAST failure modes, in words a person would actually say */
@@ -1290,25 +1323,28 @@ const MAST_PLAIN = {
 const mastPlain = m => MAST_PLAIN[m] || taskPlain(m);
 
 function renderFailures(f){
-  const types = Object.keys(f);
-  if(!types.length) return '<div class="empty">no failures yet — when one happens it lands here, labelled</div>';
-  return '<table><tr><th>while doing</th><th>what went wrong</th><th>times</th></tr>' +
-    types.flatMap(t => Object.entries(f[t]).map(([mode, n]) =>
+  const rows = Object.keys(f).flatMap(t =>
+    Object.entries(f[t]).map(([mode, n]) => ({t, mode, n})));
+  if(!rows.length) return '<div class="empty">no failures yet — when one happens it lands here, labelled</div>';
+  return paginate('failures', rows, rs =>
+    '<table><tr><th>while doing</th><th>what went wrong</th><th>times</th></tr>' +
+    rs.map(({t, mode, n}) =>
       `<tr><td class="small">${esc(taskPlain(t))}</td>
        <td class="small"><span title="${esc(mode)}">${esc(mastPlain(mode))}</span></td>
-       <td class="mono small">${n}×</td></tr>`)).join('') + '</table>';
+       <td class="mono small">${n}×</td></tr>`).join('') + '</table>', {size: 10});
 }
 
 function renderSpans(spans){
   if(!spans.length) return '<div class="empty">quiet right now — operations appear here as they happen</div>';
-  return '<table><tr><th>operation</th><th>took</th><th>details</th></tr>' +
-    spans.slice(-22).reverse().map(s => {
+  return paginate('spans', spans.slice().reverse(), ss =>
+    '<table><tr><th>operation</th><th>took</th><th>details</th></tr>' +
+    ss.map(s => {
       const attrs = Object.entries(s.attributes).map(([k,v]) => `${esc(k)}=${esc(v)}`).join('  ');
       return `<tr><td class="mono small">${esc(s.name)}</td>
         <td><span class="bar-h" style="width:${Math.min(130, Math.max(2, s.duration_ms))}px"></span>
         <span class="mono small">${s.duration_ms.toFixed(1)}ms</span></td>
         <td class="mono small faint">${attrs}</td></tr>`;
-    }).join('') + '</table>';
+    }).join('') + '</table>', {size: 10, timeOrdered: true});
 }
 
 async function refreshConsole(){
