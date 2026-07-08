@@ -23,11 +23,13 @@ from metaharness.harness.runner import BaseRunner
 from metaharness.identity.keys import KeyPair
 
 
-async def probe_endpoint(base_url: str, timeout_s: float = 3.0) -> Optional[list[str]]:
+async def probe_endpoint(base_url: str, timeout_s: float = 3.0,
+                         api_key: str = "") -> Optional[list[str]]:
     """Return the model ids served at an OpenAI-compatible base_url, or None if
     unreachable. Use this before wiring a worker — never point at a guess."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        async with httpx.AsyncClient(timeout=timeout_s, headers=headers) as client:
             resp = await client.get(f"{base_url.rstrip('/')}/models")
             resp.raise_for_status()
             return [m["id"] for m in resp.json().get("data", [])]

@@ -43,7 +43,8 @@ def _salt(salt_path: Path) -> bytes:
     return salt
 
 
-def obfuscate(plain: str, salt_path: Path = SALT_PATH) -> str:
+def obfuscate(plain: str, salt_path: Optional[Path] = None) -> str:
+    salt_path = salt_path or SALT_PATH
     if not plain or plain.startswith(_ENC_PREFIX):
         return plain
     salt = _salt(salt_path)
@@ -52,7 +53,8 @@ def obfuscate(plain: str, salt_path: Path = SALT_PATH) -> str:
     return _ENC_PREFIX + base64.b64encode(mixed).decode()
 
 
-def deobfuscate(value: str, salt_path: Path = SALT_PATH) -> str:
+def deobfuscate(value: str, salt_path: Optional[Path] = None) -> str:
+    salt_path = salt_path or SALT_PATH
     if not value or not value.startswith(_ENC_PREFIX):
         return value  # legacy/plaintext passes through; re-saved obfuscated
     salt = _salt(salt_path)
@@ -84,7 +86,7 @@ class ProviderConfig(BaseModel):
     default_model: str = ""
     keyless: bool = False      # local servers: probe instead of authenticate
 
-    def plain_key(self, salt_path: Path = SALT_PATH) -> str:
+    def plain_key(self, salt_path: Optional[Path] = None) -> str:
         return deobfuscate(self.api_key, salt_path)
 
 
@@ -127,12 +129,14 @@ class HarnessConfig(BaseModel):
     # ------------------------------------------------------------ persistence
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> "HarnessConfig":
+    def load(cls, path: Optional[Path] = None) -> "HarnessConfig":
+        path = path or CONFIG_PATH
         if not path.exists():
             return cls()
         return cls.model_validate(json.loads(path.read_text()))
 
-    def save(self, path: Path = CONFIG_PATH, salt_path: Path = SALT_PATH) -> None:
+    def save(self, path: Optional[Path] = None, salt_path: Optional[Path] = None) -> None:
+        path = path or CONFIG_PATH
         for provider in self.providers.values():
             provider.api_key = obfuscate(provider.api_key, salt_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,7 +145,7 @@ class HarnessConfig(BaseModel):
 
     # -------------------------------------------------------------- accessors
 
-    def get_api_key(self, provider_id: str, salt_path: Path = SALT_PATH) -> str:
+    def get_api_key(self, provider_id: str, salt_path: Optional[Path] = None) -> str:
         """Plaintext key for in-process use only — never over HTTP."""
         provider = self.providers.get(provider_id)
         return provider.plain_key(salt_path) if provider else ""
@@ -159,7 +163,7 @@ class HarnessConfig(BaseModel):
         return len(self.agents) != before
 
     def resolve_endpoint(self, agent: AgentConfig,
-                         salt_path: Path = SALT_PATH) -> tuple[str, str]:
+                         salt_path: Optional[Path] = None) -> tuple[str, str]:
         """(base_url, plaintext_api_key) for an agent, via provider ref or direct."""
         if agent.provider and agent.provider in self.providers:
             provider = self.providers[agent.provider]
@@ -168,7 +172,7 @@ class HarnessConfig(BaseModel):
 
     # ----------------------------------------------------------- API surface
 
-    def public_dict(self, salt_path: Path = SALT_PATH) -> dict[str, Any]:
+    def public_dict(self, salt_path: Optional[Path] = None) -> dict[str, Any]:
         """The only representation that may cross HTTP: keys masked."""
         data = self.model_dump()
         for pid, provider in data["providers"].items():
@@ -178,7 +182,7 @@ class HarnessConfig(BaseModel):
         return data
 
     def apply_provider_update(self, pid: str, patch: dict[str, Any],
-                              salt_path: Path = SALT_PATH) -> ProviderConfig:
+                              salt_path: Optional[Path] = None) -> ProviderConfig:
         """Merge a provider patch from the API, ignoring masked key echoes."""
         current = self.providers.get(pid)
         merged = current.model_dump() if current else {"id": pid, "base_url": ""}

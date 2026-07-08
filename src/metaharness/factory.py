@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from metaharness.config import SALT_PATH, AgentConfig, HarnessConfig
+from metaharness.config import AgentConfig, HarnessConfig
 from metaharness.core.types import Tier
 from metaharness.harness import CodingAgentWorker, MockLLMWorker, OpenAICompatWorker
 from metaharness.harness.runner import Runner
@@ -18,7 +18,7 @@ def build_agent_runner(
     agent: AgentConfig,
     config: HarnessConfig,
     keypair: Optional[KeyPair] = None,
-    salt_path: Path = SALT_PATH,
+    salt_path: Optional[Path] = None,
 ) -> Runner:
     """One configured agent -> one signed Runner. Raises ValueError on a
     definition that cannot be built (unknown kind, missing endpoint) — a bad
