@@ -64,6 +64,22 @@ DEFAULT_SKILLS: dict[Tier, dict[TaskType, float]] = {
 }
 
 
+def _conforming(schema: dict, task: Task) -> Any:
+    """Minimal instance of a JSON schema — required object keys, typed leaves."""
+    kind = schema.get("type")
+    if kind == "object":
+        props = schema.get("properties", {})
+        required = schema.get("required", list(props))
+        return {k: _conforming(props.get(k, {}), task) for k in required}
+    if kind == "array":
+        return []
+    if kind == "boolean":
+        return True
+    if kind in ("number", "integer"):
+        return 0
+    return f"attempt at: {task.objective[:40]}"
+
+
 class MockLLMWorker(BaseRunner):
     def __init__(
         self,
@@ -101,6 +117,10 @@ class MockLLMWorker(BaseRunner):
             return f"{check['contains']}: attempt at {task.objective[:60]}"
         if "one_of" in check and check["one_of"]:
             return check["one_of"][0]
+        if task.output_schema:
+            # a competent model conforms to a demanded schema; _corrupt drops a
+            # key, so schema-verified steps still fail at (1 - skill) rate
+            return _conforming(task.output_schema, task)
         return {"answer": f"attempt at: {task.objective[:60]}"}
 
     def _corrupt(self, value: Any, task: Task) -> Any:

@@ -254,7 +254,8 @@ function showView(v){
     document.getElementById('nav-' + name).classList.toggle('on', v === name);
   }
   if(v === 'console') refreshConsole();
-  if(v === 'settings') renderSettings();
+  if(v === 'settings') renderSettings(true);
+  if(v === 'wizard' && wiz.step === 0) renderAgentsStep();  // agents may have changed
 }
 
 /* ---------- wizard state machine ---------- */
@@ -635,12 +636,14 @@ setInterval(() => {
 /* ================= SETTINGS: wizard-driven configuration ================= */
 const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null };
 
-async function renderSettings(){
+async function renderSettings(refetch){
   const body = document.getElementById('settings-body');
-  try{
-    const [cfg, tools] = await Promise.all([get('/api/config'), get('/api/tools')]);
-    SET.cfg = cfg; SET.tools = tools;
-  }catch(e){ body.innerHTML = '<div class="card"><div class="empty">failed to load config</div></div>'; return; }
+  if(refetch || !SET.cfg){
+    try{
+      const [cfg, tools] = await Promise.all([get('/api/config'), get('/api/tools')]);
+      SET.cfg = cfg; SET.tools = tools;
+    }catch(e){ body.innerHTML = '<div class="card"><div class="empty">failed to load config</div></div>'; return; }
+  }
   if(SET.provWiz){ body.innerHTML = renderProvWizard(); return; }
   if(SET.agentWiz){ body.innerHTML = renderAgentWizard(); return; }
   body.innerHTML = renderSettingsHome();
@@ -719,13 +722,13 @@ function renderSettingsHome(){
 async function deleteProvider(pid){
   const r = await fetch('/api/config/providers/' + encodeURIComponent(pid), {method:'DELETE'});
   toast(r.ok ? 'Removed ' + pid : 'Failed: ' + (await r.text()).slice(0,140));
-  renderSettings();
+  renderSettings(true);
 }
 
 async function removeAgent(id){
   const r = await fetch('/api/workers/' + encodeURIComponent(id), {method:'DELETE'});
   toast(r.ok ? 'Retired ' + id : 'Failed: ' + (await r.text()).slice(0,140));
-  renderSettings();
+  renderSettings(true);
 }
 
 async function addMcp(){
@@ -743,7 +746,7 @@ async function addMcp(){
   }
   const r = await post('/api/config/mcp', body);
   toast(r.ok ? 'Saved MCP server ' + name : 'Failed: ' + (await r.text()).slice(0,140));
-  renderSettings();
+  renderSettings(true);
 }
 
 /* ---------- provider wizard: pick → connect → test & save ---------- */
@@ -849,7 +852,7 @@ async function provSave(){
   if(!r.ok){ toast('save failed: ' + (await r.text()).slice(0,140)); return; }
   toast('Provider ' + w.id + ' saved');
   SET.provWiz = null;
-  renderSettings();
+  renderSettings(true);
 }
 
 /* ---------- agent wizard: kind → connection → role & prompt → test & save ---------- */
@@ -1045,7 +1048,7 @@ async function agentSave(){
   if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,140)); return; }
   toast(`${w.editing ? 'Updated' : 'Registered'} ${w.worker_id} on ${w.tier} tier`);
   SET.agentWiz = null;
-  renderSettings();
+  renderSettings(true);
 }
 
 setStep(0);
