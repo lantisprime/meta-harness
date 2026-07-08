@@ -5,3 +5,4 @@ __pycache__/
 data/runtime/
 *.egg-info/
 .mh_state/
+.episodic-memory/
