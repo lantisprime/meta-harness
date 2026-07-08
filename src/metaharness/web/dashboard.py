@@ -442,12 +442,12 @@ function ago(ts){
 }
 const stepName = id => String(id || '').replace(/[-_]/g, ' ');
 function runTitle(r){
-  const goal = (r.context || {}).goal;
-  let t = goal || r.workflow || r.run_id;
-  if(!goal){
-    if(t.includes(':')) t = t.slice(t.indexOf(':') + 1);   // strip template prefix
-    if(!t.includes(' ')) t = t.replace(/[-_]/g, ' ');       // slug -> words
-  }
+  const goal = (r.context || {}).goal;   // context is arbitrary JSON — only trust strings
+  if(typeof goal === 'string' && goal.trim())
+    return goal.charAt(0).toUpperCase() + goal.slice(1);
+  let t = String(r.workflow || r.run_id || '');
+  if(t.includes(':')) t = t.slice(t.indexOf(':') + 1);   // strip template prefix
+  if(!t.includes(' ')) t = t.replace(/[-_]/g, ' ');       // slug -> words
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 function runKind(r){

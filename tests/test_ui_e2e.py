@@ -495,6 +495,36 @@ def test_console_panels_speak_plain_language(page, server):
     assert "identity key" in meta
 
 
+def test_console_ledger_survives_non_string_goal(page, server):
+    """Regression (codex review P2): /api/runs context is arbitrary JSON, so a
+    run posted with a non-string goal must not crash the ledger — the title
+    falls back to the workflow name and no page error fires."""
+    import httpx
+    base, _ = server
+    wf = (
+        "name: numeric-goal-demo\n"
+        "steps:\n"
+        "  - id: noop\n"
+        "    task_type: transform\n"
+        "    objective: Do a tiny thing.\n"
+    )
+    resp = httpx.post(base + "/api/runs",
+                      json={"workflow_yaml": wf, "context": {"goal": 123}})
+    assert resp.status_code == 200, resp.text
+
+    errors: list[str] = []
+    handler = lambda e: errors.append(str(e))  # noqa: E731
+    page.on("pageerror", handler)
+    try:
+        page.goto(base)
+        page.click("#nav-console")
+        row = page.locator(".runrow", has_text="Numeric goal demo")
+        row.wait_for()
+    finally:
+        page.remove_listener("pageerror", handler)
+    assert errors == [], f"page JS errors rendering non-string goal: {errors}"
+
+
 def test_console_approval_survives_hostile_step_id(page, server):
     """Regression (codex review P1): step ids are user-authored, so an id
     containing a quote must not break the console's Approve button. The fix
