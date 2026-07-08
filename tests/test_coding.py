@@ -108,3 +108,20 @@ def test_unknown_cli_rejected():
 def test_adapters_cover_expected_clis():
     assert set(CLI_ADAPTERS) == {"pi", "codex", "opencode", "claude"}
     assert isinstance(available_clis(), dict)
+
+
+def test_display_model_placeholder_never_reaches_argv(tmp_path):
+    """Regression: empty model -> display name 'codex-cli' leaked into the
+    invocation as `-m codex-cli`, which Codex rejects on ChatGPT accounts.
+    No override means NO model flag; the CLI uses its own default."""
+    ws = tmp_path / "ws"
+    for cli, flag in (("codex", "-m"), ("claude", "--model"),
+                      ("pi", "--model"), ("opencode", "-m")):
+        bare = CodingAgentWorker(f"w-{cli}", cli=cli)
+        argv, _ = CLI_ADAPTERS[cli].build(bare, "prompt", ws)
+        assert flag not in argv, f"{cli}: placeholder model leaked into argv"
+        assert bare.model == f"{cli}-cli"  # display/matrix name still set
+
+        pinned = CodingAgentWorker(f"w2-{cli}", cli=cli, model="real-model-id")
+        argv2, _ = CLI_ADAPTERS[cli].build(pinned, "prompt", ws)
+        assert argv2[argv2.index(flag) + 1] == "real-model-id"

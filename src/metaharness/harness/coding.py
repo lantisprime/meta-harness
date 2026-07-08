@@ -80,8 +80,8 @@ def _parse_pi_jsonl(stdout: str) -> tuple[str, float]:
 def _build_pi(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
     argv = [worker.binary, "--mode", "json", "--no-session", "--no-extensions",
             "--no-skills", "--no-prompt-templates", "--no-themes"]
-    if worker.model:
-        argv += ["--model", worker.model]
+    if worker.cli_model:
+        argv += ["--model", worker.cli_model]
     if worker.system_prompt:
         argv += ["--append-system-prompt", worker.system_prompt]
     argv += ["-p"]
@@ -92,24 +92,24 @@ def _build_codex(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[li
     argv = [worker.binary, "exec", "--skip-git-repo-check",
             "--sandbox", getattr(worker, "sandbox", "workspace-write"),
             "--cd", str(ws)]
-    if worker.model:
-        argv += ["-m", worker.model]
+    if worker.cli_model:
+        argv += ["-m", worker.cli_model]
     argv += ["-"]  # prompt from stdin
     return argv, prompt
 
 
 def _build_opencode(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
     argv = [worker.binary, "run"]
-    if worker.model:
-        argv += ["-m", worker.model]
+    if worker.cli_model:
+        argv += ["-m", worker.cli_model]
     argv += [prompt]
     return argv, None
 
 
 def _build_claude(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
     argv = [worker.binary, "-p", "--output-format", "json"]
-    if worker.model:
-        argv += ["--model", worker.model]
+    if worker.cli_model:
+        argv += ["--model", worker.cli_model]
     if worker.system_prompt:
         argv += ["--append-system-prompt", worker.system_prompt]
     return argv, prompt
@@ -229,8 +229,13 @@ class CodingAgentWorker(BaseRunner):
     ) -> None:
         if cli not in CLI_ADAPTERS:
             raise ValueError(f"unknown coding CLI '{cli}' (known: {sorted(CLI_ADAPTERS)})")
+        # model has two jobs kept strictly apart: `model` (display/matrix key,
+        # falls back to '<cli>-cli') vs `cli_model` (the explicit override the
+        # CLI receives; empty = the CLI's own configured default — a display
+        # placeholder must NEVER reach the command line)
         super().__init__(worker_id=worker_id, tier=tier,
                          model=model or f"{cli}-cli", keypair=keypair)
+        self.cli_model = model
         self.cli = cli
         self.adapter = CLI_ADAPTERS[cli]
         self.system_prompt = system_prompt
