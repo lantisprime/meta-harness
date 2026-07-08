@@ -127,7 +127,19 @@ def create_app(state: HarnessState) -> FastAPI:
     async def runs() -> list[dict[str, Any]]:
         if state.engine is None:
             return []
-        return [r.model_dump(mode="json") for r in state.engine.runs()]
+        out = []
+        for r in state.engine.runs():
+            rec = r.model_dump(mode="json")
+            # The journal is the durable clock: first entry = run started,
+            # last entry = most recent activity.
+            try:
+                entries = state.engine.journal(r.run_id).entries()
+            except KeyError:
+                entries = []
+            rec["started_at"] = entries[0].at if entries else None
+            rec["updated_at"] = entries[-1].at if entries else None
+            out.append(rec)
+        return out
 
     @app.get("/api/runs/{run_id}")
     async def run_detail(run_id: str) -> dict[str, Any]:

@@ -115,3 +115,19 @@ async def test_workers_provenance_matrix_endpoints(client):
 
 async def test_unknown_run_404(client):
     assert (await client.get("/api/runs/run_nope")).status_code == 404
+
+
+async def test_runs_carry_journal_timestamps(client):
+    """/api/runs exposes started_at/updated_at derived from the journal so the
+    console can show human-relative dates."""
+    await client.post("/api/runs", json={"workflow_yaml": WORKFLOW_YAML, "context": {}})
+    runs = (await client.get("/api/runs")).json()
+    assert runs, "run should be listed"
+    rec = runs[-1]
+    assert rec["started_at"] is not None and rec["updated_at"] is not None
+    assert rec["updated_at"] >= rec["started_at"]
+
+    detail = (await client.get(f"/api/runs/{rec['run_id']}")).json()
+    entries = detail["journal"]
+    assert rec["started_at"] == entries[0]["at"]
+    assert rec["updated_at"] == entries[-1]["at"]
