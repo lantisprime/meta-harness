@@ -41,6 +41,9 @@ class StepRecord(BaseModel):
     output: Any = None
     attempts: int = 0
     cost_usd: float = 0.0
+    # where this step's file side-effects landed (recorded by the runner);
+    # "" for pure text-work — run packaging reads this, never guesses roots
+    workspace_root: str = ""
 
 
 class RunState(BaseModel):
@@ -203,6 +206,8 @@ class WorkflowEngine:
                     output=outcome.final_output,
                     attempts=len(outcome.attempts),
                     cost_usd=outcome.total_cost_usd,
+                    workspace_root=(outcome.attempts[-1].result.workspace_root
+                                    if outcome.attempts else ""),
                 )
                 if outcome.final_verdict == Verdict.FAIL:
                     journal.append(

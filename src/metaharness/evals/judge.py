@@ -45,13 +45,19 @@ The task the worker was given:
 {boundaries}
 The artifact the worker returned:
 {output}
-
+{evidence}
 Does the artifact actually satisfy the task — complete, on-scope, and usable
 by the next step of the workflow? Judge substance, not style. An artifact that
-asserts success without doing the work fails.
+asserts success without doing the work fails.{evidence_rule}
 
 Respond with ONLY a JSON object: {{"pass": true/false, "reason": "<one sentence>"}}
 """
+
+_EVIDENCE_RULE = """
+When workspace evidence is shown above, it is ground truth: the task's real
+deliverable may live in those files. Grade the FILES against the contract —
+a weak text summary over correct, complete files passes; a confident text
+summary over missing or wrong files fails."""
 
 _MAX_OUTPUT_CHARS = 6_000
 
@@ -63,6 +69,12 @@ def make_judge(judge_runner: Runner) -> Judge:
     called with a fresh, depersonalized grading task per evaluation."""
 
     async def judge(task: Task, result: WorkerResult) -> VerificationResult:
+        from metaharness.evals.evidence import (
+            attempt_window_start,
+            collect_evidence,
+            render_evidence,
+        )
+
         output = result.raw_text or result.output
         text = output if isinstance(output, str) else json.dumps(
             output, ensure_ascii=False, default=str)
@@ -72,10 +84,22 @@ def make_judge(judge_runner: Runner) -> Judge:
         if task.boundaries:
             boundaries = "Constraints it had to respect:\n" + "\n".join(
                 f"- {b}" for b in task.boundaries) + "\n"
+        # the judge's blind spot (observed live: false-negative FAILs on
+        # code_edit steps): workers that do their work through file tools or a
+        # CLI subprocess return narration as text — collect what actually
+        # changed in the recorded workspace root and grade that too
+        evidence = collect_evidence(
+            result.workspace_root,
+            attempt_window_start(result.latency_s),
+            result.tool_calls,
+        )
+        evidence_text = ("\n" + render_evidence(evidence) + "\n") if evidence else ""
         grading_task = Task(
             task_type=TaskType.REASONING,
             objective=JUDGE_PROMPT.format(
-                objective=task.objective, boundaries=boundaries, output=text),
+                objective=task.objective, boundaries=boundaries, output=text,
+                evidence=evidence_text,
+                evidence_rule=_EVIDENCE_RULE if evidence else ""),
             output_schema=JUDGE_SCHEMA,
             max_attempts=1,
         )
