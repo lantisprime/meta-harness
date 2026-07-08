@@ -116,11 +116,25 @@ class HarnessState:
             display_name=runner.model, tiers=tiers, task_types=task_types or [],
         )
 
-    def wire(self, runners: dict[Tier, Runner], journal_dir=None, threshold: float = 0.7) -> None:
-        """Build router → executor → engine from a set of runners."""
+    def wire(self, runners: dict[Tier, Runner], journal_dir=None, threshold: float = 0.7,
+             judge: bool = True) -> None:
+        """Build router → executor → engine from a set of runners.
+
+        judge=True (default) grades every UNVERIFIED step output with the most
+        capable wired runner before dependents consume it (rubric-judge slot of
+        the verifier hierarchy). The judge call runs in a fresh context with
+        external-role framing; when the same model serves generator and judge
+        tiers the decorrelation is contextual, not model-level."""
         for runner in runners.values():
             self.attach_tools(runner)
         self.router = Router(runners, matrix=self.matrix, threshold=threshold)
+        judge_fn = None
+        if judge and runners:
+            from metaharness.evals.judge import make_judge
+            for tier in (Tier.FRONTIER, Tier.MID, Tier.SMALL):
+                if tier in runners:
+                    judge_fn = make_judge(runners[tier])
+                    break
         self.executor = TaskExecutor(
             self.router,
             registry=self.registry,
@@ -130,6 +144,7 @@ class HarnessState:
             reflector=grounded_reflector,
             playbook_hints=self.learning.hints_for,
             observer=self.learning.observe,
+            judge=judge_fn,
         )
         self.engine = WorkflowEngine(self.executor, journal_dir=journal_dir)
 

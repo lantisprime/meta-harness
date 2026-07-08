@@ -20,6 +20,7 @@ from metaharness.core.types import (
     MASTMode,
     Task,
     TaskOutcome,
+    TaskType,
     VerificationResult,
     Verdict,
     now,
@@ -34,6 +35,9 @@ from metaharness.routing.router import Router
 
 # a reflector turns a failed attempt into advice for the next one
 Reflector = Callable[[Task, Attempt], Optional[str]]
+# a judge grades an UNVERIFIED output against its contract (rubric-judge slot
+# of the verifier hierarchy); async because it calls a worker
+Judge = Callable[..., "object"]
 
 
 class TaskExecutor:
@@ -47,6 +51,7 @@ class TaskExecutor:
         reflector: Optional[Reflector] = None,
         playbook_hints: Optional[Callable[[Task], list[str]]] = None,
         observer: Optional[Callable[[TaskOutcome], None]] = None,
+        judge: Optional[Judge] = None,
     ) -> None:
         self.router = router
         self.registry = registry
@@ -56,6 +61,7 @@ class TaskExecutor:
         self.reflector = reflector
         self.playbook_hints = playbook_hints
         self.observer = observer
+        self.judge = judge
         if provenance is not None and orchestrator_keypair is None:
             raise ValueError("provenance logging needs the orchestrator keypair")
 
@@ -123,7 +129,19 @@ class TaskExecutor:
                     )
                 else:
                     verification = verify_output(task, result)
+                    if (verification.verdict == Verdict.UNVERIFIED
+                            and self.judge is not None
+                            and task.task_type != TaskType.PLANNING):
+                        # rubric-judge slot: no deterministic check exists, so a
+                        # fresh-context LLM grades the output against the step's
+                        # own contract — a FAIL enters the normal retry loop
+                        # BEFORE any dependent step consumes the output
+                        try:
+                            verification = await self.judge(variant, result)
+                        except Exception:  # a broken judge must never fail the task
+                            pass
                     # capability matrix learns from checkable outcomes only
+                    # (deterministic or rubric-judged; scorer says which)
                     if verification.verdict in (Verdict.PASS, Verdict.FAIL):
                         self.router.matrix.record(
                             result.model, task.task_type, verification.verdict == Verdict.PASS
