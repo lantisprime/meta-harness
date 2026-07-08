@@ -314,3 +314,37 @@ async def test_self_critique_aggregates_cost():
     single = await ScriptedWorker("w2", lambda t: "revised").run(
         Task(task_type=TaskType.GENERAL, objective="do a thing"))
     assert result.tokens_out > single.tokens_out
+
+
+async def test_tool_offload_parses_programs_from_prose():
+    """Regression (2026-07-09, live tuning): real chat models answer the
+    emit-a-program ask in prose, not {"program": ...} — MiniMax wrote
+    'The expression is: 17*23+9' and every offloaded task failed. The
+    offloader must read the program out of text."""
+    from metaharness.core.types import Task, TaskType, Tier, WorkerResult
+    from metaharness.harness.enrichment import ToolOffload
+    from metaharness.harness.runner import Runner
+
+    class Prose(Runner):
+        worker_id, tier, model = "prose", Tier.SMALL, "prose"
+        def __init__(self, text): self.text = text
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="prose", tier=self.tier,
+                                model="prose", output=self.text, raw_text=self.text)
+
+    task = Task(task_type=TaskType.ARITHMETIC, objective="compute",
+                inputs={"expression": "17*23+9"}, success_check={"equals": 400})
+
+    for text in ("17*23+9", "The expression is: 17*23+9", "`17*23+9`"):
+        result = await ToolOffload(Prose(text)).run(task)
+        assert result.error is None, (text, result.error)
+        assert result.output == 400
+    # dict-shaped programs (mock/schema workers) still work
+    class DictWorker(Prose):
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="prose", tier=self.tier,
+                                model="prose", output={"program": "17*23+9"}, raw_text="")
+    assert (await ToolOffload(DictWorker("")).run(task)).output == 400
+    # nothing arithmetic anywhere -> loud failure, not a silent pass
+    result = await ToolOffload(Prose("I cannot help with that")).run(task)
+    assert result.error and "tool_offload" in result.error

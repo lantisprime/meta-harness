@@ -19,6 +19,7 @@ for what is actually returned.
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any, Optional
 
@@ -52,6 +53,28 @@ class _Wrapper(Runner):
         return result
 
 
+_EXPR_RE = re.compile(r"[-+*/().%\d\s]*\d[-+*/().%\d\s]*")
+
+
+def _program_candidates(result: WorkerResult) -> list[str]:
+    """Every plausible reading of 'the program the worker emitted'. Mock and
+    schema-following workers return {\"program\": ...}; real chat models answer
+    in prose — take the raw text, then the longest arithmetic-looking span
+    (live incident 2026-07-09: MiniMax wrote 'The expression is: 17*23+9' and
+    every offloaded task failed with 'did not emit a program')."""
+    candidates: list[str] = []
+    if isinstance(result.output, dict) and result.output.get("program"):
+        candidates.append(str(result.output["program"]))
+    text = (result.raw_text or "").strip().strip("`").strip()
+    if text:
+        candidates.append(text)
+        spans = [m.group().strip() for m in _EXPR_RE.finditer(text)]
+        spans = [s for s in spans if any(ch.isdigit() for ch in s)]
+        if spans:
+            candidates.append(max(spans, key=len))
+    return candidates
+
+
 class ToolOffload(_Wrapper):
     """PAL: reframe arithmetic as 'emit the program', evaluate exactly."""
 
@@ -64,18 +87,24 @@ class ToolOffload(_Wrapper):
             subtask.inputs["emit_program"] = True
             subtask.objective = (
                 "Write the arithmetic expression that computes the answer. "
-                "Do not compute it yourself. " + task.objective
+                "Do not compute it yourself. Reply with the expression only. "
+                + task.objective
             )
             result = await self.inner.run(subtask)
             result.task_id = task.id
-            program = (result.output or {}).get("program") if isinstance(result.output, dict) else None
-            if not program:
-                result.error = result.error or "tool_offload: worker did not emit a program"
-                return self._resign(result)
-            try:
-                value = eval_arithmetic(str(program))
-            except SandboxError as exc:
-                result.error = f"tool_offload: {exc}"
+            program, value, last_exc = None, None, None
+            for candidate in _program_candidates(result):
+                try:
+                    value = eval_arithmetic(candidate)
+                    program = candidate
+                    break
+                except SandboxError as exc:
+                    last_exc = exc
+            if program is None:
+                result.error = result.error or (
+                    f"tool_offload: {last_exc}" if last_exc
+                    else "tool_offload: worker did not emit a program"
+                )
                 return self._resign(result)
             result.tool_calls.append(
                 {"tool": "python.eval_arithmetic", "input": str(program), "output": value}
