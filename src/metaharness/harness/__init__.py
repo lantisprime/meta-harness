@@ -1,5 +1,16 @@
 """Worker harnesses: the uniform Runner interface, local workers, enrichment."""
-from metaharness.harness.coding import CLI_ADAPTERS, CodingAgentWorker, available_clis
+from metaharness.harness.coding import (
+    CLI_ADAPTERS,
+    CLI_KEY_HINTS,
+    CodingAgentWorker,
+    available_clis,
+    list_cli_models,
+)
+from metaharness.harness.subscription import (
+    SUBSCRIPTION_CLIS,
+    SubscriptionWorker,
+    subscription_status,
+)
 from metaharness.harness.enrichment import (
     SchemaGuard,
     SelfCritique,
@@ -40,4 +51,9 @@ __all__ = [
     "CodingAgentWorker",
     "CLI_ADAPTERS",
     "available_clis",
+    "CLI_KEY_HINTS",
+    "list_cli_models",
+    "SubscriptionWorker",
+    "SUBSCRIPTION_CLIS",
+    "subscription_status",
 ]

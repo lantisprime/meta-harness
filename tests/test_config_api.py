@@ -126,3 +126,51 @@ async def test_coding_cli_worker_add_validates_path(harness):
         "worker_id": "coder", "tier": "frontier", "kind": "coding_cli",
         "cli": "definitely-not-installed"})
     assert resp.status_code == 422
+
+
+async def test_probe_post_provider_ref_and_no_key_in_url(harness, monkeypatch):
+    state, client = harness
+    seen = {}
+
+    async def fake_probe(base_url, timeout_s=3.0, api_key=""):
+        seen.update(base_url=base_url, api_key=api_key)
+        return ["m-1", "m-2"]
+
+    import metaharness.web.app as app_mod
+    monkeypatch.setattr(app_mod, "probe_endpoint", fake_probe)
+    await client.post("/api/config/providers", json={
+        "id": "px", "base_url": "https://api.px.dev/v1", "api_key": "sk-px-secret99"})
+    resp = await client.post("/api/probe", json={"provider": "px"})
+    assert resp.status_code == 200
+    assert resp.json() == {"reachable": True, "models": ["m-1", "m-2"]}
+    # stored key resolved server-side; caller never put it in a URL
+    assert seen == {"base_url": "https://api.px.dev/v1", "api_key": "sk-px-secret99"}
+    assert (await client.post("/api/probe", json={})).status_code == 422
+
+
+async def test_cli_models_endpoint_static_aliases(harness):
+    _, client = harness
+    resp = await client.post("/api/cli_models", json={"cli": "claude"})
+    assert resp.status_code == 200
+    assert "sonnet" in resp.json()["models"]
+    assert (await client.post("/api/cli_models", json={"cli": "vim"})).status_code == 422
+
+
+async def test_config_exposes_subscriptions_and_key_hints(harness):
+    _, client = harness
+    cfg = (await client.get("/api/config")).json()
+    assert set(cfg["subscriptions"]) == {"claude", "codex"}
+    assert {"installed", "authenticated", "login_hint", "models"} <= set(
+        cfg["subscriptions"]["claude"])
+    assert "codex login" in cfg["cli_key_hints"]["codex"]
+
+
+async def test_add_subscription_worker_validates_install(harness, monkeypatch):
+    state, client = harness
+    import metaharness.web.app as app_mod
+    monkeypatch.setattr(app_mod, "subscription_status",
+                        lambda: {"claude": {"installed": False}})
+    resp = await client.post("/api/workers", json={
+        "worker_id": "sub-w", "tier": "frontier",
+        "kind": "subscription_cli", "cli": "claude"})
+    assert resp.status_code == 422

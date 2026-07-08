@@ -700,8 +700,16 @@ function renderSettingsHome(){
       ${agentRows}
       <button class="btn ghost" onclick="startAgentWizard(null)">+ Add agent (wizard)</button></div>
     <div class="grid" style="margin-top:16px">
-      <div class="card"><h2>Coding CLIs</h2>
-        <div class="sub">Detected on this machine — usable as coding agents</div>${cliChips}</div>
+      <div class="card"><h2>CLIs & subscriptions</h2>
+        <div class="sub">Coding CLIs detected on PATH — usable as coding agents or subscription LLM providers</div>
+        ${cliChips}
+        <div class="kv" style="margin:12px 0 6px">SUBSCRIPTION ACCESS</div>
+        ${Object.entries(cfg.subscriptions || {}).map(([name, st]) => `
+          <div class="small" style="padding:3px 0">${
+            st.installed && st.authenticated ? badge('ok','signed in')
+            : st.installed ? badge('warn','not signed in')
+            : badge('dim','not installed')} <b>${esc(st.label)}</b>
+            ${st.installed && !st.authenticated ? `<span class="dim"> — ${esc(st.login_hint)}</span>` : ''}</div>`).join('')}</div>
       <div class="card"><h2>MCP servers</h2>
         <div class="sub">Tool sources for workflows (loaded at startup)</div>${mcpRows}
         <div class="field" style="margin-top:10px"><label>Add: name</label><input id="mcp-name" class="mono" placeholder="files"></div>
@@ -754,8 +762,10 @@ function startProvWizard(pid){
   const existing = pid ? SET.cfg.providers[pid] : null;
   SET.provWiz = { step: existing ? 1 : 0, id: pid || '',
     base_url: existing ? existing.base_url : '', api_key: '',
-    default_model: existing ? (existing.default_model || '') : '', test: null };
+    default_model: existing ? (existing.default_model || '') : '',
+    models: null, test: null };
   renderSettings();
+  if(existing) provFetchModels();  // stored key/keyless: list is one call away
 }
 
 function provWizSteps(){
@@ -781,9 +791,15 @@ function renderProvWizard(){
       ${keyless ? '<div class="hint-panel">Local server — no API key needed. Make sure it is running.</div>' : `
       <div class="field"><label>API key ${entry.get ? `— <a href="${esc(entry.get)}" target="_blank">get one ↗</a>` : ''}</label>
         <input id="pw-key" class="mono" type="password" placeholder="${esc((SET.cfg.providers[w.id] || {}).api_key || 'sk-…')}"></div>`}
-      <div class="field"><label>Default model ${entry.models && entry.models.length ? '' : '(optional)'}</label>
-        <input id="pw-model" class="mono" value="${esc(w.default_model)}" list="pw-models" placeholder="model id">
-        <datalist id="pw-models">${(entry.models || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>`;
+      <div class="field"><label>Default model</label>
+        <div style="display:flex;gap:8px">
+          <input id="pw-model" class="mono" value="${esc(w.default_model)}" list="pw-models" placeholder="model id" style="flex:1">
+          <button class="btn ghost" onclick="provFetchModels()">List models</button></div>
+        <datalist id="pw-models">${((w.models && w.models.length) ? w.models : (entry.models || [])).map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+        <span class="small dim" id="pw-models-msg">${
+          w.models === null ? 'press List models to fetch what this provider actually serves'
+          : w.models.length ? w.models.length + ' model(s) live from the endpoint — pick from the list'
+          : 'endpoint did not list models — check the key and base URL'}</span></div>`;
   }else{
     inner = `
       <div class="hint-panel"><b>About to save</b>
@@ -828,7 +844,20 @@ function provWizNav(delta){
   const w = SET.provWiz;
   if(w.step === 0 && delta < 0){ SET.provWiz = null; renderSettings(); return; }
   if(w.step === 1 && delta > 0 && (!w.id || !w.base_url)){ toast('id and base URL are required'); return; }
+  const entering = w.step === 0 && delta > 0;
   w.step = Math.max(0, Math.min(2, w.step + delta));
+  renderSettings();
+  if(entering && w.models === null) provFetchModels();  // keyless/stored-key just works
+}
+
+async function provFetchModels(){
+  provCapture();
+  const w = SET.provWiz;
+  const msg = document.getElementById('pw-models-msg');
+  if(msg) msg.innerHTML = '<span class="spin"></span> fetching model list…';
+  const r = await post('/api/probe', {provider: w.id, base_url: w.base_url, api_key: w.api_key});
+  if(SET.provWiz !== w) return;  // wizard closed meanwhile
+  w.models = r.ok ? (await r.json()).models : [];
   renderSettings();
 }
 
@@ -913,19 +942,41 @@ function renderAgentWizard(){
       <div class="pillrow">
         <button class="pill ${w.kind === 'openai_compat' ? 'on' : ''}" onclick="agentSet('kind','openai_compat')">LLM endpoint</button>
         <button class="pill ${w.kind === 'coding_cli' ? 'on' : ''}" onclick="agentSet('kind','coding_cli')">Coding CLI</button>
+        <button class="pill ${w.kind === 'subscription_cli' ? 'on' : ''}" onclick="agentSet('kind','subscription_cli')">Subscription (Claude Code / Codex)</button>
         <button class="pill ${w.kind === 'mock' ? 'on' : ''}" onclick="agentSet('kind','mock')">Mock (testing)</button></div>
       <div class="hint-panel">${{
         openai_compat: '<b>LLM endpoint</b>Any OpenAI-compatible API: a configured provider (Anthropic, OpenAI, …) or a local server (Ollama, LM Studio). Does text-work steps.',
         coding_cli: '<b>Coding CLI</b>A full coding harness (Pi, Codex, OpenCode, Claude Code) run headless per task in a workspace. Gives the harness hands: it can implement plans and write real code.',
+        subscription_cli: '<b>Subscription access</b>LLM completions through your signed-in Claude Code (Anthropic subscription) or Codex CLI (OpenAI subscription). No API key stored — the CLI login is the credential. Codex runs read-only; these agents answer, they do not edit.',
         mock: '<b>Mock</b>Deterministic offline worker for demos and tests.'}[w.kind]}</div>`;
   }else if(w.step === 1){
-    if(w.kind === 'coding_cli'){
+    if(w.kind === 'subscription_cli'){
+      const subs = Object.entries(SET.cfg.subscriptions || {});
+      const chosen = (SET.cfg.subscriptions || {})[w.cli];
+      inner = `<div class="sub">Which subscription answers for this agent?</div>
+        <div class="pillrow">${subs.map(([name, st]) =>
+          `<button class="pill ${w.cli === name ? 'on' : ''}" ${st.installed ? '' : 'disabled'}
+             onclick="agentSet('cli','${esc(name)}')">${esc(st.label)}</button>`).join('')}</div>
+        ${chosen ? (chosen.authenticated
+          ? `<div class="hint-panel"><b>Signed in</b><span class="kv">${esc(chosen.path)}</span></div>`
+          : `<div class="hint-panel"><b>Not signed in yet</b>${esc(chosen.login_hint)} — then come back and Test.</div>`) : ''}
+        <div class="field" style="margin-top:10px"><label>Model (optional — CLI default otherwise)</label>
+          <input id="aw-model" class="mono" value="${esc(w.model)}" list="aw-sub-models" placeholder="e.g. ${chosen && chosen.models.length ? esc(chosen.models[0]) : 'default'}">
+          <datalist id="aw-sub-models">${((chosen && chosen.models) || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>`;
+    }else if(w.kind === 'coding_cli'){
       const clis = Object.keys(SET.cfg.coding_clis || {});
+      const keyHint = w.cli ? (SET.cfg.cli_key_hints || {})[w.cli] : '';
       inner = clis.length ? `<div class="sub">Installed coding CLIs (detected on PATH)</div>
         <div class="pillrow">${clis.map(c =>
           `<button class="pill ${w.cli === c ? 'on' : ''}" onclick="agentSet('cli','${esc(c)}')">${esc(c)}</button>`).join('')}</div>
-        <div class="field" style="margin-top:10px"><label>Model override (optional — CLI default otherwise)</label>
-          <input id="aw-model" class="mono" value="${esc(w.model)}" placeholder="provider/model-id"></div>`
+        ${keyHint ? `<div class="hint-panel"><b>This harness brings its own credentials</b>
+          ${esc(keyHint)} — the meta-harness never stores or proxies them.</div>` : ''}
+        <div class="field" style="margin-top:10px"><label>Model (optional — CLI default otherwise)</label>
+          <div style="display:flex;gap:8px">
+            <input id="aw-model" class="mono" value="${esc(w.model)}" list="aw-cli-models" placeholder="provider/model-id" style="flex:1">
+            <button class="btn ghost" onclick="cliFetchModels()" ${w.cli ? '' : 'disabled'}>List models</button></div>
+          <datalist id="aw-cli-models">${w.probed.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+          <span class="small dim" id="aw-cli-msg">${w.probed.length ? w.probed.length + ' model(s) — pick from the list' : ''}</span></div>`
         : '<div class="hint-panel"><b>No coding CLIs found</b>Install pi, codex, opencode or claude and reopen this wizard.</div>';
     }else if(w.kind === 'mock'){
       inner = '<div class="hint-panel">Mock workers need no connection.</div>';
@@ -937,13 +988,13 @@ function renderAgentWizard(){
           ${provs.map(p => `<button class="pill ${w.provider === p.id ? 'on' : ''}" onclick="agentSet('provider','${esc(p.id)}')">${esc(p.label || p.id)}</button>`).join('')}</div>
         ${w.provider ? `<div class="kv" style="margin:8px 0">${esc((SET.cfg.providers[w.provider] || {}).base_url)}</div>` : `
         <div class="field"><label>Base URL</label>
-          <div style="display:flex;gap:8px">
-            <input id="aw-base" class="mono" value="${esc(w.base_url || 'http://localhost:1234/v1')}" style="flex:1">
-            <button class="btn ghost" onclick="agentProbe()">Probe</button></div></div>`}
+          <input id="aw-base" class="mono" value="${esc(w.base_url || 'http://localhost:1234/v1')}"></div>`}
         <div class="field"><label>Model</label>
-          <input id="aw-model" class="mono" value="${esc(w.model || (SET.cfg.providers[w.provider] || {}).default_model || '')}" list="aw-models" placeholder="model id">
+          <div style="display:flex;gap:8px">
+            <input id="aw-model" class="mono" value="${esc(w.model || (SET.cfg.providers[w.provider] || {}).default_model || '')}" list="aw-models" placeholder="model id" style="flex:1">
+            <button class="btn ghost" onclick="agentFetchModels()">List models</button></div>
           <datalist id="aw-models">${w.probed.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
-          <span class="small dim" id="aw-probe-msg"></span></div>`;
+          <span class="small dim" id="aw-probe-msg">${w.probed.length ? w.probed.length + ' model(s) live from the endpoint — pick from the list' : ''}</span></div>`;
     }
   }else if(w.step === 2){
     inner = `
@@ -983,7 +1034,25 @@ function renderAgentWizard(){
         : `<button class="btn" onclick="agentSave()">${w.editing ? 'Update' : 'Register'} agent</button>`}</div></div>`;
 }
 
-function agentSet(key, value){ SET.agentWiz[key] = value; if(key === 'provider') SET.agentWiz.model = ''; renderSettings(); }
+function agentSet(key, value){
+  SET.agentWiz[key] = value;
+  if(key === 'provider'){ SET.agentWiz.model = ''; SET.agentWiz.probed = []; }
+  if(key === 'cli'){ SET.agentWiz.probed = []; }
+  renderSettings();
+  if(key === 'provider') agentFetchModels();  // stored key/keyless: fetch instantly
+  if(key === 'cli' && SET.agentWiz.kind === 'coding_cli') cliFetchModels();
+}
+
+async function cliFetchModels(){
+  agentCapture();
+  const w = SET.agentWiz;
+  const msg = document.getElementById('aw-cli-msg');
+  if(msg) msg.innerHTML = '<span class="spin"></span> asking the CLI for its models…';
+  const r = await post('/api/cli_models', {cli: w.cli});
+  if(SET.agentWiz !== w) return;
+  w.probed = r.ok ? (await r.json()).models : [];
+  renderSettings();
+}
 
 function agentArchetype(k){
   agentCapture();
@@ -1002,15 +1071,20 @@ function agentCapture(){
   const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
 }
 
-async function agentProbe(){
+async function agentFetchModels(){
   agentCapture();
   const w = SET.agentWiz;
-  document.getElementById('aw-probe-msg').innerHTML = '<span class="spin"></span> probing…';
-  const data = await get('/api/probe?base_url=' + encodeURIComponent(w.base_url));
+  const msg = document.getElementById('aw-probe-msg');
+  if(msg) msg.innerHTML = '<span class="spin"></span> fetching model list…';
+  const r = await post('/api/probe', {provider: w.provider, base_url: w.provider ? '' : w.base_url});
+  if(SET.agentWiz !== w) return;
+  const data = r.ok ? await r.json() : {reachable: false, models: []};
   w.probed = data.models || [];
   renderSettings();
-  const msg = document.getElementById('aw-probe-msg');
-  if(msg) msg.textContent = data.reachable ? `${w.probed.length} model(s) found — pick from the list` : 'endpoint unreachable';
+  if(!data.reachable){
+    const m2 = document.getElementById('aw-probe-msg');
+    if(m2) m2.textContent = 'endpoint did not list models — check the key, URL, and that the server is running';
+  }
 }
 
 function agentWizNav(delta){
@@ -1019,11 +1093,14 @@ function agentWizNav(delta){
   if(w.step === 0 && delta < 0){ SET.agentWiz = null; renderSettings(); return; }
   if(delta > 0){
     if(w.step === 1 && w.kind === 'coding_cli' && !w.cli){ toast('pick a coding CLI'); return; }
+    if(w.step === 1 && w.kind === 'subscription_cli' && !w.cli){ toast('pick a subscription CLI'); return; }
     if(w.step === 1 && w.kind === 'openai_compat' && !w.provider && !w.base_url){ toast('provider or base URL needed'); return; }
     if(w.step === 2 && !w.worker_id){ toast('give the agent a worker id'); return; }
   }
+  const entering = delta > 0 && w.step === 0;
   w.step = Math.max(0, Math.min(3, w.step + delta));
   renderSettings();
+  if(entering && w.step === 1 && w.kind === 'openai_compat' && !w.probed.length) agentFetchModels();
 }
 
 async function agentTest(){

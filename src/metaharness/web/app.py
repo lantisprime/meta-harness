@@ -16,7 +16,8 @@ from pydantic import BaseModel
 from metaharness.config import PROVIDER_CATALOG, AgentConfig, MCPServerConfig, is_masked
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.factory import build_agent_runner
-from metaharness.harness.coding import available_clis
+from metaharness.harness.coding import CLI_KEY_HINTS, available_clis, list_cli_models
+from metaharness.harness.subscription import SUBSCRIPTION_CLIS, SubscriptionWorker, subscription_status
 from metaharness.harness.local import OpenAICompatWorker, probe_endpoint
 from metaharness.harness.workers import MockLLMWorker
 from metaharness.identity.registry import RegistryError
@@ -61,6 +62,13 @@ class AddWorkerRequest(BaseModel):
     max_tokens: Optional[int] = 4000
     cli: str = ""                         # coding_cli: pi | codex | opencode | claude
     persist: bool = True                  # survive restarts via config.json
+
+
+class ProbeRequest(BaseModel):
+    """POST body so API keys never appear in a URL query string."""
+    base_url: str = ""
+    provider: str = ""                    # stored-provider ref (uses its key)
+    api_key: str = ""                     # inline pre-save key; masked echo -> stored
 
 
 class TestWorkerRequest(BaseModel):
@@ -270,6 +278,12 @@ def create_app(state: HarnessState) -> FastAPI:
                 raise HTTPException(
                     422, f"coding CLI {req.cli!r} not found on PATH "
                          f"(installed: {sorted(available_clis()) or 'none'})")
+        elif req.kind == "subscription_cli":
+            status = subscription_status().get(req.cli)
+            if status is None or not status["installed"]:
+                raise HTTPException(
+                    422, f"subscription CLI {req.cli!r} not installed "
+                         f"(known: {sorted(SUBSCRIPTION_CLIS)})")
         try:
             runner = build_agent_runner(agent, state.config)
         except ValueError as exc:
@@ -312,6 +326,21 @@ def create_app(state: HarnessState) -> FastAPI:
             path = available_clis().get(req.cli)
             return {"ok": path is not None,
                     "detail": path or f"'{req.cli}' not found on PATH"}
+        if req.kind == "subscription_cli":
+            status = subscription_status().get(req.cli)
+            if status is None or not status["installed"]:
+                return {"ok": False, "detail": f"'{req.cli}' not installed"}
+            candidate = SubscriptionWorker("config-test", cli=req.cli,
+                                           model=req.model, timeout_s=90.0)
+            probe_task = Task(id=f"test-{uuid.uuid4().hex[:8]}",
+                              task_type=TaskType.GENERAL,
+                              objective="Reply with exactly: OK")
+            started = time.perf_counter()
+            result = await candidate.run(probe_task)
+            return {"ok": result.error is None,
+                    "latency_ms": round((time.perf_counter() - started) * 1000),
+                    "error": result.error,
+                    "reply": (result.raw_text or "")[:200]}
         if req.kind == "mock":
             return {"ok": True, "detail": "mock workers always answer"}
         base_url, api_key = req.base_url, req.api_key
@@ -344,6 +373,8 @@ def create_app(state: HarnessState) -> FastAPI:
             **state.config.public_dict(),
             "catalog": PROVIDER_CATALOG,
             "coding_clis": available_clis(),
+            "cli_key_hints": CLI_KEY_HINTS,
+            "subscriptions": subscription_status(),
         }
 
     @app.post("/api/config/providers")
@@ -387,6 +418,33 @@ def create_app(state: HarnessState) -> FastAPI:
     @app.get("/api/probe")
     async def probe(base_url: str) -> dict[str, Any]:
         models = await probe_endpoint(base_url)
+        return {"reachable": models is not None, "models": models or []}
+
+    @app.post("/api/cli_models")
+    async def cli_models(body: dict[str, Any]) -> dict[str, Any]:
+        """Models a coding/subscription CLI can use — asked from the CLI
+        itself when it supports listing (pi, opencode), static aliases
+        otherwise. Feeds the agent wizard's model picker."""
+        cli = str(body.get("cli", ""))
+        try:
+            models = await list_cli_models(cli)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        return {"cli": cli, "models": models}
+
+    @app.post("/api/probe")
+    async def probe_models(req: ProbeRequest) -> dict[str, Any]:
+        """List the models a provider actually serves — feeds the wizards'
+        model pickers so 'default model' is a choice, not a guess."""
+        base_url, api_key = req.base_url, req.api_key
+        if req.provider and req.provider in state.config.providers:
+            stored = state.config.providers[req.provider]
+            base_url = base_url or stored.base_url
+            if not api_key or is_masked(api_key):
+                api_key = stored.plain_key()
+        if not base_url:
+            raise HTTPException(422, "probe needs base_url or a configured provider")
+        models = await probe_endpoint(base_url, api_key=api_key, timeout_s=8.0)
         return {"reachable": models is not None, "models": models or []}
 
     @app.get("/api/workers")

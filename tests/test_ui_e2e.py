@@ -168,3 +168,77 @@ def test_goal_step_template_plan_and_full_run(page, server):
         page.click(f"button:has-text('Approve {gate}')")
     page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
     assert page.locator(".planstep .n.done").count() == 6
+
+
+def test_provider_wizard_lists_models_live(page, server):
+    """The default-model field offers what the provider actually serves."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Providers')")
+    page.click("button:has-text('+ Add provider (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('LM Studio (local)')")
+    page.click("button:has-text('Next →')")
+    # entering step 2 auto-fetches; a manual button also exists
+    assert page.locator("button:has-text('List models')").is_visible()
+    # the fetch resolves either way: live model count, or a loud can't-list note
+    page.wait_for_selector(
+        "#pw-models-msg:has-text('live from the endpoint'), "
+        "#pw-models-msg:has-text('did not list models')", timeout=15_000)
+    msg = page.locator("#pw-models-msg").inner_text()
+    if "live from the endpoint" in msg:  # LM Studio actually running here
+        assert page.locator("#pw-models option").count() > 0
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")
+
+
+def test_agent_wizard_coding_cli_models_and_key_hint(page, server):
+    """Coding CLIs: own-credentials hint + model choices from the CLI."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Agents')")
+    import httpx
+    cfg = httpx.get(base + "/api/config", timeout=5).json()
+    if "claude" not in cfg.get("coding_clis", {}):
+        pytest.skip("claude CLI not installed on this machine")
+    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Coding CLI')")
+    page.click("button:has-text('Next →')")
+    page.click(".pill:has-text('claude')")
+    # each harness brings its own credentials — hint names its auth home
+    page.wait_for_selector(".hint-panel:has-text('brings its own credentials')")
+    assert "claude login" in page.locator(".hint-panel").inner_text()
+    # model list arrives from /api/cli_models (static aliases for claude)
+    page.wait_for_selector("#aw-cli-msg:has-text('pick from the list')")
+    options = page.locator("#aw-cli-models option")
+    assert options.count() >= 3
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")
+
+
+def test_agent_wizard_subscription_kind(page, server):
+    """Subscription access via signed-in Claude Code / Codex CLI."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    # settings home shows subscription status chips
+    page.wait_for_selector(".kv:has-text('SUBSCRIPTION ACCESS')")
+    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Subscription (Claude Code / Codex)')")
+    assert "No API key stored" in page.locator(".hint-panel").inner_text()
+    page.click("button:has-text('Next →')")
+    import httpx
+    subs = httpx.get(base + "/api/config", timeout=5).json()["subscriptions"]
+    if subs["claude"]["installed"]:
+        page.click(".pill:has-text('Claude Code (Anthropic subscription)')")
+        page.wait_for_selector(".hint-panel:has-text('Signed in'), "
+                               ".hint-panel:has-text('Not signed in yet')")
+        assert page.locator("#aw-sub-models option").count() >= 3
+    else:
+        assert page.locator(".pill:has-text('Claude Code')").is_disabled()
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")

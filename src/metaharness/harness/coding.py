@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -89,7 +90,8 @@ def _build_pi(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[
 
 def _build_codex(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
     argv = [worker.binary, "exec", "--skip-git-repo-check",
-            "--sandbox", "workspace-write", "--cd", str(ws)]
+            "--sandbox", getattr(worker, "sandbox", "workspace-write"),
+            "--cd", str(ws)]
     if worker.model:
         argv += ["-m", worker.model]
     argv += ["-"]  # prompt from stdin
@@ -129,6 +131,63 @@ def available_clis() -> dict[str, str]:
         if path:
             found[name] = path
     return found
+
+
+# each coding harness authenticates ITSELF — the meta-harness never stores or
+# proxies these keys, it only tells the user where they live
+CLI_KEY_HINTS: dict[str, str] = {
+    "pi": "keys: standard env vars (ANTHROPIC_API_KEY, …) or ~/.pi/agent/auth.json",
+    "codex": "auth: `codex login` (ChatGPT OAuth) or CODEX_API_KEY; config in ~/.codex/config.toml",
+    "opencode": "keys: `opencode auth login` or provider.options.apiKey in ~/.config/opencode/opencode.json",
+    "claude": "auth: `claude login` (subscription) or ANTHROPIC_API_KEY",
+}
+
+# CLIs that can enumerate their own models; others fall back to known aliases
+_CLI_MODEL_LISTERS: dict[str, list[str]] = {
+    "pi": ["--list-models"],
+    "opencode": ["models"],
+}
+_CLI_STATIC_MODELS: dict[str, list[str]] = {
+    "claude": ["sonnet", "opus", "haiku", "claude-fable-5", "claude-opus-4-8"],
+    "codex": ["gpt-5.2-codex", "gpt-5.2", "o5"],
+}
+
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][\w.\-]*(/[\w.\-:]+)+$")
+
+
+async def list_cli_models(cli: str, timeout_s: float = 15.0,
+                          cap: int = 300) -> list[str]:
+    """The models a coding CLI can use, asked from the CLI itself when it
+    supports listing. Failures fall back to the static aliases — a model id
+    is a suggestion, not a gate; the CLI validates it at run time."""
+    if cli not in CLI_ADAPTERS:
+        raise ValueError(f"unknown coding CLI {cli!r}")
+    lister = _CLI_MODEL_LISTERS.get(cli)
+    static = _CLI_STATIC_MODELS.get(cli, [])
+    binary = shutil.which(CLI_ADAPTERS[cli].binary)
+    if lister is None or binary is None:
+        return static
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary, *lister,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL,
+        )
+        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except (OSError, asyncio.TimeoutError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return static
+    models = []
+    for line in stdout_b.decode(errors="replace").splitlines():
+        token = line.strip().split()[0] if line.strip() else ""
+        if _MODEL_ID_RE.match(token):
+            models.append(token)
+            if len(models) >= cap:
+                break
+    return models or static
 
 
 def _render_prompt(task: Task) -> str:

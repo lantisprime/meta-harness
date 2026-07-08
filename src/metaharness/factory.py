@@ -9,7 +9,12 @@ from typing import Optional
 
 from metaharness.config import AgentConfig, HarnessConfig
 from metaharness.core.types import Tier
-from metaharness.harness import CodingAgentWorker, MockLLMWorker, OpenAICompatWorker
+from metaharness.harness import (
+    CodingAgentWorker,
+    MockLLMWorker,
+    OpenAICompatWorker,
+    SubscriptionWorker,
+)
 from metaharness.harness.runner import Runner
 from metaharness.identity.keys import KeyPair
 
@@ -49,6 +54,18 @@ def build_agent_runner(
         if not agent.cli:
             raise ValueError(f"agent '{agent.worker_id}': coding_cli needs 'cli'")
         return CodingAgentWorker(
+            agent.worker_id,
+            cli=agent.cli,
+            model=agent.model,
+            tier=tier,
+            keypair=keypair,
+            system_prompt=agent.system_prompt,
+        )
+
+    if agent.kind == "subscription_cli":
+        if not agent.cli:
+            raise ValueError(f"agent '{agent.worker_id}': subscription_cli needs 'cli'")
+        return SubscriptionWorker(
             agent.worker_id,
             cli=agent.cli,
             model=agent.model,
