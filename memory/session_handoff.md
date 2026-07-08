@@ -1,38 +1,41 @@
-# Session Handoff — meta-harness (2026-07-08, session 2)
+# Session Handoff — meta-harness (2026-07-08, session 3)
 
-## State: v0.2 SHIPPED. 193/193 tests, CI green, 6 commits pushed.
-Repo: github.com/lantisprime/meta-harness (PRIVATE; branch protection deferred —
-Pro-gated; ready-to-apply config lives in the episodic workplan episode).
+## State: v0.3 shipped. 229/229 tests, CI green, 17 commits on main.
+Repo: github.com/lantisprime/meta-harness (private; branch protection still
+Pro-gated). **Live server on :8321 was intentionally NOT restarted** (user was
+testing) — restart to pick up everything from "custom workflows" onward:
+`pkill -f "metaharness serve"` then
+`.venv/bin/metaharness serve --local --port 8321`.
 
-## Shipped this session
-- **Config store** (`config.py`+`factory.py`): providers/agents/MCP →
-  `~/.metaharness/config.json` (0600, obfuscated keys, masked over HTTP);
-  configured agents rebuilt at boot before --local discovery.
-- **Coding agents** (`harness/coding.py`): pi/codex/opencode/claude headless in
-  jailed workspaces; all 4 detected locally. Harness can implement plans.
-- **Tools+MCP** (`tools/`): registry w/ adaptive per-step subsets (cap 7),
-  jailed file tools, MCP stdio+HTTP loader (`pip install -e '.[mcp]'`);
-  OpenAICompatWorker tool-call loop; planner detects per-step tools.
-- **Context mgmt** (`context.py`): per-tier budgets, on-the-fly pruning (tool
-  obs first, edges never), loud digests.
-- **Workflow types** (`workflows/templates.py`): software_engineering =
-  agentic SDLC (explore→specify⛔→plan⛔→implement→verify→review⛔) + research;
-  deterministic instantiation, `workflow_type` on /api/plans.
-- **SDLC eval** (`evals/sdlc.py`): 11 deterministic per-phase probes, pass^k.
-- **UI**: Settings view; provider + agent wizards (system-prompt archetypes);
-  workflow-type pills; tool badges in plan review; MCP add form.
-
-## Verification done
-Full pytest suite; node --check on dashboard JS; live HTTP smoke of the whole
-config flow (provider CRUD, persisted agent add/retire, template plan).
-NOT yet done: SE template run with a REAL coding CLI agent; browser-visual pass.
+## Shipped this session (all Playwright-tested, 16 browser tests)
+- **Subscription providers**: SubscriptionWorker rides signed-in Claude Code /
+  Codex CLIs (both verified live: OK in 3.1s/5.5s). Kind `subscription_cli`.
+- **Model pickers**: POST /api/probe (keys never in URLs) lists providers'
+  real models; visible filter-as-you-type pick-lists (datalists looked empty);
+  /api/cli_models reads Pi's models.json + opencode.jsonc registries.
+- **Providers**: NeuralWatt + MiniMax added to catalog.
+- **Custom workflows**: step-builder wizard (Objective→Type&tools→Verify&gate);
+  every plan (LLM/template/custom) editable inline + YAML mode;
+  POST /api/workflows/validate.
+- **Branching (option 1)**: StepSpec.when {step, equals/contains/one_of,
+  negate}; engine skips + cascades + journals `step.skipped`; checked before
+  HITL gates; survives resume. Planner prompt teaches it.
+- **Run follow-up**: Done screen → "Run again" or POST /api/runs/{id}/followup
+  (planner sees per-step digest incl. NO-SHIP findings → remediation plan into
+  editable review; approval = running it).
+- **Step judge**: evals/judge.py — UNVERIFIED outputs graded by most capable
+  runner vs step contract; FAIL → retry loop; scorer="judge";
+  wire(judge=True) default; PLANNING exempt; unparseable → UNVERIFIED.
+- **Bug fixes from live use**: stale base_url leak in wizard Test; reserved
+  worker ids; retired-id re-admission (registry key_rotations+1); display-model
+  placeholder leaking into CLI argv (-m codex-cli); approval 409 flash
+  (optimistic gate UI); renderSettings refetch churn.
 
 ## Next steps
-1. Run SE template end-to-end with real local models + a coding CLI agent.
-2. gemma vs qwen eval at scale (sdlc_capability_suite + run_suite/compare_suites).
-3. Post-step HITL (approve output content, not just execution).
-4. Branch protection when repo goes public / Pro.
-5. MCP hot-reload endpoint (servers currently load only at startup).
+1. Restart :8321; run SE template end-to-end with real models + coding CLI.
+2. gemma vs qwen eval (sdlc_capability_suite ready).
+3. Bounded loops (repeat_until) — option 2, deferred.
+4. Multi-worker per tier / per-worker matrix.
+5. Branch protection when repo public/Pro.
 
-Knowledge base: 3 new files (agentic-sdlc, coding-agent-clis-mcp,
-context-engineering). Episodic workplan episode: 20260708-085401-….
+Episodic episode revised: see em-search "workplan". Reset context now.
