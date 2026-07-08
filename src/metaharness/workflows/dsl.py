@@ -44,6 +44,7 @@ class StepSpec(BaseModel):
     max_attempts: int = 3
     depends_on: list[str] = Field(default_factory=list)
     hitl: bool = False    # require human approval before this step runs
+    tools: list[str] = Field(default_factory=list)  # tool subset for this step
 
     def to_task(self, resolved_inputs: dict[str, Any]) -> Task:
         boundaries = list(self.boundaries)
@@ -63,6 +64,7 @@ class StepSpec(BaseModel):
             success_check=self.success_check,
             tier_hint=self.tier_hint,
             max_attempts=self.max_attempts,
+            tools=list(self.tools),
         )
 
 

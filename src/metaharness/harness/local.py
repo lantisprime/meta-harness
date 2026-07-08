@@ -100,12 +100,18 @@ class OpenAICompatWorker(BaseRunner):
         cost_per_1k_tokens: float = 0.0,  # local inference is free by default
         timeout_s: float = 120.0,
         system_prompt: str = "",  # persona/role prefix; task contract still appended
+        tool_registry=None,        # ToolRegistry; wired by HarnessState.wire()
+        context_budget: Optional[int] = None,  # tokens; default by tier
+        max_tool_rounds: int = 5,
         client: Optional[httpx.AsyncClient] = None,  # injectable for tests
     ) -> None:
         super().__init__(worker_id=worker_id, tier=tier, model=model, keypair=keypair)
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.system_prompt = system_prompt
+        self.tool_registry = tool_registry
+        self.context_budget = context_budget
+        self.max_tool_rounds = max_tool_rounds
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.thinking = thinking
@@ -114,14 +120,22 @@ class OpenAICompatWorker(BaseRunner):
         self.timeout_s = timeout_s
         self._client = client
 
-    def _body(self, task: Task) -> dict[str, Any]:
+    def _tool_schemas(self, task: Task) -> list[dict[str, Any]]:
+        if not task.tools or self.tool_registry is None:
+            return []
+        return self.tool_registry.openai_schemas(task.tools)
+
+    def _body(self, task: Task, messages: list[dict[str, Any]],
+              tool_schemas: list[dict[str, Any]]) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.model,
-            "messages": _build_messages(task, self.system_prompt),
+            "messages": messages,
             "temperature": self.temperature,
         }
         if self.max_tokens is not None:
             body["max_tokens"] = self.max_tokens
+        if tool_schemas:
+            body["tools"] = tool_schemas
         if task.output_schema:
             body["response_format"] = {"type": "json_object"}
         if self.thinking is not None:
@@ -129,38 +143,73 @@ class OpenAICompatWorker(BaseRunner):
         body.update(self.extra_body)
         return body
 
-    async def _execute(self, task: Task) -> WorkerResult:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        client = self._client or httpx.AsyncClient(timeout=self.timeout_s)
-        try:
-            body = self._body(task)
+    async def _post(self, client: httpx.AsyncClient, body: dict[str, Any],
+                    headers: dict[str, str]) -> dict[str, Any]:
+        resp = await client.post(
+            f"{self.base_url}/chat/completions", json=body, headers=headers
+        )
+        if resp.status_code == 400 and "response_format" in body:
+            # servers disagree on structured-output dialects (LM Studio wants
+            # json_schema, Ollama takes json_object) — the prompt already
+            # demands JSON, so retry bare rather than fail the attempt
+            body.pop("response_format")
             resp = await client.post(
                 f"{self.base_url}/chat/completions", json=body, headers=headers
             )
-            if resp.status_code == 400 and "response_format" in body:
-                # servers disagree on structured-output dialects (LM Studio wants
-                # json_schema, Ollama takes json_object) — the prompt already
-                # demands JSON, so retry bare rather than fail the attempt
-                body.pop("response_format")
-                resp = await client.post(
-                    f"{self.base_url}/chat/completions", json=body, headers=headers
-                )
-            resp.raise_for_status()
-            data = resp.json()
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _execute(self, task: Task) -> WorkerResult:
+        from metaharness.context import budget_for, fit_messages
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        messages = _build_messages(task, self.system_prompt)
+        tool_schemas = self._tool_schemas(task)
+        prompt_budget = budget_for(self.tier, self.context_budget)
+        tool_calls_made: list[dict[str, Any]] = []
+        tokens_in = tokens_out = 0
+
+        client = self._client or httpx.AsyncClient(timeout=self.timeout_s)
+        try:
+            for _round in range(self.max_tool_rounds + 1):
+                messages = fit_messages(messages, prompt_budget)
+                data = await self._post(
+                    client, self._body(task, messages, tool_schemas), headers)
+                usage = data.get("usage") or {}
+                tokens_in += int(usage.get("prompt_tokens", 0))
+                tokens_out += int(usage.get("completion_tokens", 0))
+                message = data["choices"][0]["message"]
+                calls = message.get("tool_calls") or []
+                if not calls or not tool_schemas or _round == self.max_tool_rounds:
+                    break
+                # tool round: run each call, feed pruned observations back
+                messages.append({"role": "assistant", "content": message.get("content"),
+                                 "tool_calls": calls})
+                for call in calls:
+                    fn = call.get("function") or {}
+                    name = fn.get("name", "")
+                    try:
+                        arguments = json.loads(fn.get("arguments") or "{}")
+                    except ValueError:
+                        arguments = {}
+                    observation = await self.tool_registry.call(
+                        name, arguments, focus=task.objective)
+                    tool_calls_made.append(
+                        {"tool": name, "arguments": arguments,
+                         "result_preview": observation[:200]})
+                    messages.append({"role": "tool",
+                                     "tool_call_id": call.get("id", name),
+                                     "content": observation})
         finally:
             if self._client is None:
                 await client.aclose()
 
-        message = data["choices"][0]["message"]
         text = message.get("content") or ""
         if not text and message.get("reasoning_content"):
             # thinking model hit max_tokens mid-reasoning; surface what exists
             text = message["reasoning_content"]
-        usage = data.get("usage") or {}
-        tokens_in = int(usage.get("prompt_tokens", 0))
-        tokens_out = int(usage.get("completion_tokens", 0))
         return WorkerResult(
             task_id=task.id,
             worker_id=self.worker_id,
@@ -168,6 +217,7 @@ class OpenAICompatWorker(BaseRunner):
             model=self.model,
             output=parse_output(text, expect_json=bool(task.output_schema)),
             raw_text=text,
+            tool_calls=tool_calls_made,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=(tokens_in + tokens_out) / 1000 * self.cost_per_1k_tokens,

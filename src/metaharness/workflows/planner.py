@@ -48,13 +48,41 @@ Rules:
 - Prefer few, well-scoped steps over many vague ones.
 - Set "hitl": true on any step whose result leaves the system (sending,
   publishing, paging) so a human approves it first.
-
+{tool_rules}
 Goal: {goal}
 
 Context keys available: {context_keys}
 
 Return ONLY a JSON object: {{"name": "...", "steps": [...]}}
 """
+
+TOOL_RULES = """\
+- If a step genuinely needs to touch files, the web, or external systems, set
+  "tools": [...] on that step, choosing ONLY from this catalog (name: purpose):
+{catalog}
+  Most steps need NO tools — omit the field unless the objective is impossible
+  without one.
+"""
+
+
+def _assign_tools(plan: dict[str, Any], registry) -> dict[str, Any]:
+    """Final tool subset per step: planner-proposed names that exist in the
+    registry, unioned with deterministic keyword detection over the objective.
+    Both signals are conservative — no signal means NO tools for the step."""
+    from metaharness.tools.registry import DEFAULT_SUBSET_CAP
+
+    for step in plan.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        proposed = step.get("tools")
+        valid = [t for t in proposed if registry.get(t)] if isinstance(proposed, list) else []
+        detected = registry.select_for(
+            str(step.get("objective", "")),
+            [str(b) for b in step.get("boundaries", []) if b] or None,
+        )
+        merged = valid + [t for t in detected if t not in valid]
+        step["tools"] = merged[:DEFAULT_SUBSET_CAP]
+    return plan
 
 
 def _slug(text: str, limit: int = 40) -> str:
@@ -175,15 +203,25 @@ async def plan_workflow(
     goal: str,
     planner: Runner,
     context: Optional[dict[str, Any]] = None,
+    tools=None,
 ) -> tuple[WorkflowSpec, str]:
-    """Returns (spec, source) where source is "planner" or "fallback"."""
+    """Returns (spec, source) where source is "planner" or "fallback".
+    `tools` is the harness ToolRegistry; when given, the planner sees the
+    catalog and each step gets its (small) tool subset assigned."""
     context = context or {}
+    tool_rules = ""
+    if tools is not None and tools.names():
+        catalog = "\n".join(
+            f"    {t.name}: {t.description}" for t in tools.all()
+        )
+        tool_rules = TOOL_RULES.format(catalog=catalog)
     task = Task(
         task_type=TaskType.PLANNING,
         objective=PLANNER_PROMPT.format(
             goal=goal,
             task_types=", ".join(t.value for t in TaskType),
             context_keys=sorted(context) or "(none)",
+            tool_rules=tool_rules,
         ),
         inputs={"goal": goal},
         output_schema=PLAN_SCHEMA,
@@ -195,6 +233,8 @@ async def plan_workflow(
         plan = None if result.error else _coerce_plan(result.output)
         if plan is not None:
             plan = _derive_checks(_normalize_plan(plan))
+            if tools is not None:
+                plan = _assign_tools(plan, tools)
             plan.setdefault("name", _slug(goal))
             try:
                 spec = WorkflowSpec.model_validate(plan)

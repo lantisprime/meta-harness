@@ -93,6 +93,8 @@ class Task(BaseModel):
     success_check: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
     max_attempts: int = 3
+    # tool names this task may call (small per-step subset, never the catalog)
+    tools: list[str] = Field(default_factory=list)
 
 
 class WorkerResult(BaseModel):

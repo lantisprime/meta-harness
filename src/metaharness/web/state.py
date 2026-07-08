@@ -23,6 +23,7 @@ from metaharness.identity.provenance import ProvenanceLog
 from metaharness.identity.registry import WorkerRegistry, registration_payload
 from metaharness.identity.tokens import TokenIssuer
 from metaharness.routing.router import CapabilityMatrix, Router
+from metaharness.tools import ToolRegistry, default_registry
 from metaharness.workflows.engine import WorkflowEngine
 
 
@@ -41,6 +42,7 @@ class HarnessState:
     budget: Optional[Budget] = None
     config: HarnessConfig = field(default_factory=HarnessConfig)
     config_path: Optional[object] = None  # Path; set when config should persist
+    tools: ToolRegistry = field(default_factory=default_registry)
 
     def save_config(self) -> None:
         """Write-through for the durable config, mirroring matrix/playbook."""
@@ -116,6 +118,8 @@ class HarnessState:
 
     def wire(self, runners: dict[Tier, Runner], journal_dir=None, threshold: float = 0.7) -> None:
         """Build router → executor → engine from a set of runners."""
+        for runner in runners.values():
+            self.attach_tools(runner)
         self.router = Router(runners, matrix=self.matrix, threshold=threshold)
         self.executor = TaskExecutor(
             self.router,
@@ -128,6 +132,14 @@ class HarnessState:
             observer=self.learning.observe,
         )
         self.engine = WorkflowEngine(self.executor, journal_dir=journal_dir)
+
+    def attach_tools(self, runner: Runner) -> None:
+        """Point a runner (and whatever it wraps) at the shared tool registry."""
+        target: Optional[object] = runner
+        while target is not None:
+            if hasattr(target, "tool_registry"):
+                target.tool_registry = self.tools
+            target = getattr(target, "inner", None)
 
     def planner_runner(self) -> Runner:
         """The most capable wired runner — used to plan workflows from goals."""
@@ -151,4 +163,5 @@ class HarnessState:
         if keypair is None:
             raise ValueError("runner needs a keypair to sign its results")
         self.register_worker(runner, keypair, tiers=[tier.value])
+        self.attach_tools(runner)
         self.router.runners[tier] = runner

@@ -79,6 +79,23 @@ def create_app(state: HarnessState) -> FastAPI:
     app.state.harness = state
 
     @app.on_event("startup")
+    async def _load_mcp_tools() -> None:
+        """Mirror every enabled configured MCP server's tools into the registry.
+        A server that fails to connect is reported loudly and skipped — its
+        tools are absent, never silently stubbed."""
+        if not state.config.mcp_servers:
+            return
+        from metaharness.tools import load_mcp_tools
+        try:
+            report = await load_mcp_tools(state.tools, state.config)
+        except RuntimeError as exc:  # mcp package missing
+            print(f"  MCP: {exc}")
+            return
+        for name, entry in report.items():
+            status = f"{entry['tools']} tool(s)" if entry.get("ok") else f"FAILED: {entry['detail']}"
+            print(f"  MCP {name}: {status}")
+
+    @app.on_event("startup")
     async def _resume_interrupted_runs() -> None:
         """Runs adopted from journals in RUNNING state were interrupted mid-run
         (crash/restart) — advance them so they finish or fail visibly instead of
@@ -150,7 +167,8 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await plan_workflow(req.goal, state.planner_runner(), context)
+        spec, source = await plan_workflow(req.goal, state.planner_runner(), context,
+                                            tools=state.tools)
         return {"workflow": spec.model_dump(mode="json"), "plan_source": source}
 
     @app.post("/api/runs")
@@ -184,7 +202,8 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await plan_workflow(req.goal, state.planner_runner(), context)
+        spec, source = await plan_workflow(req.goal, state.planner_runner(), context,
+                                            tools=state.tools)
         state.provenance.append(
             "orchestrator", "workflow.planned",
             {"goal": req.goal[:300], "source": source, "workflow": spec.name,
@@ -376,6 +395,13 @@ def create_app(state: HarnessState) -> FastAPI:
             "total": len(state.provenance),
             "entries": [e.model_dump(mode="json") for e in entries],
         }
+
+    @app.get("/api/tools")
+    async def tools() -> list[dict[str, Any]]:
+        return [
+            {"name": t.name, "description": t.description, "source": t.source}
+            for t in state.tools.all()
+        ]
 
     # -- routing / learning -----------------------------------------------------------
 
