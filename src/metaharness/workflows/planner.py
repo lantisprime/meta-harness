@@ -208,8 +208,12 @@ async def plan_workflow(
     planner: Runner,
     context: Optional[dict[str, Any]] = None,
     tools=None,
-) -> tuple[WorkflowSpec, str]:
-    """Returns (spec, source) where source is "planner" or "fallback".
+) -> tuple[WorkflowSpec, str, Optional[str]]:
+    """Returns (spec, source, fallback_reason) where source is "planner" or
+    "fallback" — the reason says WHY the planner was bypassed (worker error,
+    unparseable output, invalid spec) and is None when planning succeeded.
+    A silent fallback is undiagnosable; observed live 2026-07-08 when the
+    follow-up planner flaked with no trace anywhere.
     `tools` is the harness ToolRegistry; when given, the planner sees the
     catalog and each step gets its (small) tool subset assigned."""
     context = context or {}
@@ -234,7 +238,12 @@ async def plan_workflow(
         span.set_attribute("plan.goal", goal[:200])
         span.set_attribute("plan.model", planner.model)
         result = await planner.run(task)
+        reason: Optional[str] = None
+        if result.error:
+            reason = f"planner worker error: {result.error}"
         plan = None if result.error else _coerce_plan(result.output)
+        if plan is None and reason is None:
+            reason = "planner output had no parseable {\"steps\": [...]} JSON"
         if plan is not None:
             plan = _derive_checks(_normalize_plan(plan))
             if tools is not None:
@@ -244,11 +253,13 @@ async def plan_workflow(
                 spec = WorkflowSpec.model_validate(plan)
                 span.set_attribute("plan.source", "planner")
                 span.set_attribute("plan.steps", len(spec.steps))
-                return spec, "planner"
+                return spec, "planner", None
             except ValueError as exc:
                 span.set_attribute("plan.invalid", str(exc)[:200])
+                reason = f"planner produced an invalid workflow: {str(exc)[:300]}"
         span.set_attribute("plan.source", "fallback")
-        return fallback_spec(goal, context), "fallback"
+        span.set_attribute("plan.fallback_reason", (reason or "")[:200])
+        return fallback_spec(goal, context), "fallback", reason
 
 
 FOLLOWUP_GOAL = """\
@@ -296,14 +307,15 @@ async def plan_followup(
     planner: Runner,
     context: Optional[dict[str, Any]] = None,
     tools=None,
-) -> tuple[WorkflowSpec, str]:
+) -> tuple[WorkflowSpec, str, Optional[str]]:
     """Plan remediation for a finished run: the planner sees what actually
     happened (verdicts, reviewer findings, skips) and proposes the follow-up
-    workflow. Returns (spec, source) with source "followup" or "fallback" —
-    the caller shows it for human review; NOTHING runs without approval."""
+    workflow. Returns (spec, source, fallback_reason) with source "followup"
+    or "fallback" (inner reason preserved) — the caller shows it for human
+    review; NOTHING runs without approval."""
     summary = summarize_run(spec, state)
     followup_goal = FOLLOWUP_GOAL.format(goal=goal, summary=summary)
     context = dict(context or {})
     context.setdefault("prior_run_summary", summary)
-    plan, source = await plan_workflow(followup_goal, planner, context, tools=tools)
-    return plan, ("followup" if source == "planner" else source)
+    plan, source, reason = await plan_workflow(followup_goal, planner, context, tools=tools)
+    return plan, ("followup" if source == "planner" else source), reason

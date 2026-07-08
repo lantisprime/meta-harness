@@ -181,7 +181,7 @@ def create_app(state: HarnessState) -> FastAPI:
             template = get_template(req.workflow_type)
             if template is None:
                 raise HTTPException(422, f"unknown workflow_type {req.workflow_type!r}")
-            return template.instantiate(req.goal), f"template:{template.id}"
+            return template.instantiate(req.goal), f"template:{template.id}", None
         return await plan_workflow(req.goal, state.planner_runner(), context,
                                    tools=state.tools)
 
@@ -201,17 +201,19 @@ def create_app(state: HarnessState) -> FastAPI:
         if run_state.status.value not in ("completed", "failed"):
             raise HTTPException(409, "follow-up planning needs a finished run")
         goal = str(run_state.context.get("goal") or run_state.workflow)
-        followup, source = await plan_followup(
+        followup, source, fallback_reason = await plan_followup(
             goal, spec, run_state, state.planner_runner(),
             context=run_state.context, tools=state.tools)
         state.provenance.append(
             "orchestrator", "workflow.followup_planned",
             {"source_run": run_id, "plan_source": source,
+             "fallback_reason": fallback_reason,
              "workflow": followup.name, "steps": [s.id for s in followup.steps]},
             keypair=state.orchestrator_keypair,
         )
         return {"workflow": followup.model_dump(mode="json"),
                 "plan_source": source,
+                "fallback_reason": fallback_reason,
                 "prior_summary": summarize_run(self_spec, run_state)}
 
     @app.post("/api/workflows/validate")
@@ -245,8 +247,9 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await _plan(req, context)
-        return {"workflow": spec.model_dump(mode="json"), "plan_source": source}
+        spec, source, fallback_reason = await _plan(req, context)
+        return {"workflow": spec.model_dump(mode="json"), "plan_source": source,
+                "fallback_reason": fallback_reason}
 
     @app.post("/api/runs")
     async def start_run(req: StartRunRequest) -> dict[str, Any]:
@@ -279,10 +282,11 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await _plan(req, context)
+        spec, source, fallback_reason = await _plan(req, context)
         state.provenance.append(
             "orchestrator", "workflow.planned",
             {"goal": req.goal[:300], "source": source, "workflow": spec.name,
+             "fallback_reason": fallback_reason,
              "steps": [s.id for s in spec.steps]},
             keypair=state.orchestrator_keypair,
         )
@@ -291,6 +295,7 @@ def create_app(state: HarnessState) -> FastAPI:
         return {
             "run": run_state.model_dump(mode="json"),
             "plan_source": source,
+            "fallback_reason": fallback_reason,
             "workflow": spec.model_dump(mode="json"),
         }
 

@@ -419,6 +419,7 @@ async function makePlan(){
   if(!r.ok){ msg.textContent = 'planning failed: ' + (await r.text()).slice(0,140); return; }
   const data = await r.json();
   wiz.plan = data.workflow; wiz.planSource = data.plan_source;
+  wiz.fallbackReason = data.fallback_reason || '';
   setStep(2);
 }
 
@@ -469,7 +470,9 @@ function planNote(){
     : src === 'custom' ? badge('act', 'custom — built by hand')
     : src === 'followup' ? badge('act', 'follow-up — planned from the last run')
     : badge('warn', 'fallback: single step');
-  return base + (wiz.edited ? ' ' + badge('ok', 'edited by you') : '');
+  const why = (src === 'fallback' && wiz.fallbackReason)
+    ? `<div class="small dim" style="margin-top:4px">planner fell back: ${esc(wiz.fallbackReason)}</div>` : '';
+  return base + (wiz.edited ? ' ' + badge('ok', 'edited by you') : '') + why;
 }
 
 async function renderPlanStep(){
@@ -900,6 +903,7 @@ async function planFollowup(){
   const data = await r.json();
   wiz.plan = data.workflow;
   wiz.planSource = data.plan_source;
+  wiz.fallbackReason = data.fallback_reason || '';
   wiz.edited = false; wiz.editingStep = null;
   wiz.builderMode = false; wiz.yamlMode = false;
   toast('Follow-up plan ready — review and approve before it runs');

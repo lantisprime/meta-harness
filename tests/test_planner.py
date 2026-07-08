@@ -33,7 +33,7 @@ GOOD_PLAN = {
 
 async def test_planner_accepts_valid_plan():
     planner = ScriptedWorker("p", lambda t: dict(GOOD_PLAN))
-    spec, source = await plan_workflow("triage the incident", planner)
+    spec, source, _reason = await plan_workflow("triage the incident", planner)
     assert source == "planner"
     assert [s.id for s in spec.steps] == ["classify", "summarize", "page"]
     assert spec.steps[2].hitl
@@ -42,7 +42,7 @@ async def test_planner_accepts_valid_plan():
 async def test_planner_extracts_plan_from_prose():
     text = "Here is the plan:\n" + str(GOOD_PLAN).replace("'", '"').replace("True", "true")
     planner = ScriptedWorker("p", lambda t: text)
-    spec, source = await plan_workflow("triage", planner)
+    spec, source, _reason = await plan_workflow("triage", planner)
     assert source == "planner" and len(spec.steps) == 3
 
 
@@ -54,7 +54,7 @@ async def test_planner_extracts_plan_from_prose():
 ])
 async def test_planner_falls_back_on_bad_plans(bad_output):
     planner = ScriptedWorker("p", lambda t: bad_output)
-    spec, source = await plan_workflow("summarize the report", planner)
+    spec, source, _reason = await plan_workflow("summarize the report", planner)
     assert source == "fallback"
     assert len(spec.steps) == 1 and spec.steps[0].task_type == TaskType.GENERAL
     assert spec.steps[0].objective == "summarize the report"
@@ -144,7 +144,7 @@ async def test_live_local_model_plans_workflow():
         "ollama-planner", base_url=OLLAMA, model=models[0], tier=Tier.FRONTIER,
         temperature=0.0, max_tokens=4000,
     )
-    spec, source = await plan_workflow(
+    spec, source, _reason = await plan_workflow(
         "Read the customer complaint in context, classify its urgency as low or high, "
         "summarize it for support, and draft a reply email for human approval.",
         planner, context={"complaint": "my order arrived broken twice"},
@@ -168,7 +168,7 @@ async def test_planner_derives_one_of_from_objective():
          "inputs": {}},
     ]}
     planner = ScriptedWorker("p", lambda t: plan)
-    spec, source = await plan_workflow("classify it", planner)
+    spec, source, _reason = await plan_workflow("classify it", planner)
     assert source == "planner"
     assert spec.steps[0].success_check == {"one_of": ["low", "high"]}
 
@@ -181,7 +181,7 @@ async def test_planner_derives_arithmetic_equals_from_expression():
          "inputs": {"expression": "340 * 6"}},
     ]}
     planner = ScriptedWorker("p", lambda t: plan)
-    spec, _ = await plan_workflow("compute", planner)
+    spec, _, _reason = await plan_workflow("compute", planner)
     assert spec.steps[0].success_check == {"equals": 2040}
 
 
@@ -192,7 +192,7 @@ async def test_derived_checks_never_overwrite_planner_checks():
          "success_check": {"one_of": ["a", "b", "c"]}, "inputs": {}},
     ]}
     planner = ScriptedWorker("p", lambda t: plan)
-    spec, _ = await plan_workflow("classify", planner)
+    spec, _, _reason = await plan_workflow("classify", planner)
     assert spec.steps[0].success_check == {"one_of": ["a", "b", "c"]}
 
 
@@ -218,7 +218,7 @@ async def test_planner_derives_equals_from_exact_literal():
         plan = {"name": "x", "steps": [
             {"id": "e", "task_type": "extract", "objective": objective, "inputs": {}}]}
         planner = ScriptedWorker("p", lambda t, pl=plan: pl)
-        spec, _ = await plan_workflow("extract", planner)
+        spec, _, _reason = await plan_workflow("extract", planner)
         assert spec.steps[0].success_check == {"equals": "BLUE-HORIZON-7734"}, objective
 
 
@@ -227,7 +227,7 @@ async def test_no_literal_no_derived_check():
         {"id": "e", "task_type": "extract",
          "objective": "Extract the exact date from the text.", "inputs": {}}]}
     planner = ScriptedWorker("p", lambda t: plan)
-    spec, _ = await plan_workflow("extract", planner)
+    spec, _, _reason = await plan_workflow("extract", planner)
     assert spec.steps[0].success_check is None
 
 
@@ -288,3 +288,29 @@ async def test_followup_endpoint_feeds_run_outputs_to_planner(tmp_path):
         prov = (await client.get("/api/provenance")).json()
         assert any(e["action"] == "workflow.followup_planned" for e in prov["entries"])
         assert prov["chain"]["ok"]
+
+
+async def test_fallback_reason_says_why():
+    """Bug (live 2026-07-08): follow-up planning silently fell back to the
+    generic single-step plan — no reason in the span, the log, or the API.
+    plan_workflow now returns WHY: worker error, unparseable output, or an
+    invalid spec; None when planning succeeded."""
+    import json
+
+    # 1. unparseable output
+    _, source, reason = await plan_workflow(
+        "triage", ScriptedWorker("p", lambda t: "no json here at all"))
+    assert source == "fallback" and "parseable" in reason
+
+    # 2. invalid workflow (duplicate step ids)
+    bad = json.dumps({"steps": [
+        {"id": "a", "objective": "x"}, {"id": "a", "objective": "y"}]})
+    _, source, reason = await plan_workflow(
+        "triage", ScriptedWorker("p", lambda t: bad))
+    assert source == "fallback" and "invalid workflow" in reason
+
+    # 3. success → no reason
+    _, source, reason = await plan_workflow(
+        "triage", ScriptedWorker("p", lambda t: json.dumps(
+            {"steps": [{"id": "a", "objective": "x"}]})))
+    assert source == "planner" and reason is None

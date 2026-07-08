@@ -195,7 +195,7 @@ async def test_planner_assigns_tools_to_steps(registry, tmp_path):
 
     planner = ScriptedWorker("p", handler, tier=Tier.FRONTIER,
                              keypair=KeyPair.generate())
-    spec, source = await plan_workflow("do the job", planner, tools=registry)
+    spec, source, _reason = await plan_workflow("do the job", planner, tools=registry)
     assert source == "planner"
     by_id = {s.id: s for s in spec.steps}
     assert "web_fetch" in by_id["fetch"].tools
