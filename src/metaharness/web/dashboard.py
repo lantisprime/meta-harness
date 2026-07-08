@@ -182,6 +182,37 @@ tr:last-child td{border-bottom:0}
 .attempts .att b{font-family:var(--mono);font-weight:600}
 .attempts .att.fail b{color:var(--red)}
 .attempts .att.pass b{color:var(--green)}
+/* humanized step output: .out is plain-pre by default; .md/.json variants flow */
+.out{font-size:12.5px;white-space:pre-wrap;background:var(--hair);
+  border-radius:10px;padding:10px 12px;margin-top:8px;overflow-x:auto}
+.out.md{white-space:normal}
+.out.md p{margin:5px 0}
+.out.md .md-h{font-weight:700;margin:10px 0 4px}
+.out.md .md-h1{font-size:15px}.out.md .md-h2{font-size:14px}.out.md .md-h3{font-size:13px}
+.out.md ul,.out.md ol{margin:5px 0;padding-left:20px}
+.out.md li{margin:2px 0}
+.out.md code{font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,.07);
+  border-radius:4px;padding:1px 4px}
+.out.md pre.md-code{background:var(--dark);color:var(--on-dark);padding:10px 12px;
+  border-radius:8px;overflow-x:auto;white-space:pre;font-family:var(--mono);
+  font-size:11.5px;margin:8px 0}
+.out.md table{border-collapse:collapse;margin:8px 0;font-size:12px;background:var(--card)}
+.out.md th,.out.md td{border:1px solid var(--line2);padding:4px 8px;text-align:left;vertical-align:top}
+.out.md th{background:var(--hair)}
+.out.md blockquote{border-left:3px solid var(--line2);margin:6px 0;padding:2px 10px;color:var(--mut2)}
+.out.md hr{border:none;border-top:1px solid var(--line2);margin:10px 0}
+.out.md a{color:var(--accent)}
+.out.json{white-space:normal;font-family:var(--mono);font-size:12px}
+details.jt{margin:1px 0}
+details.jt details.jt,.jrow{margin-left:16px}
+.jt summary{cursor:pointer;color:var(--mut2);font-size:11.5px;user-select:none}
+.jrow{margin-top:1px}
+.jrow > .jk{color:var(--accent-dark);margin-right:6px}
+.jrow > .jk::after{content:':'}
+.jv.jstr{color:var(--green)}
+.jv.jnum{color:var(--amber)}
+.jv.jbool{color:var(--red)}
+.jv.jnull{color:var(--faint)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-soft);
   border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
   vertical-align:-1px}
@@ -262,7 +293,95 @@ tr:last-child td{border-bottom:0}
 <div class="toast" id="toast"></div>
 
 <script>
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- humanized output rendering (safe subset, no raw HTML ever) ----------
+   Contract: ALL text is escaped before any transform runs, code spans/fences are
+   frozen as text before inline markup, and link hrefs are allowlisted to
+   http(s)/mailto — worker output is untrusted input. */
+function safeHref(href){
+  const clean = href.replace(/&amp;/g, '&').trim();
+  return /^(https?:|mailto:)/i.test(clean) ? clean : null;
+}
+function mdInline(t){  // t is already escaped
+  const codes = [];
+  t = t.replace(/`([^`]+)`/g, (m, c) => {codes.push(c); return '\\u0000' + (codes.length - 1) + '\\u0000';});
+  t = t.replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>')
+       .replace(/(^|[\\s(])\\*([^*\\s][^*]*)\\*(?=[\\s).,;:!?]|$)/g, '$1<i>$2</i>')
+       .replace(/\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/g, (m, label, href) => {
+         const h = safeHref(href);
+         return h ? `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer">${label}</a>` : m;
+       });
+  return t.replace(/\\u0000(\\d+)\\u0000/g, (m, i) => '<code>' + codes[+i] + '</code>');
+}
+function mdTable(rows){
+  const cells = r => r.replace(/^\\s*\\||\\|\\s*$/g, '').split('|').map(c => c.trim());
+  const body = rows.filter(r => !/^\\s*\\|?[\\s:|-]+\\|?\\s*$/.test(r));
+  if(!body.length) return '';
+  const head = cells(body[0]);
+  const rest = body.slice(1).map(cells);
+  return '<table><tr>' + head.map(h => '<th>' + mdInline(h) + '</th>').join('') + '</tr>' +
+    rest.map(r => '<tr>' + r.map(c => '<td>' + mdInline(c) + '</td>').join('') + '</tr>').join('') + '</table>';
+}
+function renderMarkdown(src){
+  const lines = esc(src).split('\\n');
+  const out = []; let list = null;
+  const closeList = () => {if(list){out.push('</' + list + '>'); list = null;}};
+  for(let i = 0; i < lines.length; i++){
+    const l = lines[i];
+    if(/^\\s*```/.test(l)){  // fenced code: verbatim text, no transforms inside
+      const buf = []; i++;
+      while(i < lines.length && !/^\\s*```/.test(lines[i])) buf.push(lines[i++]);
+      closeList(); out.push('<pre class="md-code">' + buf.join('\\n') + '</pre>'); continue;
+    }
+    if(/^\\s*\\|.*\\|\\s*$/.test(l)){
+      const rows = [l];
+      while(i + 1 < lines.length && /^\\s*\\|.*\\|\\s*$/.test(lines[i + 1])) rows.push(lines[++i]);
+      closeList(); out.push(mdTable(rows)); continue;
+    }
+    const h = l.match(/^(#{1,6})\\s+(.*)$/);
+    if(h){ closeList(); out.push(`<div class="md-h md-h${h[1].length}">${mdInline(h[2])}</div>`); continue; }
+    const li = l.match(/^\\s*[-*]\\s+(.*)$/);
+    if(li){ if(list !== 'ul'){closeList(); out.push('<ul>'); list = 'ul';} out.push('<li>' + mdInline(li[1]) + '</li>'); continue; }
+    const oli = l.match(/^\\s*\\d+[.)]\\s+(.*)$/);
+    if(oli){ if(list !== 'ol'){closeList(); out.push('<ol>'); list = 'ol';} out.push('<li>' + mdInline(oli[1]) + '</li>'); continue; }
+    const q = l.match(/^\\s*&gt;\\s?(.*)$/);   // '>' arrives escaped
+    if(q){ closeList(); out.push('<blockquote>' + mdInline(q[1]) + '</blockquote>'); continue; }
+    if(/^\\s*([-_*])\\s*\\1\\s*\\1[\\s\\-_*]*$/.test(l)){ closeList(); out.push('<hr>'); continue; }
+    if(!l.trim()){ closeList(); continue; }
+    closeList(); out.push('<p>' + mdInline(l) + '</p>');
+  }
+  closeList();
+  return out.join('');
+}
+function jsonTree(v, depth = 0){
+  if(v === null) return '<span class="jv jnull">null</span>';
+  if(typeof v === 'string') return '<span class="jv jstr">"' + esc(v) + '"</span>';
+  if(typeof v === 'number') return '<span class="jv jnum">' + v + '</span>';
+  if(typeof v === 'boolean') return '<span class="jv jbool">' + v + '</span>';
+  const isArr = Array.isArray(v);
+  const keys = isArr ? null : Object.keys(v);
+  const n = isArr ? v.length : keys.length;
+  if(!n) return '<span class="jv jnull">' + (isArr ? '[]' : '{}') + '</span>';
+  const label = isArr ? `[${n} item${n === 1 ? '' : 's'}]` : `{${n} key${n === 1 ? '' : 's'}}`;
+  const rows = (isArr ? v.map((x, i) => [i, x]) : keys.map(k => [k, v[k]]))
+    .map(([k, x]) => `<div class="jrow"><span class="jk">${esc(k)}</span>${jsonTree(x, depth + 1)}</div>`).join('');
+  return `<details class="jt"${depth < 2 ? ' open' : ''}><summary>${label}</summary>${rows}</details>`;
+}
+function looksMarkdown(s){
+  return /(^|\\n)#{1,6}\\s|(^|\\n)\\s*[-*]\\s+\\S|\\*\\*[^*]+\\*\\*|```|(^|\\n)\\s*\\|.+\\|/.test(s);
+}
+function humanizeOutput(v){
+  if(v !== null && v !== undefined && typeof v === 'object')
+    return '<div class="out json">' + jsonTree(v) + '</div>';
+  const s = String(v ?? '');
+  const t = s.trim();
+  if(t.startsWith('{') || t.startsWith('[')){
+    try{ return '<div class="out json">' + jsonTree(JSON.parse(t)) + '</div>'; }catch(e){}
+  }
+  if(looksMarkdown(s)) return '<div class="out md">' + renderMarkdown(s) + '</div>';
+  return '<div class="out">' + esc(s) + '</div>';
+}
 const get = async p => (await fetch(p)).json();
 const post = (p, body) => fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
 const badge = (cls, text) => `<span class="badge ${cls}">${esc(text)}</span>`;
@@ -834,7 +953,7 @@ function renderRunStep(){
         return `<div class="planstep"><div class="n ${st.cls}">${st.icon || i + 1}</div>
           <div style="flex:1"><div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
           <div class="pd">${esc(s.objective)}</div>
-          ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          ${rec ? humanizeOutput(rec.output) : ''}
           ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
           </div></div>`;
       }).join('')}</div>`;
@@ -872,7 +991,7 @@ function renderDoneStep(){
         const skip = (run.skipped || {})[s.id];
         return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : (skip ? '⤳' : i + 1))}</div>
           <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : (skip ? badge('dim', 'skipped — ' + skip) : badge('dim','did not run'))}</div>
-          ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
+          ${rec ? humanizeOutput(rec.output) : ''}
           ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
           </div></div>`;
       }).join('')}</div>
@@ -957,8 +1076,7 @@ function renderRuns(runs){
       const open = openRuns.has(r.run_id);
       const outputs = open ? Object.entries(r.completed).map(([id, rec]) =>
         `<div style="margin:8px 0"><b class="mono small">${esc(id)}</b> ${badge(rec.verdict==='pass'?'ok':'dim', rec.verdict)}
-         <div class="small" style="white-space:pre-wrap;background:var(--hair);border-radius:10px;padding:10px 12px;margin-top:5px">${esc(
-           typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div></div>`).join('') : '';
+         ${humanizeOutput(rec.output)}</div>`).join('') : '';
       return `<tr onclick="toggleRun('${r.run_id}')" style="cursor:pointer">
         <td class="mono small">${open ? '▾' : '▸'} ${esc(r.run_id)}</td><td>${esc(r.workflow)}</td>
         <td>${statusBadge(r.status)}${fail}</td>

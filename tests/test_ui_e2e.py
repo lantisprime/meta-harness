@@ -558,3 +558,39 @@ def test_branching_workflow_in_wizard_skips_untaken_path(page, server):
     done_text = page.locator("#wiz-body").inner_text()
     assert "if classify equals high" in done_text   # the skip reason names it
     assert page.locator(".planstep .n.done").count() == 2  # classify + archive
+
+
+def test_humanized_output_markdown_json_and_xss(page, server):
+    """v0.4 humanize contract: markdown subset renders, JSON becomes a
+    collapsible tree, and worker output can NEVER smuggle markup or script."""
+    base, _ = server
+    page.goto(base)
+    page.wait_for_selector(".stepper .s.on")
+
+    # markdown: heading + GFM table + inline styles + allowlisted link
+    md = "# Title\\n\\n| a | b |\\n|---|---|\\n| 1 | 2 |\\n\\n**bold** `code` [ok](https://example.com)"
+    html = page.evaluate(f"humanizeOutput('{md}')")
+    assert "<table>" in html and "<th>a</th>" in html and "<td>1</td>" in html
+    assert "<b>bold</b>" in html and "<code>code</code>" in html
+    assert 'href="https://example.com"' in html and 'rel="noopener noreferrer"' in html
+
+    # JSON string → typed collapsible tree
+    html = page.evaluate(
+        "humanizeOutput(JSON.stringify({all_met: true, criteria: ['a', 2]}))")
+    assert "<details" in html and "jbool" in html and "jstr" in html and "jnum" in html
+
+    # XSS probes: raw HTML inert, javascript:/data: links refused,
+    # no transforms inside code fences
+    html = page.evaluate("humanizeOutput('<img src=x onerror=alert(1)>')")
+    assert "<img" not in html
+    html = page.evaluate("humanizeOutput('# h\\n<script>alert(1)</script>')")
+    assert "<script" not in html
+    # refused schemes stay inert TEXT (never become an href)
+    html = page.evaluate("humanizeOutput('[x](javascript:alert(1)) **b**')")
+    assert "href" not in html and "<b>b</b>" in html
+    html = page.evaluate("humanizeOutput('[x](data:text/html,foo) **b**')")
+    assert "href" not in html
+    html = page.evaluate("humanizeOutput('```\\n**not bold** <b>raw</b>\\n```')")
+    assert "<b>" not in html.replace("**not bold**", "")
+    # step ids with quotes can't break out of attributes (esc covers ')
+    assert page.evaluate("esc(\"a'b\")") == "a&#39;b"
