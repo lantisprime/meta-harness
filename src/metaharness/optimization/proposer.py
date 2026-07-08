@@ -204,6 +204,21 @@ class RuleProposer:
                 f"{len(schema_fails)} schema-shaped failures — retry naming the violation",
                 {"schema_guard_retries": params.schema_guard_retries + 1},
             ))
+        format_fails = [
+            f for f in fails
+            if f.get("task_type") != TaskType.ARITHMETIC.value
+            and "expected" in str(f.get("detail", ""))
+        ]
+        if format_fails and not params.prompt_directives:
+            out.append((
+                f"{len(format_fails)} answers were close but not exact — an additive "
+                "directive pins the output format (prompt rewrites are high-risk; "
+                "additions are not)",
+                {"prompt_directives": [
+                    "Answer with only the requested value — one word or number, "
+                    "no explanation, no punctuation."
+                ]},
+            ))
         if fails and params.self_consistency_k < 7:
             out.append((
                 f"{len(fails)} residual failures — wrong answers scatter, majority voting recovers them",

@@ -1615,7 +1615,7 @@ const FINDING_BADGE = {
   not_worth_it: ['dim', 'dead end'], coverage: ['warn', 'thin evidence'],
   info: ['dim', 'note'],
 };
-const TUNE = { suite: 'mixed' };
+const TUNE = { suite: 'mixed', proposer: 'rule' };
 
 /* One plain-language sentence wrapping up a suite's last search — shared by
    the tuning card and the Home landing. */
@@ -1640,6 +1640,11 @@ function renderTuning(suites){
       padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
       ${['mixed','classify','extract','math'].map(n =>
         `<option value="${n}" ${TUNE.suite === n ? 'selected' : ''}>${n} suite</option>`).join('')}</select>
+    <select id="tune-proposer" style="border:1px solid var(--line2);border-radius:999px;
+      padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
+      <option value="rule" ${TUNE.proposer === 'rule' ? 'selected' : ''}>built-in ideas</option>
+      <option value="llm" ${TUNE.proposer === 'llm' ? 'selected' : ''}>✦ frontier agent reads the traces</option>
+    </select>
     <button class="btn ghost" data-tune-start="1" ${busy ? 'disabled' : ''}>
       ${busy ? 'searching…' : 'Tune harness'}</button></div>`;
   if(!suites.length) return controls + '<div class="empty">no experiments yet — pick a suite and hit Tune harness (or run <span class="mono">metaharness optimize</span>)</div>';
@@ -1769,7 +1774,7 @@ document.getElementById('tuning').addEventListener('click', async ev => {
     refreshConsole(); return;
   }
   if(ev.target.closest('button[data-tune-start]')){
-    const r = await post('/api/optimization/runs', {suite: TUNE.suite});
+    const r = await post('/api/optimization/runs', {suite: TUNE.suite, proposer: TUNE.proposer});
     toast(r.ok ? `Tuning started on the ${TUNE.suite} suite — watch it think out loud here`
                : 'Could not start — a search may already be running');
     refreshConsole();
@@ -1777,6 +1782,7 @@ document.getElementById('tuning').addEventListener('click', async ev => {
 });
 document.getElementById('tuning').addEventListener('change', ev => {
   if(ev.target.id === 'tune-suite') TUNE.suite = ev.target.value;
+  if(ev.target.id === 'tune-proposer') TUNE.proposer = ev.target.value;
 });
 
 function renderSpans(spans){

@@ -300,3 +300,25 @@ async def test_approval_preserves_user_wrappers_and_writes_active(wired_state, t
         r = getattr(r, "inner", None)
     assert chain.count("SelfCritique") == 1 and "ToolOffload" not in chain
     assert "SelfConsistency" in chain
+
+
+async def test_tuning_accepts_llm_proposer_and_rejects_unknown(wired_state, tmp_path):
+    """The web Tune button can hand proposing to the wired frontier agent —
+    the paper-shaped proposer, able to hypothesize prompt directives."""
+    import asyncio
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.post("/api/optimization/runs",
+                             json={"suite": "math", "proposer": "psychic"})).status_code == 422
+        resp = await c.post("/api/optimization/runs",
+                            json={"suite": "math", "rounds": 1, "k": 1, "proposer": "llm"})
+        assert resp.status_code == 202
+        for _ in range(200):
+            suites = (await c.get("/api/optimization")).json()
+            if suites and not suites[0]["running"]:
+                break
+            await asyncio.sleep(0.05)
+        assert suites[0]["report"] is not None   # the llm-proposer search completed

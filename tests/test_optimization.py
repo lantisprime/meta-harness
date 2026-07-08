@@ -641,3 +641,14 @@ def test_serve_boot_replays_the_approved_suite(tmp_path, monkeypatch):
     runners = {Tier.SMALL: base}
     cli._apply_promoted(runners)
     assert runners[Tier.SMALL] is base
+
+
+async def test_rule_proposer_suggests_a_prompt_directive_for_format_misses(tmp_path):
+    """Profiling → prompt improvement: near-miss failures on non-arithmetic
+    tasks get an ADDITIVE output-format directive (never a rewrite), tried
+    through the same held-out gate as any other knob."""
+    close_miss = {"task_id": "t3", "task_type": "classify", "verdict": "fail",
+                  "detail": "expected 'positive', got 'Positive.'", "scorer": "deterministic"}
+    proposal = await RuleProposer().propose(seeded_ledger(tmp_path, [close_miss]))
+    assert "prompt_directives" in proposal.delta
+    assert "one word" in proposal.delta["prompt_directives"][0]

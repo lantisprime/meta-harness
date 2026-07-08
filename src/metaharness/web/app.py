@@ -38,6 +38,7 @@ class TuneRequest(BaseModel):
     suite: str = "mixed"
     rounds: int = 6
     k: int = 3
+    proposer: str = "rule"   # 'rule' | 'llm' — llm reads raw traces with the frontier agent
 
 
 class ApprovalDecision(BaseModel):
@@ -235,6 +236,7 @@ def create_app(state: HarnessState) -> FastAPI:
         from metaharness.optimization import (
             CandidateLedger,
             HarnessOptimizer,
+            LLMProposer,
             RuleProposer,
             search_and_holdout,
         )
@@ -247,12 +249,20 @@ def create_app(state: HarnessState) -> FastAPI:
             search, holdout = search_and_holdout(req.suite)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+        if req.proposer == "llm":
+            # the frontier agent does the counterfactual diagnosis over raw
+            # traces — the paper-shaped proposer, incl. prompt-directive ideas
+            proposer = LLMProposer(state.planner_runner())
+        elif req.proposer == "rule":
+            proposer = RuleProposer()
+        else:
+            raise HTTPException(422, f"unknown proposer {req.proposer!r}")
         wired = state.router.runners.get(Tier.SMALL) or next(iter(state.router.runners.values()))
         target = _tuning_base(wired)
         ledger = CandidateLedger(Path(state.optimization_root) / req.suite)
         seed = ledger.promoted_params()  # tune from what's live, not from scratch
         optimizer = HarnessOptimizer(
-            lambda: target, RuleProposer(), search, holdout, ledger,
+            lambda: target, proposer, search, holdout, ledger,
             k=req.k, seed_params=seed, auto_promote=False,
         )
         _tuning_running.add(req.suite)
