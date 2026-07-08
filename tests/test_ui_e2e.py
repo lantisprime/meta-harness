@@ -416,6 +416,78 @@ def test_approval_never_flashes_an_error(page, server):
     assert bad == [], f"error toast flashed during approvals: {bad}"
 
 
+def test_console_run_ledger_reads_plain_language(page, server):
+    """Humanize pass: console runs are ledger rows — the goal (capitalized) is
+    the title, the run id and relative date are demoted to a mono meta line,
+    each run gets one plain-language story, and the expanded row uses humanized
+    verdict wording instead of raw enum values."""
+    import httpx
+    base, _ = server
+    wf = (
+        "name: ledger-demo\n"
+        "steps:\n"
+        "  - id: draft_reply\n"
+        "    task_type: transform\n"
+        "    objective: Draft a short reply.\n"
+    )
+    resp = httpx.post(base + "/api/runs", json={
+        "workflow_yaml": wf,
+        "context": {"goal": "prove the ledger reads like english"}})
+    assert resp.status_code == 200, resp.text
+
+    page.goto(base)
+    page.click("#nav-console")
+    page.wait_for_selector(".guide b:has-text('Why this page exists')")
+    row = page.locator(".runrow", has_text="Prove the ledger reads like english")
+    row.wait_for()
+    # the machine-y composite name never leads the row
+    assert "ledger-demo" not in row.locator(".rr-title").inner_text()
+    meta = row.locator(".rr-meta").inner_text()
+    assert "run_" in meta and "ago" in meta or "just now" in meta
+    # wait for the mock run to finish, then check the plain-language story
+    page.wait_for_selector(".runrow:has-text('Finished —')", timeout=20_000)
+    # expand: humanized verdict wording (no raw 'unverified' enum text)
+    row.click()
+    page.wait_for_selector(".rr-out")
+    head = page.locator(".rr-out-h").first.inner_text()
+    assert "draft reply" in head          # step id prettified
+    assert "unverified" not in head       # enum value never shown raw
+    assert row.locator(".badge", has_text="done").count() >= 1
+
+
+def test_console_approval_survives_hostile_step_id(page, server):
+    """Regression (codex review P1): step ids are user-authored, so an id
+    containing a quote must not break the console's Approve button. The fix
+    moved run/step ids out of inline JS strings into HTML-escaped data-*
+    attributes with a delegated click handler."""
+    import httpx
+    base, _ = server
+    wf = (
+        "name: hostile-gate\n"
+        "steps:\n"
+        "  - id: \"it's-a-gate\"\n"
+        "    task_type: transform\n"
+        "    objective: Wait for a human.\n"
+        "    hitl: true\n"
+    )
+    resp = httpx.post(base + "/api/runs", json={"workflow_yaml": wf, "context": {}})
+    assert resp.status_code == 200, resp.text
+
+    errors: list[str] = []
+    handler = lambda e: errors.append(str(e))  # noqa: E731
+    page.on("pageerror", handler)
+    try:
+        page.goto(base)
+        page.click("#nav-console")
+        row = page.locator(".runrow", has_text="Hostile gate")
+        row.wait_for()
+        row.locator("button:has-text('Approve')").click()
+        page.wait_for_selector(".runrow:has-text('Finished')", timeout=20_000)
+    finally:
+        page.remove_listener("pageerror", handler)
+    assert errors == [], f"page JS errors during hostile-id approval: {errors}"
+
+
 def test_custom_workflow_built_by_wizard_runs(page, server):
     """Wizard-driven custom workflow: two steps authored step-by-step (with a
     verifiable check, a dependency and a gate), reviewed, run to completion."""

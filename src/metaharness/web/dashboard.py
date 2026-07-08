@@ -112,6 +112,22 @@ tr:last-child td{border-bottom:0}
 .chainline{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:13.5px}
 .headhash{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 
+/* run ledger (Console) — one plain-language row per run */
+.runrow{display:flex;gap:14px;align-items:center;padding:12px 2px;
+  border-bottom:1px solid var(--hair);cursor:pointer}
+.runrow:hover .rr-title{color:var(--accent)}
+.rr-main{flex:1;min-width:0}
+.rr-title{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.rr-meta{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:3px}
+.rr-story{font-size:12.5px;color:var(--mut);text-align:right;flex:0 1 auto;max-width:44%}
+.rr-detail{padding:2px 0 14px;border-bottom:1px solid var(--hair)}
+.rr-out{border:1px solid var(--hair);border-radius:12px;padding:12px 14px;margin:10px 0}
+.rr-out-h{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600}
+.guide .fx{font-family:var(--serif);font-style:italic;font-size:19px;
+  color:var(--accent);line-height:1.3}
+.guide .cta{align-self:center;margin-left:auto;flex:0 0 auto}
+
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--mut2);margin-bottom:6px}
 .field input,.field textarea,.field select{width:100%;border:1px solid var(--line2);
@@ -280,10 +296,14 @@ details.jt details.jt,.jrow{margin-left:16px}
 <div id="view-console" class="view" style="display:none">
   <div class="eyebrow">Observability</div>
   <h1 class="greet">Everything the harness knows, live.</h1>
+  <div class="guide"><div class="fx">ƒ</div><div><b>Why this page exists</b>
+    <p>Every run, every agent, and every lesson the harness has learned — in plain
+    language, updating live. Click any run for its full story.</p></div>
+    <button class="btn cta" onclick="showView('wizard')">Start a run</button></div>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
     <div class="card"><h2>Runs</h2>
-      <div class="sub">Click a run to see step outputs</div>
+      <div class="sub">Newest first — click one to see what each step produced</div>
       <div id="runs" class="empty">loading…</div></div>
     <div class="card"><h2>Registered workers</h2>
       <div class="sub">Identities admitted via signed challenge–response</div>
@@ -401,7 +421,47 @@ function humanizeOutput(v){
 const get = async p => (await fetch(p)).json();
 const post = (p, body) => fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
 const badge = (cls, text) => `<span class="badge ${cls}">${esc(text)}</span>`;
-const statusBadge = s => badge({completed:'ok', failed:'bad', awaiting_approval:'warn', running:'act'}[s] || 'dim', String(s).replace('_',' '));
+const statusBadge = s => badge({completed:'ok', failed:'bad', awaiting_approval:'warn', running:'act'}[s] || 'dim',
+  {completed:'done', failed:'failed', awaiting_approval:'needs you', running:'running'}[s] || String(s).replace('_',' '));
+
+/* plain-language helpers: humans read goals and relative time, not ids and epochs */
+function ago(ts){
+  if(!ts) return '';
+  const s = Math.max(0, Date.now()/1000 - ts);
+  if(s < 50) return 'just now';
+  const m = Math.round(s/60); if(m < 60) return m + ' min ago';
+  const h = Math.round(s/3600); if(h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+  const d = Math.round(s/86400); if(d < 7) return d + (d === 1 ? ' day ago' : ' days ago');
+  return new Date(ts*1000).toLocaleDateString();
+}
+const stepName = id => String(id || '').replace(/[-_]/g, ' ');
+function runTitle(r){
+  const goal = (r.context || {}).goal;
+  let t = goal || r.workflow || r.run_id;
+  if(!goal){
+    if(t.includes(':')) t = t.slice(t.indexOf(':') + 1);   // strip template prefix
+    if(!t.includes(' ')) t = t.replace(/[-_]/g, ' ');       // slug -> words
+  }
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function runKind(r){
+  const w = r.workflow || '';
+  return w.includes(':') ? w.split(':')[0].replace(/[-_]/g, ' ') : '';
+}
+function runStory(r){
+  const recs = Object.values(r.completed || {});
+  const n = recs.length, v = recs.filter(x => x.verdict === 'pass').length;
+  const steps = c => c + (c === 1 ? ' step' : ' steps');
+  if(r.status === 'running') return n ? `Working — ${steps(n)} done so far` : 'Working — starting up';
+  if(r.status === 'awaiting_approval') return `Paused — “${stepName(r.awaiting)}” needs your approval`;
+  if(r.status === 'completed') return v === n && n
+    ? `Finished — all ${steps(n)} checked out`
+    : `Finished — ${steps(n)} done, ${v} verified`;
+  if(r.status === 'failed') return r.failed_step
+    ? `Stopped at “${stepName(r.failed_step)}” — open it to see why`
+    : 'Stopped before it could finish';
+  return '';
+}
 function toast(msg){ const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2600); }
 
@@ -1107,37 +1167,49 @@ function renderTiles(runs, workers, prov, playbook){
   const chainOk = prov.chain.ok;
   return `
     <div class="tile"><div class="val">${runs.length}</div>
-      <div class="lab">runs (${active} active, ${runs.filter(r=>r.status==='completed').length} completed)</div></div>
+      <div class="lab">runs so far — ${active} active, ${runs.filter(r=>r.status==='completed').length} finished</div></div>
     <div class="tile"><div class="val">${workers.filter(w=>w.active).length}</div>
-      <div class="lab">active worker identities</div></div>
+      <div class="lab">agents ready to work</div></div>
     <div class="tile"><div class="val ${chainOk?'green':'red'}">${chainOk?'✔':'✘'} ${prov.total}</div>
-      <div class="lab">provenance entries — chain ${chainOk?'intact':'BROKEN'}</div></div>
+      <div class="lab">${chainOk ? 'signed actions — audit trail intact' : 'audit trail BROKEN — do not trust these results'}</div></div>
     <div class="tile"><div class="val">${playbook.filter(b=>b.active).length}</div>
-      <div class="lab">active playbook bullets</div></div>`;
+      <div class="lab">lessons guiding new runs</div></div>`;
 }
 
+const verdictBadge = v => badge(v === 'pass' ? 'ok' : v === 'fail' ? 'bad' : 'dim',
+  v === 'pass' ? 'verified' : v === 'fail' ? 'failed its check' : 'couldn’t be checked');
+
 function renderRuns(runs){
-  if(!runs.length) return '<div class="empty">no runs yet</div>';
-  return '<table><tr><th>run</th><th>workflow</th><th>status</th><th>steps</th><th></th></tr>' +
-    runs.slice().reverse().map(r => {
-      const steps = Object.entries(r.completed).map(([id, rec]) =>
-        `<span class="mono small">${esc(id)}</span> ${badge(rec.verdict==='pass'?'ok':'dim', rec.verdict)}`).join('<br>');
-      const hitl = r.status === 'awaiting_approval'
-        ? `<button class="btn" onclick="event.stopPropagation();resolveApproval('${r.run_id}','${esc(r.awaiting)}',true)">Approve</button>`
-        : '';
-      const fail = r.failed_step ? `<br><span class="red mono small">at ${esc(r.failed_step)}</span>` : '';
-      const open = openRuns.has(r.run_id);
-      const outputs = open ? Object.entries(r.completed).map(([id, rec]) =>
-        `<div style="margin:8px 0"><b class="mono small">${esc(id)}</b> ${badge(rec.verdict==='pass'?'ok':'dim', rec.verdict)}
-         ${humanizeOutput(rec.output)}</div>`).join('') : '';
-      return `<tr onclick="toggleRun('${r.run_id}')" style="cursor:pointer">
-        <td class="mono small">${open ? '▾' : '▸'} ${esc(r.run_id)}</td><td>${esc(r.workflow)}</td>
-        <td>${statusBadge(r.status)}${fail}</td>
-        <td>${steps || '<span class="faint">—</span>'}</td><td>${hitl}</td></tr>` +
-        (open ? `<tr><td colspan="5" style="padding:4px 0 14px">${outputs ||
-          '<span class="empty">no outputs recorded yet</span>'}</td></tr>` : '');
-    }).join('') + '</table>';
+  if(!runs.length) return '<div class="empty">no runs yet — start one from the Run tab</div>';
+  return runs.slice().reverse().map(r => {
+    const open = openRuns.has(r.run_id);
+    const kind = runKind(r);
+    const hitl = r.status === 'awaiting_approval'
+      ? `<button class="btn" data-approve="1" data-run="${esc(r.run_id)}" data-step="${esc(r.awaiting)}">Approve</button>
+         <button class="btn reject" data-approve="0" data-run="${esc(r.run_id)}" data-step="${esc(r.awaiting)}">Reject</button>`
+      : '';
+    const detail = !open ? '' : `<div class="rr-detail">` +
+      (Object.entries(r.completed).map(([id, rec]) =>
+        `<div class="rr-out"><div class="rr-out-h">${esc(stepName(id))} ${verdictBadge(rec.verdict)}</div>
+         ${humanizeOutput(rec.output)}</div>`).join('')
+       || '<div class="empty">nothing recorded yet — outputs appear here as steps finish</div>') + '</div>';
+    return `<div class="runrow" data-run="${esc(r.run_id)}">
+      <div class="rr-main">
+        <div class="rr-title">${open ? '▾' : '▸'} ${esc(runTitle(r))}</div>
+        <div class="rr-meta">${esc(r.run_id)}${kind ? ' · ' + esc(kind) : ''}${r.updated_at ? ' · ' + esc(ago(r.updated_at)) : ''}</div></div>
+      <div class="rr-story">${esc(runStory(r))}</div>
+      ${statusBadge(r.status)}${hitl}</div>${detail}`;
+  }).join('');
 }
+
+/* Delegated clicks: step ids are user-authored, so they ride in data-* attributes
+   (HTML-escaped) instead of being spliced into inline JS strings. */
+document.getElementById('runs').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-approve]');
+  if(b){ resolveApproval(b.dataset.run, b.dataset.step, b.dataset.approve === '1'); return; }
+  const row = ev.target.closest('.runrow');
+  if(row) toggleRun(row.dataset.run);
+});
 
 function renderWorkers(ws){
   if(!ws.length) return '<div class="empty">none registered</div>';
