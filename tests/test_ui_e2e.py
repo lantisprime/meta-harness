@@ -69,7 +69,7 @@ def page(server):
 
 def test_run_wizard_loads_with_mock_tiers(page, server):
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     assert "metaharness" in page.title()
     page.wait_for_selector(".stepper .s.on")
     # mock workers fill all three tiers -> ready badges + enabled continue
@@ -81,7 +81,7 @@ def test_run_wizard_loads_with_mock_tiers(page, server):
 
 def test_settings_provider_wizard_end_to_end(page, server):
     base, home = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("h2:has-text('Where do completions come from?')")
     page.click("button:has-text('+ Add a provider')")
@@ -106,7 +106,7 @@ def test_settings_provider_wizard_end_to_end(page, server):
 
 def test_agent_wizard_with_archetype_prompt(page, server):
     base, home = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("h2:has-text('Who does the work?')")
     page.click("#settings-body >> button:has-text('+ Add an agent')")
@@ -141,7 +141,7 @@ def test_agent_wizard_with_archetype_prompt(page, server):
 
 def test_goal_step_template_plan_and_full_run(page, server):
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".tierrow")
     page.click("button:has-text('Continue →')")
 
@@ -181,7 +181,7 @@ def test_goal_step_template_plan_and_full_run(page, server):
 def test_provider_wizard_lists_models_live(page, server):
     """The default-model field offers what the provider actually serves."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("h2:has-text('Where do completions come from?')")
     page.click("button:has-text('+ Add a provider')")
@@ -208,7 +208,7 @@ def test_provider_wizard_lists_models_live(page, server):
 def test_agent_wizard_coding_cli_models_and_key_hint(page, server):
     """Coding CLIs: own-credentials hint + model choices from the CLI."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("h2:has-text('Who does the work?')")
     import httpx
@@ -240,7 +240,7 @@ def test_agent_wizard_coding_cli_models_and_key_hint(page, server):
 def test_agent_wizard_subscription_kind(page, server):
     """Subscription access via signed-in Claude Code / Codex CLI."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     # settings home shows subscription status chips
     page.wait_for_selector(".kv:has-text('SUBSCRIPTIONS')")
@@ -267,7 +267,7 @@ def test_agent_test_sends_provider_ref_not_stale_url(page, server):
     through the provider — a lingering direct-URL default (localhost:1234)
     must never reach the request (bug: DeepSeek test hit LM Studio)."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("h2:has-text('Who does the work?')")
     page.click("#settings-body >> button:has-text('+ Add an agent')")
@@ -302,7 +302,7 @@ def test_agent_test_sends_provider_ref_not_stale_url(page, server):
 def test_agent_edit_flow_readmits_same_id(page, server):
     """Edit = retire + re-register under the same id — must not 409."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector(".prov-item:has-text('e2e-reviewer')")
     page.click(".prov-item:has-text('e2e-reviewer') >> button:has-text('Edit')")
@@ -322,7 +322,7 @@ def test_sweep_every_action_button_is_wired(page, server):
     base, _ = server
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".tierrow")
 
     def dead_handlers():
@@ -366,7 +366,7 @@ def test_sweep_every_action_button_is_wired(page, server):
     check("agent wizard step 3 · role & prompt")
     page.click("button:has-text('← Back')"); page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
-    page.click("#nav-console"); page.wait_for_selector(".tile")
+    page.click("#nav-console"); page.wait_for_selector("#tiles .tile")
     check("console")
     page.click("#nav-wizard"); page.wait_for_selector(".tierrow")
     page.click("button:has-text('Continue →')"); page.wait_for_selector("#goal")
@@ -382,7 +382,7 @@ def test_approval_never_flashes_an_error(page, server):
     not awaiting approval'. Now the banner hides instantly and every toast
     across a double-clicked triple-gate run is recorded and error-free."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     # record every toast the UI ever shows during the run
     page.evaluate("""() => {
       window.__toasts = [];
@@ -435,7 +435,7 @@ def test_console_run_ledger_reads_plain_language(page, server):
         "context": {"goal": "prove the ledger reads like english"}})
     assert resp.status_code == 200, resp.text
 
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-console")
     page.wait_for_selector("#view-console .guide b:has-text('Why this page exists')")
     row = page.locator(".runrow", has_text="Prove the ledger reads like english")
@@ -460,7 +460,7 @@ def test_settings_reads_as_numbered_questions(page, server):
     numbered plain-language questions, the guide banner explains the page, and
     the tool catalog is collapsed behind a summary instead of dumped inline."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-settings")
     page.wait_for_selector("#view-settings .guide b:has-text('Why this page exists')")
     for q in ("1 · Where do completions come from?", "2 · Who does the work?",
@@ -481,7 +481,7 @@ def test_console_panels_speak_plain_language(page, server):
     fallback for codes the map doesn't know), and agent rows that demote the
     public key to a meta line."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-console")
     for heading in ("Agents", "Audit trail", "Who’s good at what",
                     "Lessons learned", "Why runs fail", "Under the hood"):
@@ -508,7 +508,7 @@ def test_console_cards_paginate(page, server):
             "workflow_yaml": wf,
             "context": {"goal": f"pagination probe number {i}"}})
 
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.click("#nav-console")
     page.wait_for_selector("#runs .pager")
     assert page.locator("#runs .runrow").count() == 8
@@ -550,7 +550,7 @@ def test_console_ledger_survives_non_string_goal(page, server):
     handler = lambda e: errors.append(str(e))  # noqa: E731
     page.on("pageerror", handler)
     try:
-        page.goto(base)
+        page.goto(base); page.click("#nav-wizard")
         page.click("#nav-console")
         row = page.locator(".runrow", has_text="Numeric goal demo")
         row.wait_for()
@@ -581,7 +581,7 @@ def test_console_approval_survives_hostile_step_id(page, server):
     handler = lambda e: errors.append(str(e))  # noqa: E731
     page.on("pageerror", handler)
     try:
-        page.goto(base)
+        page.goto(base); page.click("#nav-wizard")
         page.click("#nav-console")
         row = page.locator(".runrow", has_text="Hostile gate")
         row.wait_for()
@@ -596,7 +596,7 @@ def test_custom_workflow_built_by_wizard_runs(page, server):
     """Wizard-driven custom workflow: two steps authored step-by-step (with a
     verifiable check, a dependency and a gate), reviewed, run to completion."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".tierrow")
     page.click("button:has-text('Continue →')")
     page.wait_for_selector(".pill:has-text('Custom (build by hand)')")
@@ -646,7 +646,7 @@ def test_template_plan_is_editable_inline_and_via_yaml(page, server):
     """The LLM/template-suggested plan is editable: inline step edit, delete,
     reorder, plus YAML mode with validation that refuses bad specs."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".tierrow")
     page.click("button:has-text('Continue →')")
     page.wait_for_selector(".pill:has-text('Software engineering')")
@@ -689,7 +689,7 @@ def test_branching_workflow_in_wizard_skips_untaken_path(page, server):
     option, 'low') -> page-oncall runs only 'if classify equals high' and is
     visibly SKIPPED; archive runs 'if classify equals low'."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".tierrow")
     page.click("button:has-text('Continue →')")
     page.wait_for_selector(".pill:has-text('Custom (build by hand)')")
@@ -748,7 +748,7 @@ def test_humanized_output_markdown_json_and_xss(page, server):
     """v0.4 humanize contract: markdown subset renders, JSON becomes a
     collapsible tree, and worker output can NEVER smuggle markup or script."""
     base, _ = server
-    page.goto(base)
+    page.goto(base); page.click("#nav-wizard")
     page.wait_for_selector(".stepper .s.on")
 
     # markdown: heading + GFM table + inline styles + allowlisted link
@@ -778,3 +778,46 @@ def test_humanized_output_markdown_json_and_xss(page, server):
     assert "<b>" not in html.replace("**not bold**", "")
     # step ids with quotes can't break out of attributes (esc covers ')
     assert page.evaluate("esc(\"a'b\")") == "a&#39;b"
+
+
+def test_home_landing_shows_next_action_and_metrics(page, server):
+    """The calm landing: eyebrow date, one next-action card, stat tiles, and
+    orientation cards — Home is the default view."""
+    base, _ = server
+    page.goto(base)
+    page.wait_for_selector(".next-action h2")
+    assert page.locator("#nav-home.on").count() == 1
+    assert page.locator("#home-tiles .tile").count() == 3
+    assert page.locator(".next-action .btn").is_visible()
+    page.wait_for_selector("h2:has-text('Latest result')")
+    page.wait_for_selector("h2:has-text('Self-tuning')")
+
+
+def test_help_page_explains_the_sparkle(page, server):
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-help")
+    page.wait_for_selector("h1:has-text('How to drive the harness')")
+    assert page.locator("h2:has-text('AI insights')").count() == 1
+    assert page.locator("#view-help .ai-chip").count() >= 1
+
+
+def test_tuning_card_controls_present(page, server):
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-console")
+    page.wait_for_selector("h2:has-text('Harness tuning')")
+    page.wait_for_selector("#tune-suite")
+    assert page.locator("button[data-tune-start]").is_visible()
+
+
+def test_goal_step_has_prompt_assistant(page, server):
+    base, _ = server
+    page.goto(base); page.click("#nav-wizard")
+    page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')")
+    page.wait_for_selector("#goal")
+    assert page.locator("#advise-goal-btn").is_visible()
+    page.fill("#goal", "fix the disk thing on db-1")
+    page.click("#advise-goal-btn")
+    page.wait_for_selector("#goal-advice .advisor, #goal-advice .empty")

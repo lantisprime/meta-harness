@@ -131,3 +131,172 @@ async def test_runs_carry_journal_timestamps(client):
     entries = detail["journal"]
     assert rec["started_at"] == entries[0]["at"]
     assert rec["updated_at"] == entries[-1]["at"]
+
+
+async def test_optimization_endpoint_serves_tuning_ledgers(wired_state, tmp_path):
+    """/api/optimization reads harness-tuning ledgers from disk each poll:
+    candidates with frontier flags, the persisted report, promoted params, and
+    deterministic findings — empty (not an error) when nothing has run."""
+    from metaharness.harness.runner import Runner
+    from metaharness.core.types import Task, TaskType, WorkerResult
+    from metaharness.optimization import CandidateLedger, HarnessOptimizer, RuleProposer, search_and_holdout
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.get("/api/optimization")).json() == []
+
+        class TranscribeOnly(Runner):
+            worker_id, tier, model = "t", Tier.SMALL, "t"
+            async def run(self, task: Task) -> WorkerResult:
+                if task.inputs.get("emit_program") and "expression" in task.inputs:
+                    out = {"program": task.inputs["expression"]}
+                elif task.task_type == TaskType.ARITHMETIC:
+                    out = -1
+                else:
+                    out = (task.success_check or {}).get("equals", "ok")
+                return WorkerResult(task_id=task.id, worker_id="t", tier=Tier.SMALL,
+                                    model="t", output=out, raw_text=str(out),
+                                    tokens_in=30, tokens_out=10)
+
+        search, holdout = search_and_holdout("math")
+        ledger = CandidateLedger(tmp_path / "optimization" / "math")
+        await HarnessOptimizer(TranscribeOnly, RuleProposer(), search, holdout,
+                               ledger, k=2).optimize(rounds=3)
+
+        suites = (await c.get("/api/optimization")).json()
+        assert [s["suite"] for s in suites] == ["math"]
+        s = suites[0]
+        assert s["promoted"]["candidate"] == s["report"]["best_id"]
+        promoted = next(c2 for c2 in s["candidates"] if c2["id"] == s["promoted"]["candidate"])
+        assert promoted["frontier"] and promoted["scores"]["tokens_total"] > 0
+        assert s["findings"][0]["kind"] == "promotion"
+        assert s["report"]["gate"]["go"] is True
+
+
+async def test_tuning_start_approve_and_hot_swap(wired_state, tmp_path):
+    """Full web tuning loop: POST starts a background search against the bare
+    small-tier worker; the winner parks as pending; approval promotes it and
+    rewires the live router runner; a second decision 409s."""
+    import asyncio
+
+    from metaharness.optimization import CandidateLedger
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/runs", json={"suite": "math", "rounds": 3, "k": 2})
+        assert resp.status_code == 202, resp.text
+
+        for _ in range(200):                       # mock workers finish fast
+            suites = (await c.get("/api/optimization")).json()
+            if suites and suites[0]["report"] and not suites[0]["running"]:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("tuning search never finished")
+
+        s = suites[0]
+        assert s["suite"] == "math" and s["promoted"] is None
+        ledger = CandidateLedger(tmp_path / "optimization" / "math")
+        if s["pending"] is None:   # perfect mock may leave nothing to promote
+            assert (await c.post("/api/optimization/math/approval", json={"approved": True})).status_code == 409
+            return
+
+        before = wired_state.router.runners[Tier.SMALL]
+        resp = await c.post("/api/optimization/math/approval", json={"approved": True})
+        assert resp.json()["applied_live"] is True
+        assert ledger.promoted_params() is not None
+        assert wired_state.router.runners[Tier.SMALL] is not before
+        assert (await c.post("/api/optimization/math/approval", json={"approved": True})).status_code == 409
+
+
+async def test_tuning_reject_keeps_current_setup(wired_state, tmp_path):
+    from metaharness.optimization import CandidateLedger, HarnessParams
+    from tests.test_optimization import evaluated_candidate
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    ledger = CandidateLedger(tmp_path / "optimization" / "classify")
+    ledger.record(evaluated_candidate("c0001", 0.5, 100))
+    ledger.record(evaluated_candidate("c0002", 0.9, 90, parent="c0001",
+                                      params=HarnessParams(tool_offload=True)))
+    ledger.save_pending("c0002", {"go": True, "overall_incumbent": 0.5, "overall_candidate": 0.9})
+
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/classify/approval", json={"approved": False})
+        assert resp.json() == {"suite": "classify", "approved": False, "candidate": "c0002"}
+        assert ledger.promoted_params() is None and ledger.pending_info() is None
+
+
+async def test_optimization_get_is_read_only_and_root_contained(wired_state, tmp_path):
+    """Codex slice-1 P1 regression: a plain GET must not create directories in
+    empty suite dirs, and symlinks pointing outside the root are refused."""
+    root = tmp_path / "optimization"
+    (root / "empty-suite").mkdir(parents=True)
+    outside = tmp_path / "outside-target"
+    outside.mkdir()
+    (root / "sneaky").symlink_to(outside)
+
+    wired_state.optimization_root = root
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.get("/api/optimization")).json() == []
+    assert list((root / "empty-suite").iterdir()) == []
+    assert list(outside.iterdir()) == []
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.post("/api/optimization/sneaky/approval", json={"approved": True})).status_code == 404
+
+
+async def test_approval_preserves_user_wrappers_and_writes_active(wired_state, tmp_path):
+    """Codex slices-2+3 P1s: (a) approving a promotion must not strip
+    user-selected wrappers like serve --critique — only the tuning layer is
+    replaced; (b) the approval writes active.json so the NEXT boot replays the
+    approved suite, not just 'mixed'."""
+    import json
+
+    from metaharness.harness import SelfCritique
+    from metaharness.harness.enrichment import ToolOffload
+    from metaharness.optimization import CandidateLedger, HarnessParams
+    from tests.test_optimization import evaluated_candidate
+
+    # simulate `serve --critique`: the live runner is critique-wrapped
+    wired_state.router.runners[Tier.SMALL] = SelfCritique(wired_state.router.runners[Tier.SMALL])
+    wired_state.optimization_root = tmp_path / "optimization"
+    ledger = CandidateLedger(tmp_path / "optimization" / "math")
+    ledger.record(evaluated_candidate("c0001", 0.4, 100))
+    ledger.record(evaluated_candidate("c0002", 0.9, 90, parent="c0001",
+                                      params=HarnessParams(tool_offload=True)))
+    ledger.save_pending("c0002", {"go": True, "overall_incumbent": 0.4, "overall_candidate": 0.9})
+
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.post("/api/optimization/math/approval", json={"approved": True})).json()["applied_live"]
+
+    chain, r = [], wired_state.router.runners[Tier.SMALL]
+    while r is not None:
+        chain.append(type(r).__name__)
+        r = getattr(r, "inner", None)
+    assert "ToolOffload" in chain and "SelfCritique" in chain     # both layers live
+    assert chain.index("ToolOffload") < chain.index("SelfCritique")  # tuning wraps ON TOP
+
+    active = json.loads((tmp_path / "optimization" / "active.json").read_text())
+    assert active["suite"] == "math" and active["candidate"] == "c0002"
+
+    # re-approving another candidate replaces the tuning layer, never stacks it
+    ledger.record(evaluated_candidate("c0003", 0.95, 95, parent="c0001",
+                                      params=HarnessParams(self_consistency_k=3)))
+    ledger.save_pending("c0003", {"go": True, "overall_incumbent": 0.4, "overall_candidate": 0.95})
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/optimization/math/approval", json={"approved": True})
+    chain, r = [], wired_state.router.runners[Tier.SMALL]
+    while r is not None:
+        chain.append(type(r).__name__)
+        r = getattr(r, "inner", None)
+    assert chain.count("SelfCritique") == 1 and "ToolOffload" not in chain
+    assert "SelfConsistency" in chain

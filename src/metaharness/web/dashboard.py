@@ -132,6 +132,43 @@ tr:last-child td{border-bottom:0}
 .guide .cta{align-self:center;margin-left:auto;flex:0 0 auto}
 .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;
   margin-top:12px;padding-top:10px;border-top:1px solid var(--hair)}
+
+/* Home: the calm landing — a single next-action card answers "what do I do
+   right now?" (structure-lab handoff pattern) */
+.next-action{background:var(--dark);color:var(--on-dark);border-radius:20px;
+  padding:26px 28px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  box-shadow:0 12px 40px rgba(0,0,0,.12);margin-bottom:8px}
+.next-action .txt{flex:1;min-width:260px}
+.next-action .eyebrow{color:var(--dark-faint)}
+.next-action h2{font-family:var(--serif);font-weight:600;font-size:24px;
+  letter-spacing:-.01em;margin:4px 0 6px}
+.next-action p{color:var(--dark-mut);font-size:14px}
+.next-action .btn{border-radius:12px;padding:14px 26px}
+.also{color:var(--mut2);font-size:12.5px;margin:0 4px 18px}
+#home-tiles{margin-top:16px}
+
+/* AI companion: the gradient sparkle is the ONE signal for advisory content —
+   everything without it is verified, deterministic data */
+.why{width:27px;height:27px;border-radius:999px;flex:0 0 auto;display:inline-flex;
+  align-items:center;justify-content:center;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent-soft),#8b5cf622);
+  border:1px solid #8b5cf630;transition:transform .15s ease,box-shadow .15s ease}
+.why svg{width:15px;height:15px;display:block}
+.why:hover,.why.on{transform:scale(1.12);box-shadow:0 2px 10px #8b5cf640}
+@media (prefers-reduced-motion: reduce){.why,.why:hover{transition:none;transform:none}}
+.ai-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:999px;
+  font-size:11.5px;font-weight:600;white-space:nowrap;
+  background:linear-gradient(135deg,var(--accent-soft),#8b5cf626);color:var(--accent)}
+.ai-chip svg{width:11px;height:11px}
+.advisor{border:1px solid var(--line);border-radius:12px;margin:10px 0 4px;overflow:hidden}
+.advisor .facts{padding:12px 14px;border-bottom:1px solid var(--hair)}
+.advisor .facts .h,.advisor .takes .h{display:flex;align-items:center;gap:8px;font-size:11px;
+  font-weight:600;color:var(--mut2);margin-bottom:7px;text-transform:uppercase;
+  letter-spacing:.06em;font-family:var(--mono)}
+.advisor .facts ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink2)}
+.advisor .takes{padding:12px 14px;background:var(--accent-soft)}
+.advisor .takes p{font-size:13.5px;color:var(--ink2);margin-bottom:10px}
+.advisor .nba{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .pager .pager-info{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 .pager button:disabled{opacity:.35;cursor:default}
 
@@ -270,20 +307,39 @@ details.jt details.jt,.jrow{margin-left:16px}
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="ai-grad" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0071e3"/><stop offset="1" stop-color="#8b5cf6"/>
+  </linearGradient>
+  <symbol id="sparkle" viewBox="0 0 24 24">
+    <path fill="url(#ai-grad)" d="M12 1.6c.9 5.6 4.8 9.5 10.4 10.4-5.6.9-9.5 4.8-10.4 10.4C11.1 16.8 7.2 12.9 1.6 12 7.2 11.1 11.1 7.2 12 1.6Z"/>
+  </symbol>
+</defs></svg>
 <header><div class="bar">
   <div class="logo"><div class="sq">mh</div><div class="name">metaharness</div></div>
   <nav class="pills">
-    <button id="nav-wizard" class="on" onclick="showView('wizard')">Run</button>
+    <button id="nav-home" class="on" onclick="showView('home')">Home</button>
+    <button id="nav-wizard" onclick="showView('wizard')">Run</button>
     <button id="nav-settings" onclick="showView('settings')">Settings</button>
     <button id="nav-console" onclick="showView('console')">Console</button>
+    <button id="nav-help" onclick="showView('help')">Help</button>
   </nav>
   <div class="spacer"></div>
   <span class="updated" id="updated"></span>
 </div></header>
 
 <main>
+<!-- ================= HOME (landing) ================= -->
+<div id="view-home" class="view">
+  <div class="eyebrow" id="home-date"></div>
+  <h1 class="greet">Here’s where things stand.</h1>
+  <div id="home-next"></div>
+  <div class="tiles" id="home-tiles" style="grid-template-columns:repeat(3,1fr)"></div>
+  <div class="grid" id="home-rows"></div>
+</div>
+
 <!-- ================= WIZARD ================= -->
-<div id="view-wizard" class="view">
+<div id="view-wizard" class="view" style="display:none">
   <div class="eyebrow">Meta agent harness</div>
   <h1 class="greet" id="wiz-greet">What should the harness do for you?</h1>
   <div class="wiz-grid">
@@ -330,9 +386,85 @@ details.jt details.jt,.jrow{margin-left:16px}
     <div class="card"><h2>Why runs fail</h2>
       <div class="sub">Failures grouped by what actually went wrong, so fixes target the pattern</div>
       <div id="failures" class="empty">loading…</div></div>
+    <div class="card"><h2>Harness tuning</h2>
+      <div class="sub">The harness experiments on itself — every claim checked on questions it never trained on</div>
+      <div id="tuning" class="empty">loading…</div></div>
     <div class="card wide"><h2>Under the hood</h2>
       <div class="sub">Live timing of recent operations, straight from the tracer — intentionally technical</div>
       <div id="spans" class="empty">loading…</div></div>
+  </div>
+</div>
+
+<!-- ================= HELP ================= -->
+<div id="view-help" class="view" style="display:none">
+  <div class="eyebrow">Manual</div>
+  <h1 class="greet">How to drive the harness.</h1>
+  <div class="guide"><div class="fx">ƒ</div><div><b>The one-paragraph version</b>
+    <p>You describe an outcome; the harness plans it, routes each step to the cheapest
+    agent likely to succeed, verifies every result against a real check, pauses for your
+    approval at the risky moments, and learns from what happened. This page explains each
+    screen in that story.</p></div></div>
+  <div class="grid">
+    <div class="card"><h2>Run — start work</h2>
+      <div class="sub">A five-step wizard: Agents → Goal → Plan → Run → Done</div>
+      <div class="small" style="line-height:1.7">
+      <b>Agents</b> shows who is available to work and which capability tier each one fills.<br>
+      <b>Goal</b> is where you describe the outcome, not the steps. Free-form goals get
+      decomposed by the most capable agent; picking a workflow type (like the software-
+      engineering spine) runs your goal through a fixed, verification-gated process.
+      The <b>✦ Improve with AI</b> button rewrites a rough goal into a sharper one with a
+      checkable done-signal — you always click to accept, nothing changes silently.<br>
+      <b>Plan</b> shows every step with its success check before anything runs — edit,
+      reorder, or rebuild it by hand.<br>
+      <b>Run</b> executes with live progress; steps marked ⛔ park until you approve them.<br>
+      <b>Done</b> sums up what passed, what failed, and why.</div></div>
+    <div class="card"><h2>Console — watch and decide</h2>
+      <div class="sub">Everything the harness knows, refreshed every 3 seconds</div>
+      <div class="small" style="line-height:1.7">
+      <b>Runs</b> — every run in plain language; click one for step-by-step outputs.
+      Approve/Reject buttons appear when a run is waiting on you.<br>
+      <b>Agents</b> — the workers that proved their identity, and their tiers.<br>
+      <b>Audit trail</b> — every action, signed and hash-chained; if this ever says
+      broken, stop trusting results after the breakpoint.<br>
+      <b>Who's good at what</b> — observed pass rates per agent; this evidence is how
+      work gets routed.<br>
+      <b>Lessons learned</b> — advice the harness wrote for itself from verified failures.<br>
+      <b>Why runs fail</b> — failures grouped by root-cause pattern.<br>
+      <b>Harness tuning</b> — see the card of the same name, below.<br>
+      <b>Under the hood</b> — raw operation timings for debugging.</div></div>
+    <div class="card"><h2>Harness tuning — the harness improves itself</h2>
+      <div class="sub">An automated search over the harness's own configuration</div>
+      <div class="small" style="line-height:1.7">
+      Pick a suite and hit <b>Tune harness</b>: a proposer studies raw failure traces,
+      forms a hypothesis ("arithmetic answers are wrong — let code do the math"), and each
+      experiment is scored on reliability (pass^k) versus token cost. ⭐ marks setups on
+      the efficiency frontier. A winner must beat the current setup on questions it
+      <i>never saw during the search</i>; even then it only becomes live after you click
+      <b>Approve</b>. "What this means" turns the results into plain-language findings.</div></div>
+    <div class="card"><h2>The ✦ sparkle — AI insights</h2>
+      <div class="sub">One icon, one meaning: this content is advisory</div>
+      <div class="small" style="line-height:1.7">
+      Anything behind a <span class="ai-chip"><svg style="width:11px;height:11px"><use href="#sparkle"/></svg>sparkle</span>
+      is generated by an AI companion reading the same data you see. It explains, it
+      suggests next steps — but it never executes anything itself and its words are not
+      verified facts. Everything <i>without</i> the sparkle (scores, gates, the audit
+      trail) is deterministic, checked data. If the two ever disagree, trust the data.</div></div>
+    <div class="card"><h2>Settings — providers, agents, tools</h2>
+      <div class="sub">Three wizard-driven questions</div>
+      <div class="small" style="line-height:1.7">
+      <b>Where do completions come from?</b> Add providers (local or cloud); keys stay on
+      this machine and are always shown masked.<br>
+      <b>Who does the work?</b> Create agents on a provider, pick their tier and system
+      prompt; coding CLIs found on this machine can implement plans in real workspaces.<br>
+      <b>What can they touch?</b> The tool catalog and MCP servers — each step only ever
+      receives the small subset of tools it needs.</div></div>
+    <div class="card"><h2>Safety model, in short</h2>
+      <div class="sub">Why you can trust what this screen tells you</div>
+      <div class="small" style="line-height:1.7">
+      Every worker signs its results with a registered key; unsigned work is rejected.
+      Every action lands in a hash-chained audit log. No result counts as success without
+      an external check, and nothing irreversible happens without your approval —
+      including the harness changing its own configuration.</div></div>
   </div>
 </div>
 </main>
@@ -477,13 +609,104 @@ function toast(msg){ const t = document.getElementById('toast');
 
 /* ---------- view switching ---------- */
 function showView(v){
-  for(const name of ['wizard','settings','console']){
+  for(const name of ['home','wizard','settings','console','help']){
     document.getElementById('view-' + name).style.display = v === name ? '' : 'none';
     document.getElementById('nav-' + name).classList.toggle('on', v === name);
   }
+  if(v === 'home') renderHome();
   if(v === 'console') refreshConsole();
   if(v === 'settings') renderSettings(true);
   if(v === 'wizard' && wiz.step === 0) renderAgentsStep();  // agents may have changed
+}
+
+/* ---------- home: what needs doing, at a glance ---------- */
+function nextActions(runs, workers, prov, tuning){
+  const q = [];
+  if(!prov.chain.ok) q.push({eyebrow: 'integrity alert',
+    title: 'The audit trail is broken',
+    detail: 'Something altered the signed action log. Results after the break point cannot be trusted — inspect it before anything else.',
+    cta: 'Inspect in Console', go: 'console'});
+  runs.filter(r => r.status === 'awaiting_approval').forEach(r =>
+    q.push({eyebrow: 'a run is waiting on you',
+      title: 'Approve or reject: ' + runTitle(r),
+      detail: 'The run is parked at a human gate — nothing proceeds until you decide.',
+      cta: 'Review in Console', go: 'console'}));
+  tuning.filter(s => s.pending).forEach(s =>
+    q.push({eyebrow: 'the harness wants to improve itself',
+      title: `Promote ${s.pending.candidate} on the ${s.suite} suite?`,
+      detail: 'A tuned setup beat the current one on questions it never saw. It only goes live with your approval.',
+      cta: 'Decide in Console', go: 'console'}));
+  if(!workers.some(w => w.active)) q.push({eyebrow: 'setup',
+    title: 'Give the harness someone to work with',
+    detail: 'No agents are registered yet. Add a provider and an agent in Settings — three questions, wizard-guided.',
+    cta: 'Open Settings', go: 'settings'});
+  if(!runs.length) q.push({eyebrow: 'nothing has run yet',
+    title: 'Start your first run',
+    detail: 'Describe the outcome you want; the harness plans it, verifies every step, and asks before anything risky.',
+    cta: 'Open the Run wizard', go: 'wizard'});
+  if(!q.length) q.push({eyebrow: 'all quiet',
+    title: 'Nothing needs you right now',
+    detail: 'Runs are flowing and every check is green. Start something new, or let the harness tune itself.',
+    cta: 'Start a run', go: 'wizard'});
+  return q;
+}
+
+async function renderHome(){
+  try{
+    const [runs, workers, prov, playbook, tuning] = await Promise.all([
+      get('/api/runs'), get('/api/workers'), get('/api/provenance'),
+      get('/api/playbook'), get('/api/optimization')]);
+    document.getElementById('home-date').textContent =
+      new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'});
+    const q = nextActions(runs, workers, prov, tuning);
+    const first = q[0];
+    document.getElementById('home-next').innerHTML = `<div class="next-action">
+      <div class="txt"><div class="eyebrow">${esc(first.eyebrow)}</div>
+      <h2>${esc(first.title)}</h2><p>${esc(first.detail)}</p></div>
+      <button class="btn" onclick="showView('${first.go}')">${esc(first.cta)}</button></div>`
+      + (q.length > 1 ? `<div class="also">Also waiting: ${q.slice(1).map(x => esc(x.title)).join('  ·  ')}</div>` : '');
+
+    const active = runs.filter(r => ['running','awaiting_approval'].includes(r.status)).length;
+    const done = runs.filter(r => r.status === 'completed').length;
+    document.getElementById('home-tiles').innerHTML = `
+      <div class="tile"><div class="val">${runs.length}</div>
+        <div class="lab">runs so far — ${active} active, ${done} finished</div></div>
+      <div class="tile"><div class="val">${workers.filter(w => w.active).length}</div>
+        <div class="lab">agents ready to work</div></div>
+      <div class="tile"><div class="val ${prov.chain.ok ? 'green' : 'red'}">${prov.chain.ok ? '✔' : '✘'} ${prov.total}</div>
+        <div class="lab">${prov.chain.ok ? 'signed actions — audit trail intact' : 'audit trail BROKEN'}</div></div>`;
+
+    const latest = runs[runs.length - 1];
+    const tuned = tuning.find(s => s.active && s.promoted) || tuning.find(s => s.promoted);
+    document.getElementById('home-rows').innerHTML = `
+      <div class="card"><h2>Latest result</h2>
+        <div class="sub">The most recent thing the harness did</div>
+        ${latest ? `<div class="lrow"><div class="rr-main">
+            <div class="rr-title">${esc(runTitle(latest))}</div>
+            <div class="rr-meta">${esc(latest.run_id)}${latest.updated_at ? ' · ' + esc(ago(latest.updated_at)) : ''}</div></div>
+          <div class="rr-story">${esc(runStory(latest))}</div>${statusBadge(latest.status)}</div>`
+          : '<div class="empty">nothing yet — your first run will land here</div>'}
+        <div style="margin-top:10px"><button class="btn ghost" onclick="showView('console')">Open the Console</button></div></div>
+      <div class="card"><h2>Self-tuning</h2>
+        <div class="sub">The harness improving its own configuration</div>
+        ${tuned ? `<div class="lrow"><div class="rr-main">
+            <div class="rr-title">${esc(tuned.promoted.candidate)} ${tuned.active ? 'is live' : 'is promoted'}
+              ${badge('ok', tuned.active ? 'live now' : 'applies at restart')}</div>
+            <div class="rr-meta">${esc(tuned.suite)} suite · approved</div></div>
+          <div class="rr-story">every claim was checked on questions the search never saw</div></div>`
+          : '<div class="empty">no tuned configuration live yet</div>'}
+        <div style="margin-top:10px"><button class="btn ghost" onclick="showView('console')">Tune the harness</button></div></div>
+      <div class="card wide"><h2>New here?</h2>
+        <div class="sub">Three ways to get oriented</div>
+        <div class="lrow"><div class="rr-main"><div class="rr-title">What am I looking at?</div></div>
+          <button class="pill" onclick="showView('help')">Read the manual</button></div>
+        <div class="lrow"><div class="rr-main"><div class="rr-title">What does the ✦ sparkle mean?</div></div>
+          <button class="pill" onclick="showView('help')">AI insights, explained</button></div>
+        <div class="lrow"><div class="rr-main"><div class="rr-title">Ready to try it?</div></div>
+          <button class="pill" onclick="showView('wizard')">Start a run</button></div></div>`;
+  }catch(e){
+    document.getElementById('home-next').innerHTML = '<div class="empty">could not load harness state — is the server healthy?</div>';
+  }
 }
 
 /* ---------- wizard state machine ---------- */
@@ -559,6 +782,38 @@ function pickWorkflowType(id){
   renderGoalStep();
 }
 
+/* ---------- goal prompt assistant (AI companion) ---------- */
+let GOAL_ADVICE = null;
+async function adviseGoal(){
+  const goal = document.getElementById('goal').value.trim();
+  const panel = document.getElementById('goal-advice');
+  if(!goal){ panel.innerHTML = '<div class="empty">write a rough goal first — the assistant sharpens it</div>'; return; }
+  panel.innerHTML = '<div class="empty">thinking…</div>';
+  document.getElementById('advise-goal-btn').disabled = true;
+  try{
+    const r = await post('/api/advise', {page: 'goal', subject: goal});
+    if(!r.ok) throw new Error('advisor unavailable');
+    GOAL_ADVICE = await r.json();
+    const actions = GOAL_ADVICE.next_actions
+      .map((a, i) => a.action === 'prefill_goal'
+        ? `<button class="btn small" onclick="applyGoalAdvice(${i})">${esc(a.label)}</button>` : '')
+      .join('');
+    panel.innerHTML = `<div class="advisor" style="margin-top:10px"><div class="takes">
+      <div class="h">Assistant’s rewrite <span class="ai-chip"><svg style="width:11px;height:11px"><use href="#sparkle"/></svg>advisory, not verified</span></div>
+      <p>${esc(GOAL_ADVICE.read)}</p><div class="nba">${actions}</div></div></div>`;
+  }catch(e){
+    panel.innerHTML = '<div class="empty">the assistant is unavailable right now — your goal works as written</div>';
+  }
+  document.getElementById('advise-goal-btn').disabled = false;
+}
+function applyGoalAdvice(i){
+  const p = (GOAL_ADVICE.next_actions[i] || {}).params || {};
+  if(p.goal) document.getElementById('goal').value = p.goal;
+  if(p.context) document.getElementById('goalctx').value =
+    typeof p.context === 'string' ? p.context : JSON.stringify(p.context);
+  toast('Applied — review it, then plan the workflow');
+}
+
 async function renderGoalStep(){
   const types = await loadWorkflowTypes();
   const chosen = types.find(t => t.id === wiz.workflowType);
@@ -589,7 +844,10 @@ async function renderGoalStep(){
       <div class="field"><label>Context (JSON, optional)</label>
         <input id="goalctx" class="mono" placeholder='{"report": "db-1 disk full, checkout failing"}'
           value="${esc(Object.keys(wiz.context).length ? JSON.stringify(wiz.context) : '')}"></div>
-      <span class="small dim" id="goalmsg"></span></div>
+      <span class="small dim" id="goalmsg"></span>
+      <div style="margin-top:6px"><button class="btn ghost" onclick="adviseGoal()" id="advise-goal-btn">
+        <svg style="width:13px;height:13px"><use href="#sparkle"/></svg> Improve with AI</button></div>
+      <div id="goal-advice"></div></div>
     <div class="wiz-nav">
       <button class="btn ghost" onclick="setStep(0)">← Agents</button>
       <button class="btn" id="planbtn" onclick="makePlan()">Plan workflow →</button></div>`;
@@ -1176,10 +1434,12 @@ function paginate(key, items, renderItems, opts = {}){
   const body = renderItems(items.slice(cur * size, (cur + 1) * size));
   if(nPages < 2) return body;
   const [back, fwd] = opts.timeOrdered ? ['← Newer', 'Older →'] : ['← Prev', 'Next →'];
+  // keys can carry user/filesystem-derived parts (e.g. suite names) — escape
+  // them in the attribute; the click handler splits on the LAST colon.
   return body + `<div class="pager">
-    <button class="pill" data-page="${key}:-1" ${cur === 0 ? 'disabled' : ''}>${back}</button>
+    <button class="pill" data-page="${esc(key)}:-1" ${cur === 0 ? 'disabled' : ''}>${back}</button>
     <span class="pager-info">${cur * size + 1}–${Math.min(items.length, (cur + 1) * size)} of ${items.length}</span>
-    <button class="pill" data-page="${key}:1" ${cur >= nPages - 1 ? 'disabled' : ''}>${fwd}</button></div>`;
+    <button class="pill" data-page="${esc(key)}:1" ${cur >= nPages - 1 ? 'disabled' : ''}>${fwd}</button></div>`;
 }
 
 async function resolveApproval(runId, stepId, approved){
@@ -1243,7 +1503,8 @@ document.getElementById('runs').addEventListener('click', ev => {
 document.getElementById('view-console').addEventListener('click', ev => {
   const b = ev.target.closest('button[data-page]');
   if(!b) return;
-  const [key, delta] = b.dataset.page.split(':');
+  const cut = b.dataset.page.lastIndexOf(':');   // keys may contain ':'
+  const key = b.dataset.page.slice(0, cut), delta = b.dataset.page.slice(cut + 1);
   pages[key] = Math.max(0, (pages[key] || 0) + Number(delta));
   refreshConsole();
 });
@@ -1334,6 +1595,146 @@ function renderFailures(f){
        <td class="mono small">${n}×</td></tr>`).join('') + '</table>', {size: 10});
 }
 
+/* Harness tuning: one plain-language row per experiment the optimizer ran on
+   the harness itself (arXiv 2603.28052). ⭐ marks the pass-vs-cost frontier. */
+const FINDING_BADGE = {
+  pending: ['warn', 'your call'], promotion: ['ok', 'applied'],
+  not_worth_it: ['dim', 'dead end'], coverage: ['warn', 'thin evidence'],
+  info: ['dim', 'note'],
+};
+const TUNE = { suite: 'mixed' };
+function renderTuning(suites){
+  const busy = suites.some(s => s.running);
+  const controls = `<div class="chainline">
+    <select id="tune-suite" style="border:1px solid var(--line2);border-radius:999px;
+      padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
+      ${['mixed','classify','extract','math'].map(n =>
+        `<option value="${n}" ${TUNE.suite === n ? 'selected' : ''}>${n} suite</option>`).join('')}</select>
+    <button class="btn ghost" data-tune-start="1" ${busy ? 'disabled' : ''}>
+      ${busy ? 'searching…' : 'Tune harness'}</button></div>`;
+  if(!suites.length) return controls + '<div class="empty">no experiments yet — pick a suite and hit Tune harness (or run <span class="mono">metaharness optimize</span>)</div>';
+  return controls + suites.map(s => {
+    const pend = s.pending ? (() => {
+      const g = s.pending.gate || {};
+      return `<div class="guide" style="margin:8px 0">
+        <div><b>Promote ${esc(s.pending.candidate)}?</b>
+        <p>On questions it never saw during the search it answered
+        ${(100 * (g.overall_candidate || 0)).toFixed(0)}% reliably vs
+        ${(100 * (g.overall_incumbent || 0)).toFixed(0)}% today, and no task type got worse.
+        Approving rewires the live agent immediately.</p></div>
+        <div class="cta">
+          <button class="btn" data-tune-approve="1" data-suite="${esc(s.suite)}">Approve</button>
+          <button class="btn reject" data-tune-approve="0" data-suite="${esc(s.suite)}">Reject</button>
+        </div></div>`;
+    })() : '';
+    const promotedId = s.promoted ? s.promoted.candidate : null;
+    // key must stay colon-free: the pager handler splits data-page on ':'
+    const rows = paginate('tuning-' + s.suite, s.candidates.slice().reverse(), cs => cs.map(c => {
+      const seed = (c.hypothesis || '').startsWith('seed');
+      const marks = [
+        c.id === promotedId ? badge('ok', s.active ? 'promoted — in use' : 'promoted — applies at restart') : '',
+        seed ? badge('dim', 'the original setup') : '',
+        c.status === 'rejected' ? badge('bad', 'rejected')
+          : c.frontier ? '<span title="on the pass-vs-cost frontier">⭐</span>'
+          : badge('dim', 'not worth it'),
+      ].filter(Boolean).join(' ');
+      const meta = c.scores
+        ? `pass^${c.scores.k} ${c.scores.pass_hat_k.toFixed(2)} · pass@1 ${c.scores.pass_at_1.toFixed(2)}`
+          + ` · ${c.scores.tokens_total.toLocaleString()} tokens${c.parent ? ' · builds on ' + esc(c.parent) : ''}`
+        : 'never evaluated';
+      const adviceKey = s.suite + '/' + c.id;
+      return `<div class="lrow"><div class="rr-main">
+        <div class="rr-title">${esc(c.id)} ${marks}</div>
+        <div class="rr-meta">${meta}</div></div>
+        <div class="rr-story">${esc(c.hypothesis || '')}${c.rejected_reason ? ' — ' + esc(c.rejected_reason) : ''}</div>
+        <button class="why ${ADVICE[adviceKey] ? 'on' : ''}" data-advise="${esc(c.id)}"
+          data-suite="${esc(s.suite)}" title="AI insight — explain this result">
+          <svg><use href="#sparkle"/></svg></button></div>`
+        + (ADVICE[adviceKey] ? renderAdvicePanel(adviceKey, c) : '');
+    }).join(''), {timeOrdered: true});
+    const g = s.report && s.report.gate;
+    const gate = g ? `<div class="chainline" style="margin-top:10px">
+        ${badge(g.go ? 'ok' : 'bad', g.go ? 'GO' : 'NO-GO')}
+        <span class="small dim">held-out check: ${esc(g.incumbent_model)} vs ${esc(g.candidate_model)}
+        · ${(g.overall_incumbent).toFixed(2)} → ${(g.overall_candidate).toFixed(2)}
+        · ${g.wins}W/${g.losses}L/${g.ties}T</span></div>` : '';
+    const findings = (s.findings || []).map(f => {
+      const [cls, label] = FINDING_BADGE[f.kind] || ['dim', f.kind];
+      return `<div class="lrow" style="padding:8px 2px">
+        <div class="rr-main"><div class="small">${esc(f.story)}</div>
+        ${f.evidence && !f.story.includes(f.evidence) ? `<div class="rr-meta">${esc(f.evidence)}</div>` : ''}</div>
+        ${badge(cls, label)}</div>`;
+    }).join('');
+    return `<div class="small" style="margin:8px 0 4px"><b>${esc(s.suite)} suite</b>
+      ${s.running ? badge('act', 'searching…') : ''}</div>` + pend + rows + gate
+      + (findings ? `<div class="small" style="margin:12px 0 2px"><b>What this means</b></div>` + findings : '');
+  }).join('');
+}
+
+/* Advisor panels on tuning rows: verified facts render instantly; the
+   companion's read streams in under its own advisory chip. */
+const ADVICE = {};
+function renderAdvicePanel(key, c){
+  const a = ADVICE[key];
+  const facts = `<div class="facts"><div class="h">What happened <span class="badge dim">verified facts</span></div><ul>`
+    + (c.scores ? `<li>pass^${c.scores.k} ${c.scores.pass_hat_k.toFixed(2)} at ${c.scores.tokens_total.toLocaleString()} tokens — ${
+        c.frontier ? 'on the efficiency frontier' : 'a cheaper setup does the same or better'}</li>` : '')
+    + `<li>${esc(c.hypothesis || 'no hypothesis recorded')}</li>`
+    + (c.rejected_reason ? `<li>rejected: ${esc(c.rejected_reason)}</li>` : '') + '</ul></div>';
+  const body = a.loading ? '<div class="empty">thinking…</div>'
+    : a.error ? `<div class="empty">${esc(a.error)}</div>`
+    : `<p>${esc(a.read)}</p><div class="nba">${a.next_actions.filter(x => x.action !== 'none')
+        .map(x => `<button class="btn small" data-advise-act="${esc(x.action)}">${esc(x.label)}</button>`).join('')}</div>`;
+  return `<div class="rr-detail"><div class="advisor">${facts}<div class="takes">
+    <div class="h">Advisor’s read <span class="ai-chip"><svg style="width:11px;height:11px"><use href="#sparkle"/></svg>AI companion — advisory, not verified</span></div>
+    ${body}</div></div></div>`;
+}
+
+document.getElementById('tuning').addEventListener('click', async ev => {
+  const w = ev.target.closest('button[data-advise]');
+  if(w){
+    const key = w.dataset.suite + '/' + w.dataset.advise;
+    if(ADVICE[key]){ delete ADVICE[key]; refreshConsole(); return; }
+    ADVICE[key] = {loading: true};
+    refreshConsole();
+    try{
+      const r = await post('/api/advise', {page: 'tuning', subject: w.dataset.advise, suite: w.dataset.suite});
+      ADVICE[key] = r.ok ? await r.json() : {error: 'the advisor is unavailable right now — the facts above still stand'};
+    }catch(e){ ADVICE[key] = {error: 'the advisor is unavailable right now — the facts above still stand'}; }
+    refreshConsole(); return;
+  }
+  const act = ev.target.closest('button[data-advise-act]');
+  if(act){
+    if(act.dataset.adviseAct === 'start_tune'){
+      const r = await post('/api/optimization/runs', {suite: TUNE.suite});
+      toast(r.ok ? `Tuning started on the ${TUNE.suite} suite` : 'Could not start — a search may already be running');
+      refreshConsole();
+    } else if(act.dataset.adviseAct === 'approve_promotion'){
+      toast('Scroll up to the Promote banner — the decision buttons live there');
+    } else {
+      toast('That suggestion needs a human — see the Help tab for how');
+    }
+    return;
+  }
+  const a = ev.target.closest('button[data-tune-approve]');
+  if(a){
+    const ok = a.dataset.tuneApprove === '1';
+    const r = await post(`/api/optimization/${encodeURIComponent(a.dataset.suite)}/approval`, {approved: ok});
+    toast(r.ok ? (ok ? 'Promoted — the live agent now uses this setup' : 'Rejected — keeping the current setup')
+               : 'That decision was already handled — refreshing');
+    refreshConsole(); return;
+  }
+  if(ev.target.closest('button[data-tune-start]')){
+    const r = await post('/api/optimization/runs', {suite: TUNE.suite});
+    toast(r.ok ? `Tuning started on the ${TUNE.suite} suite — watch it think out loud here`
+               : 'Could not start — a search may already be running');
+    refreshConsole();
+  }
+});
+document.getElementById('tuning').addEventListener('change', ev => {
+  if(ev.target.id === 'tune-suite') TUNE.suite = ev.target.value;
+});
+
 function renderSpans(spans){
   if(!spans.length) return '<div class="empty">quiet right now — operations appear here as they happen</div>';
   return paginate('spans', spans.slice().reverse(), ss =>
@@ -1349,9 +1750,10 @@ function renderSpans(spans){
 
 async function refreshConsole(){
   try{
-    const [runs, workers, prov, matrix, playbook, failures, spans] = await Promise.all([
+    const [runs, workers, prov, matrix, playbook, failures, spans, tuning] = await Promise.all([
       get('/api/runs'), get('/api/workers'), get('/api/provenance'),
       get('/api/matrix'), get('/api/playbook'), get('/api/failures'), get('/api/spans'),
+      get('/api/optimization'),
     ]);
     document.getElementById('tiles').innerHTML = renderTiles(runs, workers, prov, playbook);
     document.getElementById('runs').innerHTML = renderRuns(runs);
@@ -1360,6 +1762,7 @@ async function refreshConsole(){
     document.getElementById('matrix').innerHTML = renderMatrix(matrix);
     document.getElementById('playbook').innerHTML = renderPlaybook(playbook);
     document.getElementById('failures').innerHTML = renderFailures(failures);
+    document.getElementById('tuning').innerHTML = renderTuning(tuning);
     document.getElementById('spans').innerHTML = renderSpans(spans);
     document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
   }catch(e){ document.getElementById('updated').textContent = 'refresh failed'; }
@@ -1367,6 +1770,7 @@ async function refreshConsole(){
 
 setInterval(() => {
   if(document.getElementById('view-console').style.display !== 'none') refreshConsole();
+  if(document.getElementById('view-home').style.display !== 'none') renderHome();
 }, 3000);
 
 /* ================= SETTINGS: wizard-driven configuration ================= */
@@ -1919,7 +2323,8 @@ async function agentSave(){
   renderSettings(true);
 }
 
-setStep(0);
+setStep(0);        // pre-render the wizard so switching to Run is instant
+showView('home');  // the calm landing answers "what do I do right now?"
 </script>
 </body>
 </html>

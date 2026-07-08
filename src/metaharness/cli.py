@@ -131,9 +131,43 @@ def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = Non
     return state
 
 
+def _apply_promoted(runners) -> None:
+    """Wrap the small-tier runner with the approved harness config — tuning
+    results take effect at serve time, loudly announced. The web approval
+    writes an `active.json` pointer naming the exact suite/config that went
+    live; CLI-promoted `mixed/promoted.json` is the fallback."""
+    import json
+
+    from metaharness.core.types import Tier
+    from metaharness.optimization import CandidateLedger, HarnessParams
+
+    if Tier.SMALL not in runners:
+        return
+    root = JOURNAL_DIR.parent / "optimization"
+    suite, params = "mixed", None
+    active_path = root / "active.json"
+    if active_path.is_file():
+        active = json.loads(active_path.read_text(encoding="utf-8"))
+        suite = active.get("suite", "mixed")
+        params = HarnessParams.model_validate(active["params"])
+    else:
+        params = CandidateLedger(root / "mixed").promoted_params()
+    if params is None:
+        return
+    base = runners[Tier.SMALL]
+    wrapped = params.build(base)
+    wrapped._tuning_base = base  # web approvals replace exactly this layer
+    runners[Tier.SMALL] = wrapped
+    defaults = HarnessParams().model_dump()
+    knobs = {k: v for k, v in params.model_dump().items() if v != defaults[k]}
+    print(f"  promoted harness config active on small tier ({suite} suite): "
+          f"{', '.join(f'{k}={v}' for k, v in knobs.items()) or 'defaults'}")
+
+
 def _finish_wiring(state, runners) -> None:
     """Wire with a persistent journal dir and rehydrate prior runs, so the
     dashboard's run history survives server restarts."""
+    _apply_promoted(runners)
     JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
     state.wire(runners, journal_dir=JOURNAL_DIR)
     state.enable_persistence(JOURNAL_DIR.parent)

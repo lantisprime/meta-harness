@@ -34,6 +34,22 @@ class ApprovalRequest(BaseModel):
     wait: bool = True
 
 
+class TuneRequest(BaseModel):
+    suite: str = "mixed"
+    rounds: int = 6
+    k: int = 3
+
+
+class ApprovalDecision(BaseModel):
+    approved: bool = True
+
+
+class AdviseRequest(BaseModel):
+    page: str                 # 'tuning' | 'goal'
+    subject: str = ""         # candidate id, or the user's raw goal text
+    suite: str = ""
+
+
 class StartRunRequest(BaseModel):
     workflow_yaml: str = ""
     workflow: Optional[dict[str, Any]] = None    # a reviewed plan, as JSON
@@ -122,6 +138,212 @@ def create_app(state: HarnessState) -> FastAPI:
         return DASHBOARD_HTML
 
     # -- runs / HITL --------------------------------------------------------------
+
+    _tuning_running: set[str] = set()
+
+    def _tuning_base(runner):
+        """The runner underneath the TUNING layer only. Params-built wrappers
+        record their base as `_tuning_base` when applied, so re-applying params
+        replaces exactly that layer — user-selected wrappers (e.g. serve
+        --critique) underneath are preserved, and stacks never pile up."""
+        return getattr(runner, "_tuning_base", runner)
+
+    def _tuning_suite_dirs() -> list:
+        """Real ledger directories under the optimization root — symlinks that
+        resolve outside the root are refused (GET must never read, and later
+        writes must never land, outside the harness's own store)."""
+        from pathlib import Path
+
+        if state.optimization_root is None:
+            return []
+        root = Path(state.optimization_root)
+        if not root.is_dir():
+            return []
+        resolved_root = root.resolve()
+        dirs = []
+        for p in sorted(root.iterdir()):
+            if not p.is_dir():
+                continue
+            resolved = p.resolve()
+            if resolved != resolved_root and resolved.is_relative_to(resolved_root):
+                dirs.append(p)
+        return dirs
+
+    @app.get("/api/optimization")
+    async def optimization() -> list[dict[str, Any]]:
+        """Harness-tuning ledgers, one entry per suite — read fresh from disk
+        every poll so a CLI-run search shows up live. Strictly read-only."""
+        from metaharness.optimization import CandidateLedger
+        from metaharness.optimization.findings import derive_findings
+
+        import json as _json
+        from pathlib import Path
+
+        active_suite = None
+        if state.optimization_root is not None:
+            active_path = Path(state.optimization_root) / "active.json"
+            if active_path.is_file():
+                active_suite = _json.loads(active_path.read_text(encoding="utf-8")).get("suite")
+
+        out: list[dict[str, Any]] = []
+        for suite_dir in _tuning_suite_dirs():
+            ledger = CandidateLedger(suite_dir)
+            if not ledger.candidates() and suite_dir.name not in _tuning_running:
+                continue
+            frontier = [c.id for c in ledger.frontier()]
+            report = ledger.load_report()
+            candidates = []
+            for c in ledger.candidates():
+                entry: dict[str, Any] = {
+                    "id": c.id, "parent": c.parent, "status": c.status,
+                    "hypothesis": c.hypothesis, "rejected_reason": c.rejected_reason,
+                    "frontier": c.id in frontier,
+                }
+                if c.scores is not None:
+                    entry["scores"] = {**c.scores.model_dump(),
+                                       "tokens_total": c.scores.tokens_total}
+                candidates.append(entry)
+            out.append({
+                "suite": suite_dir.name,
+                "running": suite_dir.name in _tuning_running,
+                "active": suite_dir.name == active_suite,
+                "candidates": candidates,
+                "frontier": frontier,
+                "promoted": ledger.promoted_info(),
+                "pending": ledger.pending_info(),
+                "report": report,
+                "findings": derive_findings(ledger, report),
+            })
+        return out
+
+    @app.post("/api/optimization/runs", status_code=202)
+    async def start_tuning(req: TuneRequest) -> dict[str, Any]:
+        """Kick off a harness-tuning search in the background against the wired
+        small-tier worker. Gate-passing winners park as pending promotions —
+        the WebUI never auto-rewires the live harness."""
+        from pathlib import Path
+
+        from metaharness.optimization import (
+            CandidateLedger,
+            HarnessOptimizer,
+            RuleProposer,
+            search_and_holdout,
+        )
+
+        if state.optimization_root is None or state.router is None:
+            raise HTTPException(409, "harness not wired for tuning")
+        if req.suite in _tuning_running:
+            raise HTTPException(409, f"a search is already running for {req.suite!r}")
+        try:
+            search, holdout = search_and_holdout(req.suite)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        wired = state.router.runners.get(Tier.SMALL) or next(iter(state.router.runners.values()))
+        target = _tuning_base(wired)
+        ledger = CandidateLedger(Path(state.optimization_root) / req.suite)
+        seed = ledger.promoted_params()  # tune from what's live, not from scratch
+        optimizer = HarnessOptimizer(
+            lambda: target, RuleProposer(), search, holdout, ledger,
+            k=req.k, seed_params=seed, auto_promote=False,
+        )
+        _tuning_running.add(req.suite)
+
+        async def _run() -> None:
+            try:
+                await optimizer.optimize(rounds=req.rounds)
+            except Exception as exc:  # a crashed search must be loud in the card
+                ledger.save_report({
+                    "rounds_run": 0, "stopped": "error", "seed_id": "", "best_id": "",
+                    "frontier": [], "gate": None, "promoted": False, "pending": None,
+                    "notes": [f"search crashed: {type(exc).__name__}: {exc}"],
+                })
+            finally:
+                _tuning_running.discard(req.suite)
+
+        asyncio.get_running_loop().create_task(_run())
+        return {"suite": req.suite, "status": "running", "target": target.worker_id}
+
+    @app.post("/api/optimization/{suite}/approval")
+    async def resolve_tuning_approval(suite: str, req: ApprovalDecision) -> dict[str, Any]:
+        """Human gate on a pending promotion. Approve → promoted.json + the
+        live small-tier runner is rewrapped immediately; reject → cleared."""
+        from metaharness.optimization import CandidateLedger, HarnessParams
+
+        suite_dir = next((d for d in _tuning_suite_dirs() if d.name == suite), None)
+        if suite_dir is None:
+            raise HTTPException(404, f"unknown suite {suite!r}")
+        ledger = CandidateLedger(suite_dir)
+        pending = ledger.pending_info()
+        if pending is None:
+            raise HTTPException(409, "no promotion is awaiting approval")
+        ledger.clear_pending()
+        if not req.approved:
+            return {"suite": suite, "approved": False, "candidate": pending["candidate"]}
+        ledger.promote(pending["candidate"])
+        # durable pointer so the NEXT serve boot replays this exact approval,
+        # whatever the suite — not just 'mixed'
+        import json as _json
+        from pathlib import Path
+
+        from metaharness.core.types import now
+        Path(state.optimization_root).mkdir(parents=True, exist_ok=True)
+        (Path(state.optimization_root) / "active.json").write_text(
+            _json.dumps({"suite": suite, "candidate": pending["candidate"],
+                         "params": pending["params"], "approved_at": now()}, indent=1),
+            encoding="utf-8",
+        )
+        applied = False
+        if state.router is not None and Tier.SMALL in state.router.runners:
+            params = HarnessParams.model_validate(pending["params"])
+            base = _tuning_base(state.router.runners[Tier.SMALL])
+            wrapped = params.build(base)
+            wrapped._tuning_base = base
+            state.router.runners[Tier.SMALL] = wrapped
+            applied = True
+        return {"suite": suite, "approved": True,
+                "candidate": pending["candidate"], "applied_live": applied}
+
+    @app.post("/api/advise")
+    async def advise_endpoint(req: AdviseRequest) -> dict[str, Any]:
+        """AI companion: an advisory read of verified state, through the
+        harness's own most capable runner. See web/advisor.py for the rules."""
+        from metaharness.optimization import CandidateLedger
+        from metaharness.web.advisor import AdvisorError, advise
+
+        try:
+            runner = state.planner_runner()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc))
+
+        if req.page == "goal":
+            question = "the goal they are about to run — rewrite it into a sharp delegation contract"
+            context = {
+                "user_goal": req.subject,
+                "hint": "propose action prefill_goal with params {goal, context, "
+                        "workflow_type}; the goal must name a checkable done-signal",
+                "workflow_types": ["", "software_engineering", "incident_response"],
+            }
+        elif req.page == "tuning":
+            suite_dir = next((d for d in _tuning_suite_dirs() if d.name == req.suite), None)
+            if suite_dir is None:
+                raise HTTPException(404, f"unknown suite {req.suite!r}")
+            ledger = CandidateLedger(suite_dir)
+            cand = ledger.get(req.subject)
+            if cand is None:
+                raise HTTPException(404, f"unknown candidate {req.subject!r}")
+            question = f"tuning experiment {cand.id} on the {req.suite} suite — explain the result"
+            context = {
+                "candidate": cand.model_dump(),
+                "on_frontier": cand.id in {c.id for c in ledger.frontier()},
+                "raw_failure_traces": ledger.failure_traces(cand.id, limit=4),
+                "report": ledger.load_report(),
+            }
+        else:
+            raise HTTPException(422, f"unknown advise page {req.page!r}")
+        try:
+            return await advise(runner, question, context)
+        except AdvisorError as exc:
+            raise HTTPException(502, str(exc))
 
     @app.get("/api/runs")
     async def runs() -> list[dict[str, Any]]:

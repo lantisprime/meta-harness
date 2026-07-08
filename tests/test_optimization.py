@@ -521,6 +521,47 @@ async def test_optimizer_requires_scoreable_tasks(tmp_path):
         )
 
 
+async def test_optimizer_persists_report_for_the_console(tmp_path):
+    """The WebUI renders search results after the process is gone — the final
+    report must land in the ledger root on every outcome, including the
+    seed-budget early return."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    optimizer = HarnessOptimizer(TranscribeOnlyWorker, RuleProposer(), search, holdout, ledger, k=2)
+    report = await optimizer.optimize(rounds=2)
+    saved = CandidateLedger(tmp_path).load_report()
+    assert saved["best_id"] == report.best_id
+    assert saved["promoted"] == report.promoted
+    assert saved["gate"]["go"] == report.gate.go
+
+    starved = HarnessOptimizer(
+        TranscribeOnlyWorker, RuleProposer(), search, holdout,
+        CandidateLedger(tmp_path / "starved"), k=2, budget=Budget(max_tokens=1),
+    )
+    await starved.optimize(rounds=1)
+    assert CandidateLedger(tmp_path / "starved").load_report()["stopped"] == "budget"
+
+
+async def test_findings_render_verified_facts_only(tmp_path):
+    """Findings derive mechanically from ledger + report: the promotion with
+    its knob delta, dead ends off the frontier, and the gate's own
+    thin-coverage warnings — no LLM anywhere."""
+    from metaharness.optimization.findings import derive_findings
+
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    optimizer = HarnessOptimizer(TranscribeOnlyWorker, RuleProposer(), search, holdout, ledger, k=2)
+    await optimizer.optimize(rounds=4)
+
+    findings = derive_findings(ledger, ledger.load_report())
+    kinds = [f["kind"] for f in findings]
+    assert kinds[0] == "promotion"
+    assert findings[0]["delta"] == {"tool_offload": [False, True]}
+    assert "100%" in findings[0]["story"] and "0%" in findings[0]["story"]
+    assert "coverage" in kinds          # 2-task holdout → "too thin" gate reason
+    assert derive_findings(CandidateLedger(tmp_path / "empty"), None) == []
+
+
 async def test_optimizer_resumes_from_existing_ledger(tmp_path):
     """Same root twice: the second run keeps the first run's seed and history
     instead of re-seeding — the search is durable, like everything else."""
@@ -537,3 +578,65 @@ async def test_optimizer_resumes_from_existing_ledger(tmp_path):
     r2 = await second.optimize(rounds=1)
     assert r2.seed_id == r1.seed_id
     assert len(CandidateLedger(tmp_path).candidates()) >= 2
+
+
+async def test_auto_promote_false_parks_a_pending_promotion(tmp_path):
+    """WebUI-started searches never rewire the harness on their own: a
+    gate-passing winner is staged for human approval instead of promoted."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    report = await HarnessOptimizer(
+        TranscribeOnlyWorker, RuleProposer(), search, holdout, ledger, k=2,
+        auto_promote=False,
+    ).optimize(rounds=4)
+    assert not report.promoted
+    assert report.pending == report.best_id
+    assert ledger.promoted_params() is None
+    pending = ledger.pending_info()
+    assert pending["candidate"] == report.best_id
+    assert pending["gate"]["go"] is True
+    # findings surface it as the user's one decision, first
+    from metaharness.optimization.findings import derive_findings
+    findings = derive_findings(ledger, ledger.load_report())
+    assert findings[0]["kind"] == "pending"
+    assert findings[0]["delta"] == {"tool_offload": [False, True]}
+
+
+def test_ledger_construction_is_read_only(tmp_path):
+    """Codex slice-1 P1: opening a ledger (the WebUI does it every poll) must
+    not create directories; only writes may."""
+    root = tmp_path / "never-written"
+    CandidateLedger(root)
+    assert not root.exists()
+    ledger = CandidateLedger(root)
+    ledger.record(evaluated_candidate("c0001", 0.5, 100))
+    assert (root / "candidates" / "c0001").is_dir()
+
+
+def test_serve_boot_replays_the_approved_suite(tmp_path, monkeypatch):
+    """Codex slices-2+3 P1: active.json (any suite) wins over the mixed
+    fallback at serve boot, and the wrapper records its tuning base."""
+    import json
+
+    from metaharness import cli
+    from metaharness.core.types import Tier
+    from metaharness.harness.enrichment import ToolOffload
+
+    monkeypatch.setattr(cli, "JOURNAL_DIR", tmp_path / "journals")
+    root = tmp_path / "optimization"
+    root.mkdir(parents=True)
+    (root / "active.json").write_text(json.dumps({
+        "suite": "math", "candidate": "c0002",
+        "params": HarnessParams(tool_offload=True).model_dump(),
+    }))
+    base = StubWorker()
+    runners = {Tier.SMALL: base}
+    cli._apply_promoted(runners)
+    assert isinstance(runners[Tier.SMALL], ToolOffload)
+    assert runners[Tier.SMALL]._tuning_base is base
+
+    # no active.json and no mixed promotion -> untouched
+    (root / "active.json").unlink()
+    runners = {Tier.SMALL: base}
+    cli._apply_promoted(runners)
+    assert runners[Tier.SMALL] is base

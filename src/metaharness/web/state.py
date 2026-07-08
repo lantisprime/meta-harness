@@ -42,6 +42,7 @@ class HarnessState:
     budget: Optional[Budget] = None
     config: HarnessConfig = field(default_factory=HarnessConfig)
     config_path: Optional[object] = None  # Path; set when config should persist
+    optimization_root: Optional[object] = None  # Path; harness-tuning ledgers live here
     tools: ToolRegistry = field(default_factory=default_registry)
 
     def save_config(self) -> None:
@@ -88,6 +89,7 @@ class HarnessState:
 
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
+        self.optimization_root = directory / "optimization"
         self.enable_playbook_persistence(directory / "playbook.json")
 
         matrix_path = directory / "matrix.json"
