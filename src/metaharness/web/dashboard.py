@@ -1054,6 +1054,7 @@ function renderDoneStep(){
       <div class="small dim" id="fu-msg" style="margin-top:8px"></div></div>
     <div class="wiz-nav">
       <button class="btn ghost" onclick="showView('console')">Inspect in Console</button>
+      <a class="btn ghost" href="/api/runs/${esc(wiz.runId)}/package" download>⬇ Download run package</a>
       <button class="btn" onclick="resetWizard()">Start another run →</button></div>`;
 }
 

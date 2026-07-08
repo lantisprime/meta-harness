@@ -10,7 +10,7 @@ import asyncio
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from metaharness.config import PROVIDER_CATALOG, AgentConfig, MCPServerConfig, is_masked
@@ -140,6 +140,28 @@ def create_app(state: HarnessState) -> FastAPI:
             "state": run_state.model_dump(mode="json"),
             "journal": [e.model_dump(mode="json") for e in journal.entries()],
         }
+
+    @app.get("/api/runs/{run_id}/package")
+    async def run_package(run_id: str) -> Response:
+        """Everything the run produced, as one zip: manifest, workflow spec,
+        journal, per-step outputs, and the files changed under each step's
+        recorded workspace root (capped; omissions listed in the manifest).
+        Works for failed runs too — a failure package is a bug report."""
+        from metaharness.workflows.package import build_package_bytes
+
+        try:
+            spec = state.engine._runs[run_id][0]
+            run_state = state.engine.state(run_id)
+            journal = state.engine.journal(run_id)
+        except (KeyError, AttributeError):
+            raise HTTPException(404, f"unknown run {run_id}")
+        payload = build_package_bytes(spec, run_state, journal.entries())
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={"Content-Disposition":
+                     f'attachment; filename="{run_id}-package.zip"'},
+        )
 
     def _advance_in_background(run_id: str) -> None:
         async def _run() -> None:
