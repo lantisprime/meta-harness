@@ -178,6 +178,28 @@ def create_app(state: HarnessState) -> FastAPI:
         return await plan_workflow(req.goal, state.planner_runner(), context,
                                    tools=state.tools)
 
+    @app.post("/api/workflows/validate")
+    async def validate_workflow(req: StartRunRequest) -> dict[str, Any]:
+        """Validate a hand-written or hand-edited workflow WITHOUT running it:
+        the plan editor's save/apply path. Returns the normalized workflow
+        plus its YAML form (for the raw editor); a bad spec 422s with the
+        validator's exact complaint."""
+        import yaml
+
+        try:
+            if req.workflow is not None:
+                from metaharness.workflows.dsl import WorkflowSpec
+                spec = WorkflowSpec.model_validate(req.workflow)
+            elif req.workflow_yaml:
+                spec = load_workflow(req.workflow_yaml)
+            else:
+                raise ValueError("provide workflow or workflow_yaml")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        data = spec.model_dump(mode="json")
+        return {"workflow": data,
+                "yaml": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
+
     @app.post("/api/plans")
     async def preview_plan(req: GoalRequest) -> dict[str, Any]:
         """Plan a workflow from a goal WITHOUT starting it — the wizard's review

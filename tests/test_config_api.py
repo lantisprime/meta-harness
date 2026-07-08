@@ -196,3 +196,32 @@ async def test_retire_then_readd_same_worker_id(harness):
     resp = await client.post("/api/workers", json=body)
     assert resp.status_code == 201
     assert resp.json()["key_rotations"] == 1  # re-admission visible in audit
+
+
+async def test_workflow_validate_endpoint(harness):
+    _, client = harness
+    good = {"name": "wf", "steps": [
+        {"id": "a", "objective": "do a"},
+        {"id": "b", "objective": "do b", "depends_on": ["a"], "hitl": True}]}
+    resp = await client.post("/api/workflows/validate", json={"workflow": good})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [s["id"] for s in body["workflow"]["steps"]] == ["a", "b"]
+    assert "steps:" in body["yaml"]
+
+    # YAML round-trips through the same validator
+    resp = await client.post("/api/workflows/validate",
+                             json={"workflow_yaml": body["yaml"]})
+    assert resp.status_code == 200
+
+    dup = {"name": "wf", "steps": [{"id": "a", "objective": "x"},
+                                   {"id": "a", "objective": "y"}]}
+    resp = await client.post("/api/workflows/validate", json={"workflow": dup})
+    assert resp.status_code == 422 and "duplicate" in resp.json()["detail"].lower()
+
+    ghost_dep = {"name": "wf", "steps": [
+        {"id": "a", "objective": "x", "depends_on": ["nope"]}]}
+    resp = await client.post("/api/workflows/validate", json={"workflow": ghost_dep})
+    assert resp.status_code == 422
+
+    assert (await client.post("/api/workflows/validate", json={})).status_code == 422

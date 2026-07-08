@@ -146,6 +146,17 @@ tr:last-child td{border-bottom:0}
 .pick-list .pl-row:last-child{border-bottom:0}
 .pick-list .pl-row:hover{background:var(--accent-soft);color:var(--accent)}
 .pick-list .pl-more{padding:6px 13px;font-size:11.5px;color:var(--faint);font-style:italic}
+.step-actions{display:flex;gap:4px;margin-left:auto}
+.step-actions button{width:26px;height:26px;border-radius:8px;border:1px solid var(--line2);
+  background:#fff;color:var(--mut);font-size:12px;line-height:1}
+.step-actions button:hover{color:var(--accent);border-color:var(--accent)}
+.step-edit{background:var(--hair);border-radius:12px;padding:14px 16px;margin-top:10px}
+.step-edit .field{margin-bottom:10px}
+.tool-toggle{padding:4px 11px;border-radius:999px;border:1px solid var(--line2);background:#fff;
+  font-family:var(--mono);font-size:11px;color:var(--mut)}
+.tool-toggle.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.yaml-box{width:100%;min-height:320px;font-family:var(--mono);font-size:12px;
+  border:1px solid var(--line2);border-radius:12px;padding:14px;background:#fafafc}
 
 .tierrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
 .tierrow:last-child{border-bottom:0}
@@ -267,7 +278,9 @@ function showView(v){
 
 /* ---------- wizard state machine ---------- */
 const STEPS = ['Agents','Goal','Plan','Run','Done'];
-const wiz = { step: 0, goal: '', context: {}, workflowType: '', plan: null, planSource: '', runId: null, run: null, poller: null };
+const wiz = { step: 0, goal: '', context: {}, workflowType: '', plan: null, planSource: '',
+              editingStep: null, builderMode: false, builder: null, yamlMode: false,
+              yamlText: '', edited: false, runId: null, run: null, poller: null };
 
 function renderStepper(){
   document.getElementById('stepper').innerHTML = STEPS.map((label, i) =>
@@ -340,8 +353,13 @@ async function renderGoalStep(){
   const chosen = types.find(t => t.id === wiz.workflowType);
   const typePills = ['<button class="pill ' + (wiz.workflowType ? '' : 'on') + '" onclick="pickWorkflowType(\\'\\')">Free-form (planner)</button>']
     .concat(types.map(t => `<button class="pill ${wiz.workflowType === t.id ? 'on' : ''}" onclick="pickWorkflowType('${esc(t.id)}')">${esc(t.label)}</button>`))
+    .concat([`<button class="pill ${wiz.workflowType === '__custom__' ? 'on' : ''}" onclick="pickWorkflowType('__custom__')">Custom (build by hand)</button>`])
     .join('');
-  const typeNote = chosen
+  const typeNote = wiz.workflowType === '__custom__'
+    ? `<div class="hint-panel"><b>Custom workflow</b>
+        No planner involved: you get one empty step and the full editor —
+        add steps, wire dependencies, pick tools, set gates. YAML mode available.</div>`
+    : chosen
     ? `<div class="hint-panel"><b>${esc(chosen.label)} — deterministic phase spine</b>
         ${esc(chosen.description)}<br>
         <span class="kv">${chosen.phases.map(p => p.id + (p.hitl ? ' ⛔' : '')).join(' → ')}</span>
@@ -374,6 +392,18 @@ async function makePlan(){
   const ctxRaw = document.getElementById('goalctx').value.trim();
   wiz.context = {};
   if(ctxRaw){ try{ wiz.context = JSON.parse(ctxRaw); }catch(e){ msg.textContent = 'context is not valid JSON'; return; } }
+  if(wiz.workflowType === '__custom__'){
+    wiz.plan = {name: wiz.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'custom',
+                steps: [{id: 'step-1', task_type: 'general', objective: wiz.goal,
+                         inputs: {goal: '$context.goal'}, boundaries: [], tools: [],
+                         depends_on: [], hitl: false, success_check: null}]};
+    wiz.plan.steps = [];  // wizard-driven: steps are added one by one
+    wiz.planSource = 'custom';
+    wiz.builderMode = true;
+    wiz.builder = null;
+    setStep(2);
+    return;
+  }
   btn.disabled = true;
   msg.innerHTML = wiz.workflowType
     ? '<span class="spin"></span> expanding the workflow template…'
@@ -387,31 +417,308 @@ async function makePlan(){
   setStep(2);
 }
 
-/* ---------- step 3: plan review ---------- */
-function renderPlanStep(){
+/* ---------- step 3: plan review + editor + builder ---------- */
+const TASK_TYPES = ['classify','extract','summarize','transform','arithmetic',
+                    'code_edit','reasoning','planning','general'];
+let TOOLS_NAMES = null;
+async function loadToolNames(){
+  if(TOOLS_NAMES === null){
+    try{ TOOLS_NAMES = (await get('/api/tools')).map(t => t.name); }catch(e){ TOOLS_NAMES = []; }
+  }
+  return TOOLS_NAMES;
+}
+
+function checkOf(step){
+  const c = step.success_check;
+  if(!c) return {kind: 'none', value: ''};
+  const kind = Object.keys(c)[0];
+  const v = c[kind];
+  return {kind, value: Array.isArray(v) ? v.join(', ') : String(v)};
+}
+
+function buildCheck(kind, value){
+  if(kind === 'none' || !value.trim()) return null;
+  if(kind === 'one_of') return {one_of: value.split(',').map(x => x.trim()).filter(Boolean)};
+  return {[kind]: value.trim()};
+}
+
+function planNote(){
+  const src = wiz.planSource || '';
+  const base = src.startsWith('template:')
+    ? badge('act', src.replace('template:', '') + ' template')
+    : src === 'planner' ? badge('act', 'planned by frontier agent')
+    : src === 'custom' ? badge('act', 'custom — built by hand')
+    : badge('warn', 'fallback: single step');
+  return base + (wiz.edited ? ' ' + badge('ok', 'edited by you') : '');
+}
+
+async function renderPlanStep(){
+  await loadToolNames();
+  if(wiz.builderMode){
+    if(!wiz.builder) wiz.builder = {sub: 0, draft: newDraft()};
+    return renderStepBuilder();
+  }
+  if(wiz.yamlMode) return renderYamlEditor();
   const p = wiz.plan;
-  const note = wiz.planSource.startsWith('template:')
-    ? badge('act', wiz.planSource.replace('template:', '') + ' template') + ' <span class="small dim">deterministic phase spine — no LLM planned this</span>'
-    : wiz.planSource === 'planner'
-    ? badge('act','planned by ' + 'frontier agent')
-    : badge('warn','fallback: single step') + ' <span class="small dim">the planner could not produce a valid multi-step plan</span>';
   document.getElementById('wiz-body').innerHTML = `
-    <div class="guide"><div><b>Nothing has run yet.</b>
-      <p>Check the steps below. Steps marked HITL will pause and wait for your approval
-      before running. If the plan looks wrong, go back and rephrase the goal.</p></div></div>
-    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">${note}</div>
-      ${p.steps.map((s, i) => `
+    <div class="guide"><div><b>Nothing has run yet — and every step is editable.</b>
+      <p>✎ edits a step, ↑↓ reorder, ✕ removes, + adds one via the step wizard.
+      Steps marked HITL pause for your approval. YAML mode has every advanced field.</p></div></div>
+    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">${planNote()}</div>
+      ${p.steps.map((st, i) => wiz.editingStep === i ? stepEditForm(st, i) : `
         <div class="planstep"><div class="n">${i + 1}</div>
-          <div style="flex:1"><div class="pt">${esc(s.id)}
-            ${badge('dim', s.task_type)}${s.hitl ? badge('warn','HITL — waits for you') : ''}
-            ${s.success_check ? badge('ok','verifiable') : ''}
-            ${(s.tools || []).map(t => badge('act','🔧 ' + t)).join('')}</div>
-          <div class="pd">${esc(s.objective)}</div>
-          ${s.depends_on.length ? `<div class="pd mono">after: ${esc(s.depends_on.join(', '))}</div>` : ''}</div></div>`).join('')}
-    </div>
+          <div style="flex:1"><div class="pt">${esc(st.id)}
+            ${badge('dim', st.task_type)}${st.hitl ? badge('warn','HITL — waits for you') : ''}
+            ${st.success_check ? badge('ok','verifiable') : ''}
+            ${(st.tools || []).map(t => badge('act','🔧 ' + t)).join('')}</div>
+          <div class="pd">${esc(st.objective)}</div>
+          ${(st.depends_on || []).length ? `<div class="pd mono">after: ${esc(st.depends_on.join(', '))}</div>` : ''}</div>
+          <div class="step-actions">
+            <button title="edit" onclick="editStep(${i})">✎</button>
+            <button title="move up" onclick="moveStep(${i},-1)" ${i ? '' : 'disabled'}>↑</button>
+            <button title="move down" onclick="moveStep(${i},1)" ${i < p.steps.length - 1 ? '' : 'disabled'}>↓</button>
+            <button title="remove" onclick="deleteStep(${i})">✕</button></div></div>`).join('')}
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="btn ghost" onclick="openStepBuilder()">+ Add step (wizard)</button>
+        <button class="btn ghost" onclick="openYaml()">Edit as YAML</button></div>
+      <div class="small red" id="planmsg" style="margin-top:8px"></div></div>
     <div class="wiz-nav">
       <button class="btn ghost" onclick="setStep(1)">← Rephrase goal</button>
-      <button class="btn" onclick="startRun()">Run this plan →</button></div>`;
+      <button class="btn" onclick="runValidatedPlan()" ${p.steps.length ? '' : 'disabled'}>Run this plan →</button></div>`;
+}
+
+/* -- inline step editor (works on ANY plan: LLM, template, custom) -- */
+function stepEditForm(st, i){
+  const check = checkOf(st);
+  return `<div class="step-edit">
+    <div class="field" style="display:flex;gap:10px">
+      <span style="width:180px"><label>Step id</label>
+        <input id="se-id" class="mono" value="${esc(st.id)}"></span>
+      <span style="flex:1"><label>Task type</label><select id="se-type">
+        ${TASK_TYPES.map(t => `<option ${st.task_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></span></div>
+    <div class="field"><label>Objective — the full delegation contract for this step</label>
+      <textarea id="se-obj">${esc(st.objective)}</textarea></div>
+    <div class="field"><label>Tools this step may call</label>
+      <div class="pillrow">${(TOOLS_NAMES || []).map(t =>
+        `<button class="tool-toggle ${(st.tools || []).includes(t) ? 'on' : ''}" onclick="this.classList.toggle('on')" data-tool="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>
+    <div class="field" style="display:flex;gap:10px">
+      <span style="width:160px"><label>Success check</label><select id="se-check">
+        ${['none','equals','contains','one_of'].map(k => `<option ${check.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
+      <span style="flex:1"><label>Check value (one_of: comma-separated)</label>
+        <input id="se-checkval" class="mono" value="${esc(check.value)}"></span></div>
+    <div class="field" style="display:flex;gap:10px">
+      <span style="flex:1"><label>Depends on (comma-separated step ids)</label>
+        <input id="se-deps" class="mono" value="${esc((st.depends_on || []).join(', '))}"></span>
+      <span style="width:190px;align-self:end"><label style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="se-hitl" ${st.hitl ? 'checked' : ''} style="width:auto"> HITL gate</label></span></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn" onclick="saveStep(${i})">Save step</button>
+      <button class="btn ghost" onclick="wiz.editingStep=null;renderPlanStep()">Cancel</button></div></div>`;
+}
+
+function editStep(i){ wiz.editingStep = i; renderPlanStep(); }
+
+function collectStepForm(){
+  return {
+    id: document.getElementById('se-id').value.trim(),
+    task_type: document.getElementById('se-type').value,
+    objective: document.getElementById('se-obj').value.trim(),
+    tools: [...document.querySelectorAll('.step-edit .tool-toggle.on')].map(b => b.dataset.tool),
+    success_check: buildCheck(document.getElementById('se-check').value,
+                              document.getElementById('se-checkval').value),
+    depends_on: document.getElementById('se-deps').value.split(',').map(x => x.trim()).filter(Boolean),
+    hitl: document.getElementById('se-hitl').checked,
+  };
+}
+
+function saveStep(i){
+  const edit = collectStepForm();
+  if(!edit.id){ toast('the step needs an id'); return; }
+  if(!edit.objective){ toast('the step needs an objective'); return; }
+  if(wiz.plan.steps.some((st, j) => j !== i && st.id === edit.id)){
+    toast(`step id ${edit.id} is already used`); return; }
+  wiz.plan.steps[i] = Object.assign({}, wiz.plan.steps[i], edit);
+  wiz.editingStep = null; wiz.edited = true;
+  renderPlanStep();
+}
+
+function deleteStep(i){
+  const removed = wiz.plan.steps.splice(i, 1)[0];
+  wiz.plan.steps.forEach(st => {
+    st.depends_on = (st.depends_on || []).filter(d => d !== removed.id); });
+  wiz.editingStep = null; wiz.edited = true;
+  renderPlanStep();
+}
+
+function moveStep(i, delta){
+  const j = i + delta;
+  if(j < 0 || j >= wiz.plan.steps.length) return;
+  [wiz.plan.steps[i], wiz.plan.steps[j]] = [wiz.plan.steps[j], wiz.plan.steps[i]];
+  wiz.edited = true;
+  renderPlanStep();
+}
+
+async function runValidatedPlan(){
+  const msg = document.getElementById('planmsg');
+  msg.textContent = '';
+  const r = await post('/api/workflows/validate', {workflow: wiz.plan});
+  if(!r.ok){
+    msg.textContent = 'invalid workflow: ' + JSON.parse(await r.text()).detail;
+    return;
+  }
+  wiz.plan = (await r.json()).workflow;  // normalized
+  startRun();
+}
+
+/* -- step builder: wizard-driven custom workflow authoring -- */
+function newDraft(){
+  return {id: `step-${wiz.plan.steps.length + 1}`, task_type: 'general', objective: '',
+          tools: [], hitl: false, depends_on: [], check_kind: 'none', check_value: ''};
+}
+
+function openStepBuilder(){
+  wiz.builderMode = true;
+  wiz.builder = {sub: 0, draft: newDraft()};
+  renderPlanStep();
+}
+
+function renderStepBuilder(){
+  const b = wiz.builder;
+  const d = b.draft;
+  const chips = ['Objective', 'Type & tools', 'Verify & gate'].map((l, i) =>
+    `<span class="t ${i === b.sub ? 'on' : ''} ${i < b.sub ? 'done' : ''}">${i + 1} · ${l}</span>`).join('');
+  let inner = '';
+  if(b.sub === 0){
+    inner = `
+      <div class="hint-panel"><b>A step is one delegation contract</b>
+        Say exactly what the worker must produce — outcome, not process. Mention
+        checkable expectations ("respond with exactly one of: low, high") and the
+        verify sub-step can enforce them mechanically.</div>
+      <div class="field"><label>Step id</label>
+        <input id="sb-id" class="mono" value="${esc(d.id)}"></div>
+      <div class="field"><label>Objective</label>
+        <textarea id="sb-obj" placeholder="e.g. Classify the ticket severity as exactly one of: low, high.">${esc(d.objective)}</textarea></div>`;
+  }else if(b.sub === 1){
+    inner = `
+      <div class="field"><label>Task type — routes the step to the right tier</label>
+        <div class="pillrow">${TASK_TYPES.map(t =>
+          `<button class="pill ${d.task_type === t ? 'on' : ''}" onclick="wiz.builder.draft.task_type='${t}';renderPlanStep()">${t}</button>`).join('')}</div></div>
+      <div class="field"><label>Tools (only what this step truly needs — fewer is better)</label>
+        <div class="pillrow">${(TOOLS_NAMES || []).map(t =>
+          `<button class="tool-toggle ${d.tools.includes(t) ? 'on' : ''}" onclick="toggleDraftTool('${esc(t)}')">${esc(t)}</button>`).join('')}</div></div>`;
+  }else{
+    const prior = wiz.plan.steps.map(st => st.id);
+    inner = `
+      <div class="field" style="display:flex;gap:10px">
+        <span style="width:160px"><label>Success check</label><select id="sb-check">
+          ${['none','equals','contains','one_of'].map(k => `<option ${d.check_kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
+        <span style="flex:1"><label>Check value (one_of: comma-separated)</label>
+          <input id="sb-checkval" class="mono" value="${esc(d.check_value)}"></span></div>
+      <div class="field"><label>Runs after (dependencies)</label>
+        ${prior.length ? `<div class="pillrow">${prior.map(id =>
+          `<button class="pill ${d.depends_on.includes(id) ? 'on' : ''}" onclick="toggleDraftDep('${esc(id)}')">${esc(id)}</button>`).join('')}</div>`
+          : '<span class="small dim">first step — nothing to depend on yet</span>'}</div>
+      <div class="field"><label style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="sb-hitl" ${d.hitl ? 'checked' : ''} style="width:auto">
+        HITL gate — pause for my approval before this step runs</label></div>`;
+  }
+  const added = wiz.plan.steps.map((st, i) =>
+    `<div class="small" style="padding:3px 0"><span class="mono">${i + 1}. ${esc(st.id)}</span>
+     ${badge('dim', st.task_type)}${st.hitl ? badge('warn','gate') : ''}</div>`).join('');
+  document.getElementById('wiz-body').innerHTML = `
+    <div class="card"><h2>Add step ${wiz.plan.steps.length + 1} — ${esc(wiz.plan.name)}</h2>
+      <div class="subwiz-steps">${chips}</div>${inner}
+      <div class="wiz-nav">
+        <button class="btn ghost" onclick="builderNav(-1)">${b.sub === 0 ? 'Cancel' : '← Back'}</button>
+        ${b.sub < 2
+          ? `<button class="btn" onclick="builderNav(1)">Next →</button>`
+          : `<button class="btn" onclick="builderCommit()">Add step to workflow</button>`}</div></div>
+    ${wiz.plan.steps.length ? `<div class="card" style="margin-top:16px"><h2>Workflow so far</h2>${added}
+      <div style="margin-top:10px"><button class="btn" onclick="wiz.builderMode=false;renderPlanStep()">Done — review workflow →</button></div></div>` : ''}`;
+}
+
+function toggleDraftTool(t){
+  const tools = wiz.builder.draft.tools;
+  tools.includes(t) ? tools.splice(tools.indexOf(t), 1) : tools.push(t);
+  renderPlanStep();
+}
+
+function toggleDraftDep(id){
+  const deps = wiz.builder.draft.depends_on;
+  deps.includes(id) ? deps.splice(deps.indexOf(id), 1) : deps.push(id);
+  renderPlanStep();
+}
+
+function builderCapture(){
+  const d = wiz.builder.draft;
+  const grab = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const v = grab('sb-id'); if(v !== null) d.id = v.trim();
+  const o = grab('sb-obj'); if(o !== null) d.objective = o.trim();
+  const c = grab('sb-check'); if(c !== null) d.check_kind = c;
+  const cv = grab('sb-checkval'); if(cv !== null) d.check_value = cv;
+  const h = document.getElementById('sb-hitl'); if(h) d.hitl = h.checked;
+}
+
+function builderNav(delta){
+  builderCapture();
+  const b = wiz.builder;
+  if(b.sub === 0 && delta < 0){
+    wiz.builderMode = false;
+    if(!wiz.plan.steps.length && wiz.planSource === 'custom') setStep(1);
+    else renderPlanStep();
+    return;
+  }
+  if(b.sub === 0 && delta > 0 && !b.draft.objective){ toast('give the step an objective'); return; }
+  b.sub = Math.max(0, Math.min(2, b.sub + delta));
+  renderPlanStep();
+}
+
+function builderCommit(){
+  builderCapture();
+  const d = wiz.builder.draft;
+  if(wiz.plan.steps.some(st => st.id === d.id)){ toast(`step id ${d.id} is already used`); return; }
+  wiz.plan.steps.push({id: d.id, task_type: d.task_type, objective: d.objective,
+    inputs: {goal: '$context.goal'}, boundaries: [], tools: d.tools.slice(),
+    depends_on: d.depends_on.slice(), hitl: d.hitl,
+    success_check: buildCheck(d.check_kind, d.check_value)});
+  wiz.edited = true;
+  toast(`Added ${d.id}`);
+  wiz.builder = {sub: 0, draft: newDraft()};
+  renderPlanStep();
+}
+
+/* -- YAML power mode -- */
+async function openYaml(){
+  const r = await post('/api/workflows/validate', {workflow: wiz.plan});
+  if(!r.ok){ toast('current plan is invalid: ' + (await r.text()).slice(0, 120)); return; }
+  wiz.yamlText = (await r.json()).yaml;
+  wiz.yamlMode = true;
+  renderPlanStep();
+}
+
+async function applyYaml(){
+  const text = document.getElementById('yaml-box').value;
+  const r = await post('/api/workflows/validate', {workflow_yaml: text});
+  if(!r.ok){
+    document.getElementById('yamlmsg').textContent =
+      'invalid: ' + JSON.parse(await r.text()).detail;
+    return;
+  }
+  wiz.plan = (await r.json()).workflow;
+  wiz.yamlMode = false; wiz.edited = true;
+  renderPlanStep();
+}
+
+function renderYamlEditor(){
+  document.getElementById('wiz-body').innerHTML = `
+    <div class="card"><h2>${esc(wiz.plan.name)} — YAML</h2>
+      <div class="sub">Every field of the DSL is editable here (inputs, boundaries,
+        tier_hint, max_attempts…). Apply validates before anything changes.</div>
+      <textarea id="yaml-box" class="yaml-box">${esc(wiz.yamlText)}</textarea>
+      <div class="small red" id="yamlmsg" style="margin:8px 0"></div>
+      <div class="wiz-nav">
+        <button class="btn ghost" onclick="wiz.yamlMode=false;renderPlanStep()">Cancel</button>
+        <button class="btn" onclick="applyYaml()">Apply YAML</button></div></div>`;
 }
 
 async function startRun(){
@@ -510,6 +817,8 @@ function renderDoneStep(){
 
 function resetWizard(){
   wiz.goal = ''; wiz.context = {}; wiz.plan = null; wiz.runId = null; wiz.run = null;
+  wiz.editingStep = null; wiz.builderMode = false; wiz.builder = null;
+  wiz.yamlMode = false; wiz.edited = false;
   if(wiz.poller){ clearInterval(wiz.poller); wiz.poller = null; }
   setStep(1);
 }

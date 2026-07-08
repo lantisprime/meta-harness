@@ -406,3 +406,95 @@ def test_approval_never_flashes_an_error(page, server):
     assert toasts, "expected approval toasts to be recorded"
     bad = [t for t in toasts if "failed" in t.lower() or "already handled" in t]
     assert bad == [], f"error toast flashed during approvals: {bad}"
+
+
+def test_custom_workflow_built_by_wizard_runs(page, server):
+    """Wizard-driven custom workflow: two steps authored step-by-step (with a
+    verifiable check, a dependency and a gate), reviewed, run to completion."""
+    base, _ = server
+    page.goto(base)
+    page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')")
+    page.wait_for_selector(".pill:has-text('Custom (build by hand)')")
+    page.click(".pill:has-text('Custom (build by hand)')")
+    assert "No planner involved" in page.locator(".hint-panel").inner_text()
+    page.fill("#goal", "triage the incident by hand")
+    page.click("#planbtn")
+
+    # step builder, sub-wizard 1: objective
+    page.wait_for_selector("h2:has-text('Add step 1')")
+    page.fill("#sb-id", "classify")
+    page.fill("#sb-obj", "Classify severity as exactly one of: low, high.")
+    page.click("button:has-text('Next →')")
+    # sub 2: type & tools
+    page.click(".pill:has-text('classify')")
+    page.click("button:has-text('Next →')")
+    # sub 3: verify & gate
+    page.select_option("#sb-check", "one_of")
+    page.fill("#sb-checkval", "low, high")
+    page.click("button:has-text('Add step to workflow')")
+
+    # second step depends on the first, behind a gate
+    page.wait_for_selector("h2:has-text('Add step 2')")
+    page.fill("#sb-id", "page-oncall")
+    page.fill("#sb-obj", "Draft the on-call page for the classified severity.")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Next →')")
+    page.click(".pill:has-text('classify')")     # dependency toggle
+    page.check("#sb-hitl")
+    page.click("button:has-text('Add step to workflow')")
+
+    page.click("button:has-text('Done — review workflow →')")
+    page.wait_for_selector(".planstep")
+    assert page.locator(".planstep").count() == 2
+    assert page.locator(".badge:has-text('custom — built by hand')").count() == 1
+    assert page.locator(".badge:has-text('verifiable')").count() == 1
+    assert page.locator(".badge:has-text('HITL')").count() == 1
+
+    page.click("button:has-text('Run this plan →')")
+    page.wait_for_selector(".guide b:has-text('Approval needed: page-oncall')",
+                           timeout=30_000)
+    page.click("button:has-text('Approve page-oncall')")
+    page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
+
+
+def test_template_plan_is_editable_inline_and_via_yaml(page, server):
+    """The LLM/template-suggested plan is editable: inline step edit, delete,
+    reorder, plus YAML mode with validation that refuses bad specs."""
+    base, _ = server
+    page.goto(base)
+    page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')")
+    page.wait_for_selector(".pill:has-text('Software engineering')")
+    page.click(".pill:has-text('Software engineering')")
+    page.fill("#goal", "editable plan test")
+    page.click("#planbtn")
+    page.wait_for_selector(".planstep")
+
+    # inline edit the first step: tweak objective, add a gate
+    page.locator(".planstep .step-actions button[title='edit']").first.click()
+    page.wait_for_selector(".step-edit")
+    page.fill("#se-obj", "EDITED objective: survey the workspace read-only.")
+    page.check("#se-hitl")
+    page.click("button:has-text('Save step')")
+    page.wait_for_selector(".badge:has-text('edited by you')")
+    assert "EDITED objective" in page.locator(".planstep").first.inner_text()
+    assert page.locator(".badge:has-text('HITL')").count() == 4  # 3 template + 1 new
+
+    # delete the last step; dependent references are cleaned up
+    before = page.locator(".planstep").count()
+    page.locator(".planstep .step-actions button[title='remove']").last.click()
+    assert page.locator(".planstep").count() == before - 1
+
+    # YAML mode: a duplicate id is refused with the validator's message
+    page.click("button:has-text('Edit as YAML')")
+    page.wait_for_selector("#yaml-box")
+    yaml_text = page.locator("#yaml-box").input_value()
+    assert "steps:" in yaml_text
+    page.fill("#yaml-box", yaml_text.replace("id: specify", "id: explore", 1))
+    page.click("button:has-text('Apply YAML')")
+    page.wait_for_selector("#yamlmsg:has-text('invalid')")
+    # restore a valid spec and apply
+    page.fill("#yaml-box", yaml_text)
+    page.click("button:has-text('Apply YAML')")
+    page.wait_for_selector(".planstep")
