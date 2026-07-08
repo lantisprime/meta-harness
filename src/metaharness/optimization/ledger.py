@@ -55,8 +55,9 @@ class CandidateLedger:
     proposer learned from regressions."""
 
     def __init__(self, root: Path | str) -> None:
+        # Construction is READ-ONLY (the WebUI opens ledgers on every poll);
+        # directories are created lazily by the first write.
         self.root = Path(root)
-        (self.root / "candidates").mkdir(parents=True, exist_ok=True)
         self._candidates: list[Candidate] = []
         self._load()
 
@@ -80,7 +81,7 @@ class CandidateLedger:
         if candidate.created_at == 0.0:
             candidate.created_at = now()
         cdir = self.root / "candidates" / candidate.id
-        cdir.mkdir(parents=True, exist_ok=True)
+        cdir.mkdir(parents=True, exist_ok=True)  # first write creates the tree
         (cdir / "candidate.json").write_text(candidate.model_dump_json(indent=1), encoding="utf-8")
         (cdir / "rationale.md").write_text(
             f"# {candidate.id} (parent: {candidate.parent or '—'}, {candidate.status})\n\n"
@@ -150,6 +151,7 @@ class CandidateLedger:
         candidate = self.get(cid)
         if candidate is None or candidate.params is None:
             raise ValueError(f"cannot promote unknown/rejected candidate: {cid}")
+        self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / "promoted.json"
         path.write_text(
             json.dumps(
@@ -165,8 +167,51 @@ class CandidateLedger:
         return path
 
     def promoted_params(self) -> Optional[HarnessParams]:
+        info = self.promoted_info()
+        return HarnessParams.model_validate(info["params"]) if info else None
+
+    def promoted_info(self) -> Optional[dict[str, Any]]:
         path = self.root / "promoted.json"
         if not path.is_file():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return HarnessParams.model_validate(data["params"])
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    # -- pending promotion (human gate) --------------------------------------------
+
+    def save_pending(self, cid: str, gate: dict[str, Any]) -> None:
+        """Park a gate-passing candidate for human approval — the loop never
+        rewires the live harness on its own when a human is in the loop."""
+        candidate = self.get(cid)
+        if candidate is None or candidate.params is None:
+            raise ValueError(f"cannot stage unknown/rejected candidate: {cid}")
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "pending_promotion.json").write_text(
+            json.dumps({"candidate": cid, "staged_at": now(), "gate": gate,
+                        "params": candidate.params.model_dump()}, indent=1, default=str),
+            encoding="utf-8",
+        )
+
+    def pending_info(self) -> Optional[dict[str, Any]]:
+        path = self.root / "pending_promotion.json"
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def clear_pending(self) -> None:
+        (self.root / "pending_promotion.json").unlink(missing_ok=True)
+
+    # -- report ------------------------------------------------------------------
+
+    def save_report(self, report: dict[str, Any]) -> None:
+        """Persist the loop's final report next to the candidates — the console
+        renders search results long after the process that ran them is gone."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "report.json").write_text(
+            json.dumps(report, indent=1, default=str), encoding="utf-8"
+        )
+
+    def load_report(self) -> Optional[dict[str, Any]]:
+        path = self.root / "report.json"
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))

@@ -46,6 +46,7 @@ class OptimizationReport(BaseModel):
     frontier: list[str] = Field(default_factory=list)
     gate: Optional[GateReport] = None
     promoted: bool = False
+    pending: Optional[str] = None    # gate-passing candidate awaiting human approval
     notes: list[str] = Field(default_factory=list)
 
 
@@ -65,6 +66,7 @@ class HarnessOptimizer:
         budget: Optional[Budget] = None,
         lessons: Optional[list[str]] = None,
         seed_params: Optional[HarnessParams] = None,
+        auto_promote: bool = True,
     ) -> None:
         for name, tasks in (("search", search_tasks), ("holdout", holdout_tasks)):
             unscoreable = [t.id for t in tasks if not t.success_check and not t.output_schema]
@@ -79,6 +81,9 @@ class HarnessOptimizer:
         self.budget = budget
         self.lessons = lessons
         self.seed_params = seed_params or HarnessParams()
+        # auto_promote=False parks a gate-passing winner as a pending promotion
+        # for human approval (WebUI); True promotes immediately (CLI default).
+        self.auto_promote = auto_promote
 
     # -- evaluation --------------------------------------------------------------
 
@@ -140,6 +145,13 @@ class HarnessOptimizer:
     # -- the loop ---------------------------------------------------------------
 
     async def optimize(self, rounds: int = 6) -> OptimizationReport:
+        """Run the search and persist the final report into the ledger root, so
+        the WebUI can render results without holding the process."""
+        report = await self._optimize(rounds)
+        self.ledger.save_report(report.model_dump(mode="json"))
+        return report
+
+    async def _optimize(self, rounds: int) -> OptimizationReport:
         report = OptimizationReport()
 
         # seed: the incumbent configuration, evaluated once. A pre-populated
@@ -271,11 +283,16 @@ class HarnessOptimizer:
             winner, gate, _, _ = min(
                 promotable, key=lambda j: (-j[2].pass_hat_k, j[2].tokens_total)
             )
-            self.ledger.promote(winner.id)
-            report.promoted = True
             report.best_id = winner.id
             report.gate = gate
             report.notes.extend(gate.reasons)
+            if self.auto_promote:
+                self.ledger.promote(winner.id)
+                report.promoted = True
+            else:
+                self.ledger.save_pending(winner.id, gate.model_dump(mode="json"))
+                report.pending = winner.id
+                report.notes.append(f"{winner.id} cleared the held-out gate — promotion awaits approval")
         elif judged:
             report.gate = judged[-1][1]
         return report
