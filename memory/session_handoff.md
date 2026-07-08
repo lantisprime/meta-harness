@@ -1,41 +1,40 @@
 # Session Handoff — meta-harness (2026-07-08, session 5)
 
-## State: v0.5 "humanize console" shipped & pushed. 254/254 tests. 6 commits on main (…→ 0b779c1).
-Server :8321 IS running v0.5 (restarted twice this session, screenshot-verified via Playwright).
+## State: v0.5 shipped & pushed straight to main (user's explicit call — no PR).
+255/255 tests. 9 commits: 9b29100 → c3011d0 (+ this handoff). Server :8321 IS
+running v0.5 (restarted 3× this session, Playwright screenshot-verified).
 
 ## What happened
-User flagged Console/Settings as "not human friendly" and pointed at the design
-handoff in ../design_handoff_structure_lab_console (Structure Lab console spec:
-guide banners, plain-language ledger rows, numbered admin questions). Implemented
-the full humanize pass. User waived all approval gates mid-session ("no rules").
-Two codex reviews via second-opinion.mjs (--storage episodic, --dispatch; takes
->2 min → run in background): round 1 HOLD/REJECT (4 findings), round 2 HOLD
-(1 finding). All 5 distinct findings ACCEPTed and fixed.
+User flagged Console/Settings as "not human friendly" → applied the design
+handoff in ../design_handoff_structure_lab_console (guide banners, plain-language
+ledger rows, numbered admin questions). Then added pagination to every console
+card on request. User waived all approval gates ("no rules") and later confirmed
+direct-to-main over PR. Two codex reviews (second-opinion.mjs --storage episodic
+--dispatch, run in background — takes >2 min): 5 findings total, all ACCEPTed+fixed.
 
-## v0.5 (one concern per commit)
+## v0.5 commits (one concern each)
 - /api/runs: journal-derived started_at/updated_at
-- Console run ledger: goal-as-title, mono meta line (id · template · ago),
-  one plain story per run, inline Approve/Reject; data-* delegation for
-  user-authored ids (codex P1 — inline onclick JS-string injection) + hostile-id test
-- Console panels: Agents / Audit trail / Who's good at what / Lessons learned /
-  Why runs fail (MAST_PLAIN map + tooltip) / Under the hood
+- Console run ledger: goal-as-title, mono meta line, plain story per run, inline
+  Approve/Reject; data-* delegation for user-authored ids (codex P1 injection) + tests
+- Console panels humanized: Agents / Audit trail / Who's good at what / Lessons
+  learned / Why runs fail (MAST_PLAIN map) / Under the hood
 - Settings: 3 numbered questions, collapsed tool catalog, deleteMcp defined
-  (was a latent ReferenceError), model pick-list also delegated
-- Word-boundary goal truncation (templates.py) + font-synthesis:none
-- runTitle() only trusts string goals (codex P2 — numeric goal crashed ledger)
+  (was latent ReferenceError), pick-lists delegated
+- Word-boundary goal truncation + font-synthesis:none
+- runTitle() trusts only string goals (codex P2 — numeric goal crashed ledger)
+- paginate() on all 7 console cards: 8/page (10 tables, 3 model groups),
+  Newer/Older vs Prev/Next, state survives 3s poll, e2e-tested
 
 ## Notes
-- User screenshots showed ALL text italic — client-side only (served HTML clean,
-  Google Fonts upright, no local font cuts). font-synthesis:none added as guard;
-  ask user to hard-refresh and confirm. Chrome extension was disconnected.
-- e2e selectors live on copy strings — humanizing copy broke 9 selectors; all fixed.
+- User's all-italic screenshots were client-side; font-synthesis:none added.
+  If still italic after hard refresh, debug live (Chrome extension was disconnected).
+- e2e selectors live on copy strings — humanizing copy broke 9; all fixed.
 
 ## Next steps (carried over)
-1. Re-run SE template e2e on v0.5 with real workers (judge-evidence fix still unproven).
+1. Re-run SE template e2e on v0.5 with real workers (judge-evidence fix unproven).
 2. Issues #1 (execution-based verify for code_edit), #2 (CLI timeout exposure).
 3. gemma vs qwen eval (sdlc_capability_suite ready).
 4. Bounded loops (repeat_until); multi-worker per tier.
-5. Possible sweep: remaining inline-onclick handlers in the Run wizard (server-
-   generated args today, but the delegation pattern is established now).
+5. Optional: delegate remaining Run-wizard inline onclicks (pattern established).
 
 Episodic: em-search "v0.5 humanize". Reset context now.
