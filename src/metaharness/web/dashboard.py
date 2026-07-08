@@ -1108,7 +1108,8 @@ async function agentTest(){
   const w = SET.agentWiz;
   document.getElementById('aw-test').innerHTML = '<span class="spin"></span> testing…';
   const r = await post('/api/test_worker', {kind: w.kind, provider: w.provider,
-    base_url: w.base_url, model: w.model, system_prompt: w.system_prompt, cli: w.cli});
+    base_url: w.provider ? '' : w.base_url,  // provider ref wins; never a stale direct URL
+    model: w.model, system_prompt: w.system_prompt, cli: w.cli});
   w.test = r.ok ? await r.json() : {ok: false, error: (await r.text()).slice(0,140)};
   renderSettings();
 }

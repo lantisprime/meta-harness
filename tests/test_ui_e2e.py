@@ -242,3 +242,40 @@ def test_agent_wizard_subscription_kind(page, server):
         assert page.locator(".pill:has-text('Claude Code')").is_disabled()
     page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
+
+
+def test_agent_test_sends_provider_ref_not_stale_url(page, server):
+    """Regression: with a provider selected, the wizard's Test must resolve
+    through the provider — a lingering direct-URL default (localhost:1234)
+    must never reach the request (bug: DeepSeek test hit LM Studio)."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Agents')")
+    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click("button:has-text('Next →')")   # kind: LLM endpoint (default)
+    # direct-URL default renders first — this is the value that used to leak
+    assert "localhost:1234" in page.locator("#aw-base").input_value()
+    page.click(".pill:has-text('LM Studio')")  # provider saved by earlier test
+    page.fill("#aw-model", "some-model")
+    page.click("button:has-text('Next →')")
+    page.fill("#aw-id", "ds-agent")
+    page.click("button:has-text('Next →')")
+
+    captured = {}
+
+    def intercept(route):
+        captured.update(json=route.request.post_data_json)
+        route.fulfill(json={"ok": True, "latency_ms": 1, "reply": "OK"})
+
+    page.route("**/api/test_worker", intercept)
+    page.click("button:has-text('Test')")
+    page.wait_for_selector("#aw-test .green")
+    page.unroute("**/api/test_worker")
+    assert captured["json"]["provider"] == "lmstudio"
+    assert captured["json"]["base_url"] == ""   # stale default never leaks
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")

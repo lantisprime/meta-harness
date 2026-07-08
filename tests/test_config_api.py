@@ -174,3 +174,12 @@ async def test_add_subscription_worker_validates_install(harness, monkeypatch):
         "worker_id": "sub-w", "tier": "frontier",
         "kind": "subscription_cli", "cli": "claude"})
     assert resp.status_code == 422
+
+
+async def test_reserved_worker_ids_rejected(harness):
+    _, client = harness
+    for wid in ("orchestrator", "config-test"):
+        resp = await client.post("/api/workers", json={
+            "worker_id": wid, "tier": "mid", "kind": "mock"})
+        assert resp.status_code == 422
+        assert "reserved" in resp.json()["detail"]

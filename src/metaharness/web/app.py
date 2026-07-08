@@ -262,6 +262,8 @@ def create_app(state: HarnessState) -> FastAPI:
         """Configure a new agent: build the runner, admit its identity through
         the registration ceremony, point the tier's routing slot at it, and
         (by default) persist the definition so it survives restarts."""
+        if req.worker_id in ("orchestrator", "config-test"):
+            raise HTTPException(422, f"worker id {req.worker_id!r} is reserved")
         agent = _agent_config_from(req)
         if req.kind == "openai_compat":
             base_url, api_key = state.config.resolve_endpoint(agent)
