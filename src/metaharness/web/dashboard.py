@@ -213,6 +213,22 @@ details.jt details.jt,.jrow{margin-left:16px}
 .jv.jnum{color:var(--amber)}
 .jv.jbool{color:var(--red)}
 .jv.jnull{color:var(--faint)}
+/* step tabs (Run/Done screens) */
+.steptabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px;border-bottom:1px solid var(--line2);padding-bottom:10px}
+.stab{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);
+  background:var(--card);border-radius:999px;padding:6px 14px 6px 7px;font-size:12.5px;
+  font-family:var(--sans);font-weight:600;color:var(--ink2);cursor:pointer}
+.stab:hover{border-color:var(--accent)}
+.stab.on{background:var(--dark);color:var(--on-dark);border-color:var(--dark)}
+.stab .ticon{width:20px;height:20px;border-radius:999px;display:inline-flex;align-items:center;
+  justify-content:center;font-size:11px;font-family:var(--mono);
+  background:var(--accent-soft);color:var(--accent)}
+.stab .ticon.done{background:var(--green);color:#fff}
+.stab .ticon.now{background:var(--accent);color:#fff}
+.stab .ticon.fail{background:var(--red);color:#fff}
+.steppanel{padding:10px 2px 2px}
+.steppanel .pt{font-weight:600;font-size:13.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.steppanel .pd{color:var(--mut2);font-size:12.5px;margin-top:4px}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-soft);
   border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
   vertical-align:-1px}
@@ -404,7 +420,8 @@ function showView(v){
 const STEPS = ['Agents','Goal','Plan','Run','Done'];
 const wiz = { step: 0, goal: '', context: {}, workflowType: '', plan: null, planSource: '',
               editingStep: null, builderMode: false, builder: null, yamlMode: false,
-              yamlText: '', edited: false, runId: null, run: null, poller: null };
+              yamlText: '', edited: false, runId: null, run: null, poller: null,
+              pinnedStep: null, fallbackReason: '' };
 
 function renderStepper(){
   document.getElementById('stepper').innerHTML = STEPS.map((label, i) =>
@@ -895,6 +912,7 @@ async function startRun(){
   if(!r.ok){ toast('start failed: ' + (await r.text()).slice(0,120)); return; }
   const state = await r.json();
   wiz.runId = state.run_id; wiz.run = state;
+  wiz.pinnedStep = null;   // fresh run → tabs auto-follow again
   setStep(3);
   wiz.poller = setInterval(pollRun, 2000);
 }
@@ -935,6 +953,51 @@ function attemptRows(stepId){
   }).join('')}</div>`;
 }
 
+/* ---------- tabbed step display (Run + Done screens) ----------
+   Step names sit in a tab strip on top; one step's detail shows at a time.
+   The selected tab auto-follows the running/awaiting/failed step until the
+   user clicks a tab (pin). Tab ids travel via data-step-id + one delegated
+   listener — step ids are planner/user-controlled, never interpolate them
+   into inline handlers. */
+function activeStepId(){
+  const p = wiz.plan, run = wiz.run || {};
+  if(wiz.pinnedStep && p.steps.some(s => s.id === wiz.pinnedStep)) return wiz.pinnedStep;
+  if(run.awaiting) return run.awaiting;
+  if(run.failed_step) return run.failed_step;
+  const running = p.steps.find(s => stepStatus(s).cls === 'now');
+  if(running) return running.id;
+  const done = p.steps.filter(s => (run.completed || {})[s.id]);
+  return (done.length ? done[done.length - 1] : p.steps[0]).id;
+}
+
+function stepTabs(sel){
+  return `<div class="steptabs">` + wiz.plan.steps.map((s, i) => {
+    const st = stepStatus(s);
+    return `<button class="stab ${s.id === sel ? 'on' : ''}" data-step-id="${esc(s.id)}">
+      <span class="ticon ${st.cls}">${st.icon || i + 1}</span>${esc(s.id)}</button>`;
+  }).join('') + `</div>`;
+}
+
+function stepPanel(s){
+  const run = wiz.run || {completed: {}};
+  const st = stepStatus(s);
+  const rec = (run.completed || {})[s.id];
+  return `<div class="steppanel">
+    <div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
+    <div class="pd">${esc(s.objective)}</div>
+    ${rec ? humanizeOutput(rec.output) : ''}
+    ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
+  </div>`;
+}
+
+document.addEventListener('click', e => {
+  const tab = e.target.closest('.stab[data-step-id]');
+  if(!tab || !wiz.plan) return;
+  wiz.pinnedStep = tab.dataset.stepId;
+  if(wiz.step === 3) renderRunStep();
+  else if(wiz.step === 4) renderDoneStep();
+});
+
 function renderRunStep(){
   const p = wiz.plan; const run = wiz.run || {};
   const hitl = run.status === 'awaiting_approval'
@@ -944,19 +1007,12 @@ function renderRunStep(){
           <button class="btn" onclick="resolveHitl(true)">Approve ${esc(run.awaiting)}</button>
           <button class="btn reject" onclick="resolveHitl(false)">Reject</button></div></div></div>`
     : '';
+  const selected = p.steps.find(s => s.id === activeStepId()) || p.steps[0];
   document.getElementById('wiz-body').innerHTML = hitl + `
     <div class="card"><h2>${esc(p.name)}</h2>
       <div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status || 'running')}</div>
-      ${p.steps.map((s, i) => {
-        const st = stepStatus(s);
-        const rec = (run.completed || {})[s.id];
-        return `<div class="planstep"><div class="n ${st.cls}">${st.icon || i + 1}</div>
-          <div style="flex:1"><div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
-          <div class="pd">${esc(s.objective)}</div>
-          ${rec ? humanizeOutput(rec.output) : ''}
-          ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
-          </div></div>`;
-      }).join('')}</div>`;
+      ${stepTabs(selected.id)}
+      ${stepPanel(selected)}</div>`;
 }
 
 async function resolveHitl(approved){
@@ -986,15 +1042,10 @@ function renderDoneStep(){
       <p>${ok ? 'Every step below ran, was signed by its worker, and is journaled — the Console tab shows the provenance chain and what the router learned.'
               : 'The journal in the Console tab shows every attempt and why it failed. Rephrasing the goal often fixes fallback plans.'}</p></div></div>
     <div class="card"><h2>${esc(p.name)}</h2><div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status)}</div>
-      ${p.steps.map((s, i) => {
-        const rec = (run.completed || {})[s.id];
-        const skip = (run.skipped || {})[s.id];
-        return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : (skip ? '⤳' : i + 1))}</div>
-          <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : (skip ? badge('dim', 'skipped — ' + skip) : badge('dim','did not run'))}</div>
-          ${rec ? humanizeOutput(rec.output) : ''}
-          ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
-          </div></div>`;
-      }).join('')}</div>
+      ${(() => {
+        const selected = p.steps.find(s => s.id === activeStepId()) || p.steps[0];
+        return stepTabs(selected.id) + stepPanel(selected);
+      })()}</div>
     <div class="card" style="margin-top:16px"><h2>Not done yet?</h2>
       <div class="sub">Reviewer said no-ship, or a step failed? Iterate — nothing below runs without your approval.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1033,6 +1084,7 @@ function resetWizard(){
   wiz.goal = ''; wiz.context = {}; wiz.plan = null; wiz.runId = null; wiz.run = null;
   wiz.editingStep = null; wiz.builderMode = false; wiz.builder = null;
   wiz.yamlMode = false; wiz.edited = false;
+  wiz.pinnedStep = null; wiz.fallbackReason = '';
   if(wiz.poller){ clearInterval(wiz.poller); wiz.poller = null; }
   setStep(1);
 }

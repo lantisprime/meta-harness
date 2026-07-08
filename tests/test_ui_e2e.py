@@ -167,7 +167,15 @@ def test_goal_step_template_plan_and_full_run(page, server):
                                timeout=30_000)
         page.click(f"button:has-text('Approve {gate}')")
     page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
-    assert page.locator(".planstep .n.done").count() == 6
+    # done screen: one tab per step, all six done
+    assert page.locator(".stab").count() == 6
+    assert page.locator(".stab .ticon.done").count() == 6
+    # clicking a tab pins it and swaps the panel
+    page.click(".stab:has-text('explore')")
+    assert "Explore the workspace" in page.locator(".steppanel .pd").inner_text()
+    page.click(".stab:has-text('review')")
+    assert "Adversarially review" in page.locator(".steppanel .pd").inner_text()
+    assert page.locator(".stab.on:has-text('review')").count() == 1
 
 
 def test_provider_wizard_lists_models_live(page, server):
@@ -553,11 +561,11 @@ def test_branching_workflow_in_wizard_skips_untaken_path(page, server):
 
     page.click("button:has-text('Run this plan →')")
     page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
-    # the untaken branch is visibly skipped with its reason; the taken one ran
+    # tabs: two ran, one skipped (⤳); the skip reason lives in its tab's panel
+    assert page.locator(".stab .ticon.done").count() == 2  # classify + archive
+    page.click(".stab:has(.ticon:has-text('⤳'))")
     assert page.locator(".badge:has-text('skipped — condition not met')").count() == 1
-    done_text = page.locator("#wiz-body").inner_text()
-    assert "if classify equals high" in done_text   # the skip reason names it
-    assert page.locator(".planstep .n.done").count() == 2  # classify + archive
+    assert "if classify equals high" in page.locator(".steppanel").inner_text()
 
 
 def test_humanized_output_markdown_json_and_xss(page, server):
