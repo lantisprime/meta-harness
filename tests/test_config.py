@@ -119,7 +119,7 @@ def test_resolve_endpoint_provider_ref_and_direct(salt_path):
 
 def test_catalog_has_local_and_remote_entries():
     ids = {p["id"] for p in PROVIDER_CATALOG}
-    assert {"anthropic", "openai", "ollama", "lmstudio", "custom"} <= ids
+    assert {"anthropic", "openai", "neuralwatt", "ollama", "lmstudio", "custom"} <= ids
     assert all(p["base_url"] for p in PROVIDER_CATALOG if p["id"] != "custom")
 
 

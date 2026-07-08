@@ -154,6 +154,64 @@ _CLI_STATIC_MODELS: dict[str, list[str]] = {
 
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][\w.\-]*(/[\w.\-:]+)+$")
 
+PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
+OPENCODE_CONFIG_PATHS = [
+    Path.home() / ".config" / "opencode" / "opencode.json",
+    Path.home() / ".config" / "opencode" / "opencode.jsonc",
+]
+
+
+def _load_jsonish(path: Path) -> dict:
+    """JSON, tolerating the JSONC subset opencode uses (full-line comments,
+    trailing commas). Anything unparseable yields {} — suggestions only."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return {}
+    try:
+        return json.loads(text)
+    except ValueError:
+        stripped = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("//")
+        )
+        stripped = re.sub(r",(\s*[}\]])", r"\1", stripped)
+        try:
+            return json.loads(stripped)
+        except ValueError:
+            return {}
+
+
+def pi_config_models(path: Path = PI_MODELS_PATH) -> list[str]:
+    """provider/model ids from Pi's custom model registry (~/.pi/agent/
+    models.json) — the ids Pi itself accepts via --model."""
+    data = _load_jsonish(path)
+    models = []
+    for pid, provider in (data.get("providers") or {}).items():
+        for entry in provider.get("models") or []:
+            if isinstance(entry, dict) and entry.get("id"):
+                models.append(f"{pid}/{entry['id']}")
+    return models
+
+
+def opencode_config_models(paths: Optional[list[Path]] = None) -> list[str]:
+    """provider/model ids from OpenCode's config (opencode.json[c])."""
+    models = []
+    for path in paths or OPENCODE_CONFIG_PATHS:
+        data = _load_jsonish(path)
+        for pid, provider in (data.get("provider") or {}).items():
+            if isinstance(provider, dict):
+                for mid in (provider.get("models") or {}):
+                    models.append(f"{pid}/{mid}")
+        if models:
+            break
+    return models
+
+
+_CLI_CONFIG_MODELS = {
+    "pi": pi_config_models,
+    "opencode": opencode_config_models,
+}
+
 
 async def list_cli_models(cli: str, timeout_s: float = 15.0,
                           cap: int = 300) -> list[str]:
@@ -163,7 +221,11 @@ async def list_cli_models(cli: str, timeout_s: float = 15.0,
     if cli not in CLI_ADAPTERS:
         raise ValueError(f"unknown coding CLI {cli!r}")
     lister = _CLI_MODEL_LISTERS.get(cli)
-    static = _CLI_STATIC_MODELS.get(cli, [])
+    # the CLI's own config directory is the fastest, most personal source:
+    # custom registries (pi models.json) and configured providers (opencode)
+    config_reader = _CLI_CONFIG_MODELS.get(cli)
+    configured = config_reader() if config_reader else []
+    static = _dedupe(configured + _CLI_STATIC_MODELS.get(cli, []))
     binary = shutil.which(CLI_ADAPTERS[cli].binary)
     if lister is None or binary is None:
         return static
@@ -187,7 +249,12 @@ async def list_cli_models(cli: str, timeout_s: float = 15.0,
             models.append(token)
             if len(models) >= cap:
                 break
-    return models or static
+    return _dedupe(configured + models)[:cap] or static
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    return [x for x in items if not (x in seen or seen.add(x))]
 
 
 def _render_prompt(task: Task) -> str:

@@ -125,3 +125,48 @@ def test_display_model_placeholder_never_reaches_argv(tmp_path):
         pinned = CodingAgentWorker(f"w2-{cli}", cli=cli, model="real-model-id")
         argv2, _ = CLI_ADAPTERS[cli].build(pinned, "prompt", ws)
         assert argv2[argv2.index(flag) + 1] == "real-model-id"
+
+
+def test_pi_config_models_reads_registry(tmp_path):
+    from metaharness.harness.coding import pi_config_models
+
+    registry = tmp_path / "models.json"
+    registry.write_text(json.dumps({"providers": {
+        "neuralwatt": {"baseUrl": "https://api.neuralwatt.com/v1",
+                       "models": [{"id": "qwen3.5-397b"}, {"id": "glm-5.2"}]},
+        "empty": {"models": []},
+    }}))
+    assert pi_config_models(registry) == [
+        "neuralwatt/qwen3.5-397b", "neuralwatt/glm-5.2"]
+    assert pi_config_models(tmp_path / "missing.json") == []
+
+
+def test_opencode_config_models_tolerates_jsonc(tmp_path):
+    from metaharness.harness.coding import opencode_config_models
+
+    cfg = tmp_path / "opencode.jsonc"
+    cfg.write_text("""{
+  // comment line survives stripping
+  "provider": {
+    "lmstudio": {"models": {"qwen3.6-35b-a3b": {"name": "Qwen"},}},
+    "openrouter": {"models": {"z-ai/glm-5.1": {}}}
+  },
+}""")
+    models = opencode_config_models([cfg])
+    assert "lmstudio/qwen3.6-35b-a3b" in models
+    assert "openrouter/z-ai/glm-5.1" in models
+    assert opencode_config_models([tmp_path / "nope.json"]) == []
+
+
+async def test_list_cli_models_merges_config_registry(tmp_path, monkeypatch):
+    import metaharness.harness.coding as coding_mod
+    from metaharness.harness.coding import list_cli_models
+
+    registry = tmp_path / "models.json"
+    registry.write_text(json.dumps({"providers": {
+        "neuralwatt": {"models": [{"id": "glm-5.2"}]}}}))
+    monkeypatch.setitem(coding_mod._CLI_CONFIG_MODELS, "pi",
+                        lambda: coding_mod.pi_config_models(registry))
+    monkeypatch.setattr(coding_mod.shutil, "which", lambda b: None)  # no binary
+    models = await list_cli_models("pi")
+    assert models == ["neuralwatt/glm-5.2"]  # config registry alone suffices
