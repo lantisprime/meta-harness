@@ -128,6 +128,33 @@ Framed strictly as integrity/authenticity — the same guarantees you get from s
 
 - Live run tree with step timeline (from spans), worker registry & identity status, provenance log viewer, playbook & failure-taxonomy browser, capability matrix / eval reports, and controls to launch, steer, approve gates, and stop runs.
 
+### 3.9 Harness Self-Optimization (Meta-Harness outer loop)
+
+Implements arXiv 2603.28052 over this harness's own configuration (`optimization/`;
+research distilled in `memory/knowledge_base/meta-harness-optimization.md`):
+
+- **Candidate ledger on disk** — one directory per candidate (params, scores, proposer
+  hypothesis, lineage, and the **raw** per-attempt eval traces). Raw is load-bearing: the
+  paper's ablation shows summarized traces cost ~15 accuracy points, so `digest_text`
+  never touches them. Rejected proposals are recorded too — the proposer learns from
+  rejections the way the paper's proposer learns from regressions.
+- **Proposers** share one contract: read the ledger, return `{hypothesis, parent, delta}`.
+  `LLMProposer` is the paper's shape (frontier worker over raw traces, picks its own
+  parent, schema-guarded output); `RuleProposer` is a deterministic fallback running the
+  same counterfactual diagnosis with fixed rules, so the loop works offline.
+- **Search space (v1)** is config-space: the enrichment stack (tool offload, consistency
+  k, schema retries, critique rounds) plus additive-only prompt directives. Pydantic
+  bounds are the paper's interface-validation gate — invalid deltas are rejected loudly,
+  never silently evaluated. Code-space search via the coding-agent workers is the
+  designed follow-on.
+- **Scoring** is multi-objective: pass^k against a domain suite (classification,
+  extraction, math, or mixed — deliberately not SDLC-only) with token cost tracked, kept
+  as a **Pareto frontier**, not a greedy incumbent. A plateau detector stops stalled
+  searches; a `Budget` puts a hard ceiling on the whole run.
+- **Promotion** reuses the eval gate: best-vs-seed paired go/no-go on a **held-out**
+  suite (`compare_suites`) — search-set numbers alone never promote. Promoted params land
+  in `optimization/<suite>/promoted.json`.
+
 ## 4. Runner Adapter Contract
 
 Every worker harness — however it calls its model internally — is wrapped behind one uniform interface: **messages + files in → text stream + tool calls out**. Adapters exist for headless CLI harnesses (driven via their non-interactive modes) and SDK agents. Per-worker isolation uses git worktrees so parallel workers don't collide.
@@ -144,3 +171,4 @@ Every worker harness — however it calls its model internally — is wrapped be
 8. OTel wiring across all layers.
 9. Web UI.
 10. End-to-end demo + real artifact tests.
+11. Harness self-optimization: Meta-Harness outer loop over the enrichment stack. *(done — v1 config-space)*

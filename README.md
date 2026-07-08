@@ -28,6 +28,7 @@ The full design (with subsystem detail and a component diagram) is in [`docs/arc
 | Workflow types | `src/metaharness/workflows/templates.py` | Named deterministic phase templates; `software_engineering` = agentic SDLC (explore → specify ⛔ → plan ⛔ → implement → verify → review ⛔) |
 | Learning | `src/metaharness/correction/` | Two-speed loop: per-task Reflexion + offline MAST failure clustering into an auto-curated playbook (delta updates, verified outcomes only) |
 | Evals | `src/metaharness/evals/` | Golden sets, pass^k gating, paired go/no-go comparison; `sdlc.py` grades per-phase agentic-coding capability deterministically |
+| Self-optimization | `src/metaharness/optimization/` | Meta-Harness outer loop (arXiv 2603.28052): proposer reads raw failure traces of prior candidates and searches harness configs; Pareto frontier (pass^k vs tokens); promotion only through the held-out eval gate |
 | Observability | `src/metaharness/observability/` | OpenTelemetry spans across all layers; in-memory store feeds the WebUI live |
 | Web UI | `src/metaharness/web/` | Run wizard (Agents → Goal → Plan → Run → Done, with workflow-type picker) + wizard-driven Settings (provider/agent wizards with system-prompt archetypes, MCP servers, tool catalog) + live console |
 
@@ -60,6 +61,28 @@ Then open http://127.0.0.1:8321. Useful flags: `--critique` (enable SelfCritique
 Agents saved in the **Settings** view (wizard-driven: providers → keys → test → save; agent wizard with system-prompt archetypes) persist to `~/.metaharness/config.json` and are rebuilt at every serve — configured agents claim their tiers before `--local` discovery fills the rest. Coding CLIs found on `PATH` (pi, codex, opencode, claude) can be registered as agents that implement plans in real workspaces.
 
 MCP tool servers: `pip install -e '.[mcp]'`, add servers in Settings (stdio command or HTTP URL), and their tools join the registry at startup — the planner hands each step only the small tool subset it needs.
+
+### Optimizing the harness itself
+
+The harness can search its own configuration — the Meta-Harness outer loop
+([arXiv 2603.28052](https://arxiv.org/abs/2603.28052)) applied to the enrichment stack:
+
+```bash
+# offline demo: mock worker + deterministic rule proposer
+.venv/bin/metaharness optimize --suite mixed --rounds 6
+
+# real: smallest discovered local model is the target, largest is the agentic proposer
+.venv/bin/metaharness optimize --local --proposer llm --suite math --max-tokens 500000
+```
+
+Each round a proposer reads the candidate ledger — params, scores, hypotheses, and the
+**raw** failure traces of every prior candidate (the paper's ablation: raw traces beat
+summaries by ~15 accuracy points) — and proposes a targeted config delta with a causal
+hypothesis. Candidates are scored pass^k vs token cost on a search suite; a Pareto
+frontier is kept, and the best candidate is promoted only if it beats the seed on a
+**held-out** suite through the paired go/no-go gate. Suites are domain-general
+(`classify`, `extract`, `math`, or `mixed`), and the ledger under
+`~/.metaharness/optimization/<suite>/` survives restarts — a later run resumes the search.
 
 ## Persistence
 

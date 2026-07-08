@@ -163,6 +163,90 @@ def _build_mock_state():
     return state
 
 
+def _run_optimize(args) -> None:
+    """Meta-Harness outer loop (arXiv 2603.28052): search harness configs for a
+    fixed worker against a domain suite; promote through the held-out gate."""
+    from metaharness.core.budget import Budget
+    from metaharness.core.types import Tier
+    from metaharness.harness import MockLLMWorker, OpenAICompatWorker
+    from metaharness.identity import KeyPair
+    from metaharness.optimization import (
+        CandidateLedger,
+        HarnessOptimizer,
+        LLMProposer,
+        RuleProposer,
+        search_and_holdout,
+    )
+
+    search, holdout = search_and_holdout(args.suite)
+    root = Path(args.root) if args.root else Path.home() / ".metaharness" / "optimization" / args.suite
+    ledger = CandidateLedger(root)
+
+    found: list[tuple[str, str, float]] = []
+    if args.local:
+        endpoints = args.endpoint or DEFAULT_ENDPOINTS
+        found = sorted(asyncio.run(_discover(endpoints)), key=lambda f: f[2])
+        if not found:
+            raise SystemExit(f"--local: no models discovered at {', '.join(endpoints)}")
+        base_url, model, size = found[0]
+
+        def base_factory():
+            return OpenAICompatWorker(
+                "opt-target", base_url=base_url, model=model, tier=Tier.SMALL,
+                keypair=KeyPair.generate(), max_tokens=2000,
+            )
+        print(f"  target    ← {model}  [{size:g}B @ {base_url}]")
+    else:
+        def base_factory():
+            return MockLLMWorker("opt-target", Tier.SMALL, keypair=KeyPair.generate(), seed=7)
+        print("  target    ← mock small worker (offline demo; --local for a real model)")
+
+    if args.proposer == "llm":
+        if not found:
+            raise SystemExit("--proposer llm needs --local: a discovered model must do the proposing")
+        p_url, p_model, p_size = found[-1]
+        proposer = LLMProposer(OpenAICompatWorker(
+            "opt-proposer", base_url=p_url, model=p_model, tier=Tier.FRONTIER,
+            keypair=KeyPair.generate(), max_tokens=2000,
+        ))
+        print(f"  proposer  ← {p_model}  [{p_size:g}B]")
+    else:
+        proposer = RuleProposer()
+        print("  proposer  ← deterministic rules (--proposer llm for the paper-shaped agentic proposer)")
+
+    budget = None
+    if args.max_tokens or args.max_cost:
+        budget = Budget(max_tokens=args.max_tokens, max_cost_usd=args.max_cost)
+
+    optimizer = HarnessOptimizer(
+        base_factory, proposer, search, holdout, ledger, k=args.k, budget=budget,
+    )
+    report = asyncio.run(optimizer.optimize(rounds=args.rounds))
+
+    print(f"\nCandidates ({root}):")
+    for c in ledger.candidates():
+        if c.scores:
+            line = (f"pass^{c.scores.k}={c.scores.pass_hat_k:.2f} "
+                    f"pass@1={c.scores.pass_at_1:.2f} tokens={c.scores.tokens_total}")
+        else:
+            line = f"rejected: {c.rejected_reason}"
+        print(f"  {c.id}  [{c.status:9s}] {line}")
+        print(f"          {c.hypothesis[:100]}")
+    print(f"\nStopped after {report.rounds_run} round(s): {report.stopped}")
+    print(f"Pareto frontier: {', '.join(report.frontier)}")
+    print(f"Seed {report.seed_id} → best {report.best_id}")
+    if report.gate is not None:
+        verdict = "GO" if report.gate.go else "NO-GO"
+        print(f"Held-out gate [{report.gate.incumbent_model} vs {report.gate.candidate_model}]: "
+              f"{verdict} "
+              f"({report.gate.overall_incumbent:.2f} → {report.gate.overall_candidate:.2f}, "
+              f"{report.gate.wins}W/{report.gate.losses}L/{report.gate.ties}T)")
+    for note in report.notes:
+        print(f"  - {note}")
+    if report.promoted:
+        print(f"Promoted: {root / 'promoted.json'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="metaharness")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -177,7 +261,32 @@ def main() -> None:
                        help="pin a tier to a model by substring, e.g. --pick frontier=qwen3.6 (repeatable)")
     serve.add_argument("--critique", action="store_true",
                        help="draft→critique→revise round for unverified open-ended tasks (slower, better plans)")
+
+    from metaharness.optimization.suites import SUITE_NAMES
+
+    opt = sub.add_parser(
+        "optimize",
+        help="search harness configurations against an eval suite (Meta-Harness outer loop, arXiv 2603.28052)",
+    )
+    opt.add_argument("--suite", choices=SUITE_NAMES, default="mixed",
+                     help="domain suite to optimize against (default: mixed — classification+extraction+math)")
+    opt.add_argument("--rounds", type=int, default=6, help="max proposer rounds (default 6)")
+    opt.add_argument("--k", type=int, default=3, help="attempts per task for pass^k (default 3)")
+    opt.add_argument("--proposer", choices=["rule", "llm"], default="rule",
+                     help="rule = deterministic diagnosis; llm = agentic proposer over raw traces (needs --local)")
+    opt.add_argument("--local", action="store_true",
+                     help="use discovered local models (smallest = optimization target, largest = llm proposer)")
+    opt.add_argument("--endpoint", action="append", default=None,
+                     help="extra OpenAI-compatible base URL to probe (repeatable)")
+    opt.add_argument("--root", default=None,
+                     help="candidate ledger directory (default ~/.metaharness/optimization/<suite>)")
+    opt.add_argument("--max-tokens", type=int, default=None, help="hard token ceiling for the whole search")
+    opt.add_argument("--max-cost", type=float, default=None, help="hard cost ceiling in USD for the whole search")
     args = parser.parse_args()
+
+    if args.command == "optimize":
+        _run_optimize(args)
+        return
 
     if args.command == "serve":
         import uvicorn
