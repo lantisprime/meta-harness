@@ -268,3 +268,33 @@ def test_provenance_jsonl_roundtrip(tmp_path):
     check = restored.verify_chain(resolve)
     assert check.ok
     assert restored.head_hash() == log.head_hash()
+
+
+def test_retired_worker_id_can_be_readmitted():
+    """Retire -> re-add with the same id runs the full ceremony again with a
+    fresh key; an ACTIVE duplicate is still rejected. Rotation count carries
+    over so re-admission is visible in the audit trail."""
+    from metaharness.identity.keys import KeyPair
+    from metaharness.identity.registry import (
+        RegistryError, WorkerRegistry, registration_payload,
+    )
+
+    registry = WorkerRegistry()
+
+    def admit(worker_id, keypair):
+        challenge = registry.begin_registration(worker_id)
+        payload = registration_payload(worker_id, keypair.public_b64(), challenge.nonce)
+        return registry.complete_registration(
+            worker_id, keypair.public_b64(), keypair.sign(payload))
+
+    first = admit("bot", KeyPair.generate())
+    assert first.key_rotations == 0
+    with pytest.raises(RegistryError, match="already registered"):
+        registry.begin_registration("bot")
+
+    registry.deactivate("bot")
+    fresh_key = KeyPair.generate()
+    second = admit("bot", fresh_key)
+    assert second.active and second.key_rotations == 1
+    assert second.public_key_b64 == fresh_key.public_b64()
+    assert registry.verify_message("bot", b"hello", fresh_key.sign(b"hello"))

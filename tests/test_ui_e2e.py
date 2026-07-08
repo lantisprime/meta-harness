@@ -279,3 +279,80 @@ def test_agent_test_sends_provider_ref_not_stale_url(page, server):
     page.click("button:has-text('← Back')")
     page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
+
+
+def test_agent_edit_flow_readmits_same_id(page, server):
+    """Edit = retire + re-register under the same id — must not 409."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    page.wait_for_selector(".prov-item:has-text('e2e-reviewer')")
+    page.click(".prov-item:has-text('e2e-reviewer') >> button:has-text('Edit')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click("button:has-text('Next →')")   # kind -> connection
+    page.click("button:has-text('Next →')")   # -> role & prompt
+    page.click("button:has-text('Next →')")   # -> test & save
+    page.click("button:has-text('Update agent')")
+    page.wait_for_selector(".toast.on:has-text('Updated e2e-reviewer')")
+    page.wait_for_selector(".prov-item:has-text('e2e-reviewer')")
+
+
+def test_sweep_every_action_button_is_wired(page, server):
+    """Sweep across every view and wizard surface: each onclick handler must
+    reference a defined function, and walking the surfaces raises zero page
+    errors — no dead buttons anywhere."""
+    base, _ = server
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(base)
+    page.wait_for_selector(".tierrow")
+
+    def dead_handlers():
+        return page.evaluate("""() => {
+          const dead = [];
+          document.querySelectorAll('[onclick]').forEach(el => {
+            const m = el.getAttribute('onclick').match(/^\\s*([A-Za-z_$][\\w$]*)\\s*\\(/);
+            if(m && typeof window[m[1]] !== 'function')
+              dead.push(m[1]);
+          });
+          return dead;
+        }""")
+
+    surfaces = []
+
+    def check(name):
+        surfaces.append(name)
+        assert dead_handlers() == [], f"dead onclick handler(s) on {name}"
+
+    check("run wizard / agents step")
+    page.click("#nav-settings"); page.wait_for_selector("h2:has-text('Providers')")
+    check("settings home")
+    page.click("button:has-text('+ Add provider (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    check("provider wizard step 1")
+    page.click(".pill:has-text('DeepSeek')")
+    page.click("button:has-text('Next →')")
+    check("provider wizard step 2")
+    page.click("button:has-text('Next →')")
+    check("provider wizard step 3")
+    page.click("button:has-text('← Back')"); page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")
+    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector(".subwiz-steps")
+    for kind in ("Coding CLI", "Subscription", "Mock (testing)", "LLM endpoint"):
+        page.click(f".pill:has-text('{kind}')")
+        check(f"agent wizard step 1 · {kind}")
+    page.click("button:has-text('Next →')")
+    check("agent wizard step 2 · LLM endpoint")
+    page.click("button:has-text('Next →')")
+    check("agent wizard step 3 · role & prompt")
+    page.click("button:has-text('← Back')"); page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")
+    page.click("#nav-console"); page.wait_for_selector(".tile")
+    check("console")
+    page.click("#nav-wizard"); page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')"); page.wait_for_selector("#goal")
+    check("goal step")
+
+    assert len(surfaces) >= 10
+    assert errors == [], f"page errors during sweep: {errors}"

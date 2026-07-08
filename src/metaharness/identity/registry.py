@@ -74,8 +74,12 @@ class WorkerRegistry:
     # -- registration ceremony -------------------------------------------------
 
     def begin_registration(self, worker_id: str) -> RegistrationChallenge:
-        if worker_id in self._workers:
+        existing = self._workers.get(worker_id)
+        if existing is not None and existing.active:
             raise RegistryError(f"worker {worker_id!r} is already registered")
+        # a retired (deactivated) id may be re-admitted with a fresh key: the
+        # ceremony runs again in full, and the old record's rotation count
+        # carries over so re-admission stays visible in the audit trail
         challenge = RegistrationChallenge(
             worker_id=worker_id, nonce=secrets.token_hex(16), issued_at=time.time()
         )
@@ -107,6 +111,7 @@ class WorkerRegistry:
                 f"registration signature for {worker_id!r} does not verify under the presented key"
             )
         del self._challenges[worker_id]  # single-use
+        previous = self._workers.get(worker_id)
         record = WorkerRecord(
             worker_id=worker_id,
             display_name=display_name or worker_id,
@@ -114,6 +119,7 @@ class WorkerRegistry:
             tiers=tiers or [],
             task_types=task_types or [],
             registered_at=at,
+            key_rotations=(previous.key_rotations + 1) if previous else 0,
             metadata=metadata or {},
         )
         self._workers[worker_id] = record

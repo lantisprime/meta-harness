@@ -183,3 +183,16 @@ async def test_reserved_worker_ids_rejected(harness):
             "worker_id": wid, "tier": "mid", "kind": "mock"})
         assert resp.status_code == 422
         assert "reserved" in resp.json()["detail"]
+
+
+async def test_retire_then_readd_same_worker_id(harness):
+    """Regression: 'worker X is already registered' after remove -> re-add.
+    Retirement deactivates the identity; the same id must be re-admittable."""
+    _, client = harness
+    body = {"worker_id": "planner-bot", "tier": "mid", "kind": "mock"}
+    assert (await client.post("/api/workers", json=body)).status_code == 201
+    assert (await client.post("/api/workers", json=body)).status_code == 409  # active dup
+    assert (await client.delete("/api/workers/planner-bot")).status_code == 200
+    resp = await client.post("/api/workers", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["key_rotations"] == 1  # re-admission visible in audit
