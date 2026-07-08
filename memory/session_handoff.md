@@ -1,41 +1,34 @@
-# Session Handoff — meta-harness (2026-07-08, session 3)
+# Session Handoff — meta-harness (2026-07-08, session 4)
 
-## State: v0.3 shipped. 229/229 tests, CI green, 17 commits on main.
-Repo: github.com/lantisprime/meta-harness (private; branch protection still
-Pro-gated). **Live server on :8321 was intentionally NOT restarted** (user was
-testing) — restart to pick up everything from "custom workflows" onward:
-`pkill -f "metaharness serve"` then
-`.venv/bin/metaharness serve --local --port 8321`.
+## State: v0.4 shipped & pushed. 247/247 tests. 8 commits on main (…→ e8fc46f).
+Server :8321 IS running v0.4 (restarted this session, smoke-tested).
 
-## Shipped this session (all Playwright-tested, 16 browser tests)
-- **Subscription providers**: SubscriptionWorker rides signed-in Claude Code /
-  Codex CLIs (both verified live: OK in 3.1s/5.5s). Kind `subscription_cli`.
-- **Model pickers**: POST /api/probe (keys never in URLs) lists providers'
-  real models; visible filter-as-you-type pick-lists (datalists looked empty);
-  /api/cli_models reads Pi's models.json + opencode.jsonc registries.
-- **Providers**: NeuralWatt + MiniMax added to catalog.
-- **Custom workflows**: step-builder wizard (Objective→Type&tools→Verify&gate);
-  every plan (LLM/template/custom) editable inline + YAML mode;
-  POST /api/workflows/validate.
-- **Branching (option 1)**: StepSpec.when {step, equals/contains/one_of,
-  negate}; engine skips + cascades + journals `step.skipped`; checked before
-  HITL gates; survives resume. Planner prompt teaches it.
-- **Run follow-up**: Done screen → "Run again" or POST /api/runs/{id}/followup
-  (planner sees per-step digest incl. NO-SHIP findings → remediation plan into
-  editable review; approval = running it).
-- **Step judge**: evals/judge.py — UNVERIFIED outputs graded by most capable
-  runner vs step contract; FAIL → retry loop; scorer="judge";
-  wire(judge=True) default; PLANNING exempt; unparseable → UNVERIFIED.
-- **Bug fixes from live use**: stale base_url leak in wizard Test; reserved
-  worker ids; retired-id re-admission (registry key_rotations+1); display-model
-  placeholder leaking into CLI argv (-m codex-cli); approval 409 flash
-  (optimistic gate UI); renderSettings refetch churn.
+## What happened
+Ran handoff item #1: SE template e2e with real workers (deepseek-v4-pro,
+pi-cli/codex-cli, MiniMax-M3). Goal itself shipped (GET /health works, 23
+node tests pass) but BOTH runs (ec3559b, afd3ce2) were false-negative
+failures: judge graded final chat text, not the workspace. Follow-up planner
+also fell back silently once (flaky). Fixed all of it as v0.4, plus the
+user's three feature asks (packaging, humanized output, tabbed steps).
+Plan was codex-reviewed (second-opinion.mjs, verdict HOLD → 6 findings all
+ACCEPTed and folded in). User waived approval gates mid-session.
+
+## v0.4 (one concern per commit)
+- step.attempt journaling + judge.error/run.advance_error (diagnosability)
+- planner fallback_reason through APIs/provenance/wizard
+- WorkerResult.workspace_root stamped by runners (never inferred)
+- evals/evidence.py + judge prompt evidence block ("files are ground truth")
+- humanizeOutput: escape-first GFM subset + <details> JSON tree (XSS-tested);
+  esc() covers single quotes
+- Tabbed Run/Done screens (data-step-id delegation, auto-follow, pin)
+- GET /api/runs/{id}/package → capped zip + Done-screen download button
 
 ## Next steps
-1. Restart :8321; run SE template end-to-end with real models + coding CLI.
-2. gemma vs qwen eval (sdlc_capability_suite ready).
-3. Bounded loops (repeat_until) — option 2, deferred.
-4. Multi-worker per tier / per-worker matrix.
-5. Branch protection when repo public/Pro.
+1. Re-run SE template e2e on v0.4 — confirm judge now passes narration+files
+   (test/health.test.js still missing in ~/.metaharness/workspaces/shared).
+2. Issues filed: #1 execution-based verify for code_edit, #2 CLI timeout
+   exposure — good next implementations.
+3. gemma vs qwen eval (sdlc_capability_suite ready) — carried over.
+4. Bounded loops (repeat_until); multi-worker per tier — carried over.
 
-Episodic episode revised: see em-search "workplan". Reset context now.
+Episodic: em-search "v0.4". Reset context now.
