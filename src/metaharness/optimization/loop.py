@@ -48,6 +48,8 @@ class OptimizationReport(BaseModel):
     promoted: bool = False
     pending: Optional[str] = None    # gate-passing candidate awaiting human approval
     finished_at: float = 0.0         # epoch seconds; the console shows freshness
+    target_model: str = ""           # which model these results describe — swapping
+                                     # the tier's model makes old ledgers stale
     notes: list[str] = Field(default_factory=list)
 
 
@@ -156,7 +158,7 @@ class HarnessOptimizer:
         return report
 
     async def _optimize(self, rounds: int) -> OptimizationReport:
-        report = OptimizationReport()
+        report = OptimizationReport(target_model=self.base_factory().model)
 
         # seed: the incumbent configuration, evaluated once. A pre-populated
         # ledger (resumed search) keeps its existing seed and history.

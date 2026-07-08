@@ -1628,7 +1628,8 @@ function tuningSummary(s){
     : rep.stopped === 'error' ? 'the search crashed — see the note in the Console'
     : 'nothing beat the current setup';
   const g = rep.gate;
-  return `Last ${s.suite} search${rep.finished_at ? ' finished ' + ago(rep.finished_at) : ''}: `
+  return `Last ${s.suite} search${rep.target_model ? ' on ' + rep.target_model : ''}${
+      rep.finished_at ? ' finished ' + ago(rep.finished_at) : ''}: `
     + `${experiments} experiment${experiments === 1 ? '' : 's'} over ${rep.rounds_run} round${rep.rounds_run === 1 ? '' : 's'} — ${outcome}`
     + (g ? ` (held-out ${g.overall_incumbent.toFixed(2)} → ${g.overall_candidate.toFixed(2)})` : '') + '.';
 }
