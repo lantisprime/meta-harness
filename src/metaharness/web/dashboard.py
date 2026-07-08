@@ -470,10 +470,21 @@ function renderRunStep(){
 }
 
 async function resolveHitl(approved){
-  const r = await post(`/api/runs/${wiz.runId}/approval`, {step_id: wiz.run.awaiting, approved, wait: false});
-  if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,120)); return; }
-  toast(approved ? 'Approved — continuing' : 'Rejected — run will stop');
+  const stepId = wiz.run && wiz.run.awaiting;
+  if(!stepId) return;  // gate already resolved (double-click, stale render)
+  // optimistic: hide the banner the instant you click — the lingering Approve
+  // button was a stale-click 409 trap while the 2s poll caught up
+  wiz.run.awaiting = null; wiz.run.status = 'running';
   renderRunStep();
+  const r = await post(`/api/runs/${wiz.runId}/approval`, {step_id: stepId, approved, wait: false});
+  if(r.ok){
+    toast(approved ? 'Approved — continuing' : 'Rejected — run will stop');
+  }else if(r.status === 409){
+    toast('That gate was already handled — refreshing');
+  }else{
+    toast('failed: ' + (await r.text()).slice(0,120));
+  }
+  pollRun();  // resync immediately instead of waiting for the next tick
 }
 
 /* ---------- step 5: done ---------- */
@@ -509,7 +520,9 @@ function toggleRun(runId){ openRuns.has(runId) ? openRuns.delete(runId) : openRu
 
 async function resolveApproval(runId, stepId, approved){
   const r = await post(`/api/runs/${runId}/approval`, {step_id: stepId, approved, wait: false});
-  toast(r.ok ? `${approved ? 'Approved' : 'Rejected'} ${stepId}` : 'Approval failed');
+  toast(r.ok ? `${approved ? 'Approved' : 'Rejected'} ${stepId}`
+        : r.status === 409 ? 'That gate was already handled — refreshing'
+        : 'Approval failed');
   refreshConsole();
 }
 

@@ -366,3 +366,43 @@ def test_sweep_every_action_button_is_wired(page, server):
 
     assert len(surfaces) >= 10
     assert errors == [], f"page errors during sweep: {errors}"
+
+
+def test_approval_never_flashes_an_error(page, server):
+    """Regression: the gate banner lingered until the next 2s poll after
+    Approve, so an eager second click hit a 409 and flashed 'failed: run is
+    not awaiting approval'. Now the banner hides instantly and every toast
+    across a double-clicked triple-gate run is recorded and error-free."""
+    base, _ = server
+    page.goto(base)
+    # record every toast the UI ever shows during the run
+    page.evaluate("""() => {
+      window.__toasts = [];
+      const orig = window.toast;
+      window.toast = m => { window.__toasts.push(String(m)); orig(m); };
+    }""")
+    page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')")
+    page.wait_for_selector(".pill:has-text('Software engineering')")
+    page.click(".pill:has-text('Software engineering')")
+    page.fill("#goal", "double-click gate torture test")
+    page.click("#planbtn")
+    page.wait_for_selector(".planstep")
+    page.click("button:has-text('Run this plan →')")
+
+    for gate in ("specify", "plan", "review"):
+        page.wait_for_selector(f".guide b:has-text('Approval needed: {gate}')",
+                               timeout=30_000)
+        button = page.locator(f"button:has-text('Approve {gate}')")
+        button.click()
+        # banner must vanish immediately (optimistic), not after the next poll
+        page.wait_for_selector(".guide b:has-text('Approval needed')",
+                               state="detached", timeout=1_000)
+        # an eager second click finds no button — nothing to mis-fire
+        assert page.locator(f"button:has-text('Approve {gate}')").count() == 0
+
+    page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
+    toasts = page.evaluate("() => window.__toasts")
+    assert toasts, "expected approval toasts to be recorded"
+    bad = [t for t in toasts if "failed" in t.lower() or "already handled" in t]
+    assert bad == [], f"error toast flashed during approvals: {bad}"
