@@ -139,6 +139,13 @@ tr:last-child td{border-bottom:0}
   color:var(--ink2);margin-bottom:14px}
 .hint-panel b{display:block;font-size:12px;color:var(--mut);margin-bottom:4px}
 .hint-panel ul{margin:4px 0 0 18px}
+.pick-list{border:1px solid var(--line);border-radius:10px;max-height:190px;overflow-y:auto;
+  margin-top:6px;background:#fff}
+.pick-list .pl-row{padding:7px 13px;font-family:var(--mono);font-size:12px;cursor:pointer;
+  border-bottom:1px solid var(--hair);color:var(--ink2)}
+.pick-list .pl-row:last-child{border-bottom:0}
+.pick-list .pl-row:hover{background:var(--accent-soft);color:var(--accent)}
+.pick-list .pl-more{padding:6px 13px;font-size:11.5px;color:var(--faint);font-style:italic}
 
 .tierrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
 .tierrow:last-child{border-bottom:0}
@@ -757,6 +764,33 @@ async function addMcp(){
   renderSettings(true);
 }
 
+/* ---------- visible model pick-list (datalists hide until you type) ---------- */
+const PICK_CAP = 60;
+function modelPickList(listId, inputId, models, filter){
+  if(!models || !models.length) return '';
+  const needle = (filter || '').toLowerCase();
+  const hits = needle ? models.filter(m => m.toLowerCase().includes(needle)) : models;
+  const rows = hits.slice(0, PICK_CAP).map(m =>
+    `<div class="pl-row" onclick="pickModel('${esc(inputId)}','${esc(m)}')">${esc(m)}</div>`).join('');
+  const more = hits.length > PICK_CAP
+    ? `<div class="pl-more">…${hits.length - PICK_CAP} more — type to narrow</div>` : '';
+  const none = hits.length ? '' : '<div class="pl-more">no model matches the filter</div>';
+  return `<div class="pick-list" id="${esc(listId)}">${rows}${more}${none}</div>`;
+}
+
+function pickModel(inputId, value){
+  const el = document.getElementById(inputId);
+  if(el){ el.value = value; el.dispatchEvent(new Event('input')); }
+}
+
+function filterPickList(inputId, listId, modelsGetter){
+  const el = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  if(!el || !list) return;
+  const html = modelPickList(listId, inputId, modelsGetter(), el.value);
+  list.outerHTML = html || `<div class="pick-list" id="${listId}" style="display:none"></div>`;
+}
+
 /* ---------- provider wizard: pick → connect → test & save ---------- */
 function startProvWizard(pid){
   const existing = pid ? SET.cfg.providers[pid] : null;
@@ -793,9 +827,10 @@ function renderProvWizard(){
         <input id="pw-key" class="mono" type="password" placeholder="${esc((SET.cfg.providers[w.id] || {}).api_key || 'sk-…')}"></div>`}
       <div class="field"><label>Default model</label>
         <div style="display:flex;gap:8px">
-          <input id="pw-model" class="mono" value="${esc(w.default_model)}" list="pw-models" placeholder="model id" style="flex:1">
+          <input id="pw-model" class="mono" value="${esc(w.default_model)}" placeholder="model id" style="flex:1"
+            oninput="filterPickList('pw-model','pw-pick', () => (SET.provWiz.models && SET.provWiz.models.length) ? SET.provWiz.models : ${JSON.stringify((entry.models || []))}.slice())">
           <button class="btn ghost" onclick="provFetchModels()">List models</button></div>
-        <datalist id="pw-models">${((w.models && w.models.length) ? w.models : (entry.models || [])).map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+        ${modelPickList('pw-pick', 'pw-model', (w.models && w.models.length) ? w.models : (entry.models || []), w.default_model)}
         <span class="small dim" id="pw-models-msg">${
           w.models === null ? 'press List models to fetch what this provider actually serves'
           : w.models.length ? w.models.length + ' model(s) live from the endpoint — pick from the list'
@@ -961,8 +996,8 @@ function renderAgentWizard(){
           ? `<div class="hint-panel"><b>Signed in</b><span class="kv">${esc(chosen.path)}</span></div>`
           : `<div class="hint-panel"><b>Not signed in yet</b>${esc(chosen.login_hint)} — then come back and Test.</div>`) : ''}
         <div class="field" style="margin-top:10px"><label>Model (optional — CLI default otherwise)</label>
-          <input id="aw-model" class="mono" value="${esc(w.model)}" list="aw-sub-models" placeholder="e.g. ${chosen && chosen.models.length ? esc(chosen.models[0]) : 'default'}">
-          <datalist id="aw-sub-models">${((chosen && chosen.models) || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>`;
+          <input id="aw-model" class="mono" value="${esc(w.model)}" placeholder="e.g. ${chosen && chosen.models.length ? esc(chosen.models[0]) : 'default'}">
+          ${modelPickList('aw-pick', 'aw-model', (chosen && chosen.models) || [], '')}</div>`;
     }else if(w.kind === 'coding_cli'){
       const clis = Object.keys(SET.cfg.coding_clis || {});
       const keyHint = w.cli ? (SET.cfg.cli_key_hints || {})[w.cli] : '';
@@ -973,9 +1008,10 @@ function renderAgentWizard(){
           ${esc(keyHint)} — the meta-harness never stores or proxies them.</div>` : ''}
         <div class="field" style="margin-top:10px"><label>Model (optional — CLI default otherwise)</label>
           <div style="display:flex;gap:8px">
-            <input id="aw-model" class="mono" value="${esc(w.model)}" list="aw-cli-models" placeholder="provider/model-id" style="flex:1">
+            <input id="aw-model" class="mono" value="${esc(w.model)}" placeholder="provider/model-id" style="flex:1"
+              oninput="filterPickList('aw-model','aw-pick', () => SET.agentWiz.probed)">
             <button class="btn ghost" onclick="cliFetchModels()" ${w.cli ? '' : 'disabled'}>List models</button></div>
-          <datalist id="aw-cli-models">${w.probed.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+          ${modelPickList('aw-pick', 'aw-model', w.probed, '')}
           <span class="small dim" id="aw-cli-msg">${w.probed.length ? w.probed.length + ' model(s) — pick from the list' : ''}</span></div>`
         : '<div class="hint-panel"><b>No coding CLIs found</b>Install pi, codex, opencode or claude and reopen this wizard.</div>';
     }else if(w.kind === 'mock'){
@@ -991,9 +1027,10 @@ function renderAgentWizard(){
           <input id="aw-base" class="mono" value="${esc(w.base_url || 'http://localhost:1234/v1')}"></div>`}
         <div class="field"><label>Model</label>
           <div style="display:flex;gap:8px">
-            <input id="aw-model" class="mono" value="${esc(w.model || (SET.cfg.providers[w.provider] || {}).default_model || '')}" list="aw-models" placeholder="model id" style="flex:1">
+            <input id="aw-model" class="mono" value="${esc(w.model || (SET.cfg.providers[w.provider] || {}).default_model || '')}" placeholder="model id" style="flex:1"
+              oninput="filterPickList('aw-model','aw-pick', () => SET.agentWiz.probed)">
             <button class="btn ghost" onclick="agentFetchModels()">List models</button></div>
-          <datalist id="aw-models">${w.probed.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+          ${modelPickList('aw-pick', 'aw-model', w.probed, '')}
           <span class="small dim" id="aw-probe-msg">${w.probed.length ? w.probed.length + ' model(s) live from the endpoint — pick from the list' : ''}</span></div>`;
     }
   }else if(w.step === 2){

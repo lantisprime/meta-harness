@@ -188,7 +188,11 @@ def test_provider_wizard_lists_models_live(page, server):
         "#pw-models-msg:has-text('did not list models')", timeout=15_000)
     msg = page.locator("#pw-models-msg").inner_text()
     if "live from the endpoint" in msg:  # LM Studio actually running here
-        assert page.locator("#pw-models option").count() > 0
+        rows = page.locator("#pw-pick .pl-row")
+        assert rows.count() > 0            # VISIBLE pick list, not a hidden datalist
+        first = rows.first.inner_text()
+        rows.first.click()                 # clicking a row fills the input
+        assert page.locator("#pw-model").input_value() == first
     page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
 
@@ -213,8 +217,14 @@ def test_agent_wizard_coding_cli_models_and_key_hint(page, server):
     assert "claude login" in page.locator(".hint-panel").inner_text()
     # model list arrives from /api/cli_models (static aliases for claude)
     page.wait_for_selector("#aw-cli-msg:has-text('pick from the list')")
-    options = page.locator("#aw-cli-models option")
-    assert options.count() >= 3
+    rows = page.locator("#aw-pick .pl-row")
+    assert rows.count() >= 3
+    # typing filters the visible list live
+    page.fill("#aw-model", "sonnet")
+    page.locator("#aw-model").dispatch_event("input")
+    page.wait_for_selector("#aw-pick .pl-row:has-text('sonnet')")
+    assert page.locator("#aw-pick .pl-row").count() < rows.count() or rows.count() == 1
+    page.fill("#aw-model", "")
     page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
 
@@ -237,7 +247,7 @@ def test_agent_wizard_subscription_kind(page, server):
         page.click(".pill:has-text('Claude Code (Anthropic subscription)')")
         page.wait_for_selector(".hint-panel:has-text('Signed in'), "
                                ".hint-panel:has-text('Not signed in yet')")
-        assert page.locator("#aw-sub-models option").count() >= 3
+        assert page.locator("#aw-pick .pl-row").count() >= 3
     else:
         assert page.locator(".pill:has-text('Claude Code')").is_disabled()
     page.click("button:has-text('← Back')")
