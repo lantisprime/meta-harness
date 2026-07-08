@@ -18,13 +18,18 @@ The full design (with subsystem detail and a component diagram) is in [`docs/arc
 |---|---|---|
 | Trust plane | `src/metaharness/identity/` | Ed25519 worker registry, scoped task tokens, hash-chained provenance log |
 | Runner layer | `src/metaharness/harness/` | Uniform worker interface + enrichment stack (ToolOffload, SelfConsistency, SchemaGuard, SelfCritique) |
-| Local workers | `src/metaharness/harness/` | OpenAI-compatible worker for LM Studio / Ollama (handles `response_format` and `reasoning_content` quirks) |
+| Local & remote workers | `src/metaharness/harness/local.py` | OpenAI-compatible worker: local (LM Studio/Ollama) and remote (Anthropic/OpenAI/Groq/…) endpoints, per-agent system prompts, function-calling tool loop |
+| Coding agents | `src/metaharness/harness/coding.py` | Pi / Codex / OpenCode / Claude Code driven headless per task in jailed workspaces — the harness can implement its own plans |
+| Config store | `src/metaharness/config.py` | Providers, agents, MCP servers persisted to `~/.metaharness/config.json` (0600); keys obfuscated at rest, always masked over HTTP |
+| Tools & MCP | `src/metaharness/tools/` | Workspace-jailed file tools, web fetch, calculator + MCP-server tools behind one registry; each step gets a small auto-detected subset (cap ~7) |
+| Context management | `src/metaharness/context.py` | Per-tier prompt budgets, on-the-fly pruning (tool observations first, edges never), loud digests |
 | Router | `src/metaharness/routing/` | Cheapest-capable pre-routing + verified-failure escalation, backed by a learned capability matrix |
-| Workflow engine | `src/metaharness/workflows/` | Durable journaled runs: crash-resume, human-approval gates, YAML DSL, goal→WorkflowSpec planner with deterministically derived checks |
+| Workflow engine | `src/metaharness/workflows/` | Durable journaled runs: crash-resume, human-approval gates, YAML DSL, goal→WorkflowSpec planner with deterministically derived checks + per-step tool detection |
+| Workflow types | `src/metaharness/workflows/templates.py` | Named deterministic phase templates; `software_engineering` = agentic SDLC (explore → specify ⛔ → plan ⛔ → implement → verify → review ⛔) |
 | Learning | `src/metaharness/correction/` | Two-speed loop: per-task Reflexion + offline MAST failure clustering into an auto-curated playbook (delta updates, verified outcomes only) |
-| Evals | `src/metaharness/evals/` | Golden sets, pass^k gating, paired go/no-go comparison |
+| Evals | `src/metaharness/evals/` | Golden sets, pass^k gating, paired go/no-go comparison; `sdlc.py` grades per-phase agentic-coding capability deterministically |
 | Observability | `src/metaharness/observability/` | OpenTelemetry spans across all layers; in-memory store feeds the WebUI live |
-| Web UI | `src/metaharness/web/` | Wizard flow (Agents → Goal → Plan → Run → Done) with live console |
+| Web UI | `src/metaharness/web/` | Run wizard (Agents → Goal → Plan → Run → Done, with workflow-type picker) + wizard-driven Settings (provider/agent wizards with system-prompt archetypes, MCP servers, tool catalog) + live console |
 
 ## Quick start
 
@@ -51,6 +56,10 @@ Point the harness at an OpenAI-compatible server (LM Studio, Ollama) and map mod
 ```
 
 Then open http://127.0.0.1:8321. Useful flags: `--critique` (enable SelfCritique enrichment), `--endpoint URL` (explicit server URLs), `--host/--port`.
+
+Agents saved in the **Settings** view (wizard-driven: providers → keys → test → save; agent wizard with system-prompt archetypes) persist to `~/.metaharness/config.json` and are rebuilt at every serve — configured agents claim their tiers before `--local` discovery fills the rest. Coding CLIs found on `PATH` (pi, codex, opencode, claude) can be registered as agents that implement plans in real workspaces.
+
+MCP tool servers: `pip install -e '.[mcp]'`, add servers in Settings (stdio command or HTTP URL), and their tools join the registry at startup — the planner hands each step only the small tool subset it needs.
 
 ## Persistence
 

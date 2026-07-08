@@ -121,6 +121,25 @@ tr:last-child td{border-bottom:0}
 .field textarea{min-height:90px;resize:vertical}
 .field input.mono,.field select{font-family:var(--mono);font-size:12.5px}
 
+.pillrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.pill{padding:7px 14px;border-radius:999px;border:1px solid var(--line2);background:#fff;
+  font-size:13px;font-weight:500;color:var(--mut)}
+.pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.prov-item{border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin-bottom:10px;
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.prov-item .pi-main{flex:1;min-width:200px}
+.prov-item .pi-name{font-weight:600;font-size:13.5px}
+.kv{font-family:var(--mono);font-size:11.5px;color:var(--mut2)}
+.subwiz-steps{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.subwiz-steps .t{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:999px;
+  background:var(--hair);color:var(--mut2)}
+.subwiz-steps .t.on{background:var(--accent);color:#fff}
+.subwiz-steps .t.done{background:var(--green);color:#fff}
+.hint-panel{background:var(--hair);border-radius:12px;padding:13px 16px;font-size:12.5px;
+  color:var(--ink2);margin-bottom:14px}
+.hint-panel b{display:block;font-size:12px;color:var(--mut);margin-bottom:4px}
+.hint-panel ul{margin:4px 0 0 18px}
+
 .tierrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
 .tierrow:last-child{border-bottom:0}
 .tierrow .tn{font-family:var(--mono);font-size:12px;text-transform:uppercase;
@@ -162,6 +181,7 @@ tr:last-child td{border-bottom:0}
   <div class="logo"><div class="sq">mh</div><div class="name">metaharness</div></div>
   <nav class="pills">
     <button id="nav-wizard" class="on" onclick="showView('wizard')">Run</button>
+    <button id="nav-settings" onclick="showView('settings')">Settings</button>
     <button id="nav-console" onclick="showView('console')">Console</button>
   </nav>
   <div class="spacer"></div>
@@ -177,6 +197,13 @@ tr:last-child td{border-bottom:0}
     <div class="stepper" id="stepper"></div>
     <div class="wiz-body" id="wiz-body"></div>
   </div>
+</div>
+
+<!-- ================= SETTINGS ================= -->
+<div id="view-settings" class="view" style="display:none">
+  <div class="eyebrow">Configuration</div>
+  <h1 class="greet">Providers, agents, tools — all wizard-driven.</h1>
+  <div id="settings-body"><div class="card"><div class="empty">loading…</div></div></div>
 </div>
 
 <!-- ================= CONSOLE ================= -->
@@ -222,16 +249,17 @@ function toast(msg){ const t = document.getElementById('toast');
 
 /* ---------- view switching ---------- */
 function showView(v){
-  document.getElementById('view-wizard').style.display = v === 'wizard' ? '' : 'none';
-  document.getElementById('view-console').style.display = v === 'console' ? '' : 'none';
-  document.getElementById('nav-wizard').classList.toggle('on', v === 'wizard');
-  document.getElementById('nav-console').classList.toggle('on', v === 'console');
+  for(const name of ['wizard','settings','console']){
+    document.getElementById('view-' + name).style.display = v === name ? '' : 'none';
+    document.getElementById('nav-' + name).classList.toggle('on', v === name);
+  }
   if(v === 'console') refreshConsole();
+  if(v === 'settings') renderSettings();
 }
 
 /* ---------- wizard state machine ---------- */
 const STEPS = ['Agents','Goal','Plan','Run','Done'];
-const wiz = { step: 0, goal: '', context: {}, plan: null, planSource: '', runId: null, run: null, poller: null };
+const wiz = { step: 0, goal: '', context: {}, workflowType: '', plan: null, planSource: '', runId: null, run: null, poller: null };
 
 function renderStepper(){
   document.getElementById('stepper').innerHTML = STEPS.map((label, i) =>
@@ -272,62 +300,53 @@ async function renderAgentsStep(){
     <div class="guide"><div><b>Agents do the work; tiers set the cost ladder.</b>
       <p>The harness routes each step to the cheapest tier likely to succeed and escalates on verified failure.
       The frontier agent also plans your workflows. Defaults are fine — just continue.</p></div></div>
-    <div class="card"><h2>Tier assignments</h2><div class="sub">Who answers when the router calls</div>${tiers}</div>
-    <div class="card" style="margin-top:16px"><h2>Add or replace an agent</h2>
-      <div class="sub">Point a tier at a local OpenAI-compatible endpoint (Ollama, LM Studio, vLLM)</div>
-      <div class="field"><label>Endpoint base URL</label>
-        <div style="display:flex;gap:8px">
-          <input id="wurl" class="mono" value="http://localhost:1234/v1" style="flex:1">
-          <button class="btn ghost" onclick="probeUrl()">Probe</button></div></div>
-      <div class="field"><label>Model</label><select id="wmodel"><option value="">probe first…</option></select></div>
-      <div class="field" style="display:flex;gap:10px">
-        <span style="flex:1"><label>Worker id</label><input id="wid" class="mono" placeholder="my-gemma"></span>
-        <span style="width:130px"><label>Tier</label><select id="wtier">
-          <option value="small">small</option><option value="mid">mid</option>
-          <option value="frontier">frontier</option></select></span></div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <button class="btn ghost" onclick="addWorker()">Register agent</button>
-        <span class="small dim" id="wmsg"></span></div></div>
+    <div class="card"><h2>Tier assignments</h2><div class="sub">Who answers when the router calls</div>${tiers}
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="btn ghost" onclick="openAgentWizard()">+ Add an agent (wizard)</button>
+        <button class="btn ghost" onclick="showView('settings')">Open Settings</button></div></div>
     <div class="wiz-nav"><span></span>
       <button class="btn" ${Object.keys(byTier).length ? '' : 'disabled'} onclick="setStep(1)">Continue →</button></div>`;
 }
 
-async function probeUrl(){
-  const msg = document.getElementById('wmsg');
-  msg.textContent = 'probing…';
-  const data = await get('/api/probe?base_url=' + encodeURIComponent(document.getElementById('wurl').value.trim()));
-  const sel = document.getElementById('wmodel');
-  if(!data.reachable){ msg.textContent = 'endpoint unreachable'; sel.innerHTML = '<option value="">—</option>'; return; }
-  sel.innerHTML = data.models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
-  msg.textContent = `${data.models.length} model(s) found`;
-}
-
-async function addWorker(){
-  const msg = document.getElementById('wmsg');
-  const body = {
-    worker_id: document.getElementById('wid').value.trim(),
-    tier: document.getElementById('wtier').value,
-    kind: 'openai_compat',
-    base_url: document.getElementById('wurl').value.trim(),
-    model: document.getElementById('wmodel').value,
-  };
-  if(!body.worker_id){ msg.textContent = 'give the worker an id'; return; }
-  if(!body.model){ msg.textContent = 'probe and pick a model first'; return; }
-  msg.textContent = 'registering…';
-  const r = await post('/api/workers', body);
-  if(!r.ok){ msg.textContent = 'failed: ' + (await r.text()).slice(0,140); return; }
-  toast(`Registered ${body.worker_id} on ${body.tier} tier`);
-  renderAgentsStep();
+function openAgentWizard(prefill){
+  showView('settings');
+  startAgentWizard(prefill || null);
 }
 
 /* ---------- step 2: goal ---------- */
-function renderGoalStep(){
+let WORKFLOW_TYPES = null;
+async function loadWorkflowTypes(){
+  if(WORKFLOW_TYPES === null){
+    try{ WORKFLOW_TYPES = await get('/api/workflow-types'); }catch(e){ WORKFLOW_TYPES = []; }
+  }
+  return WORKFLOW_TYPES;
+}
+
+function pickWorkflowType(id){
+  wiz.workflowType = id;
+  renderGoalStep();
+}
+
+async function renderGoalStep(){
+  const types = await loadWorkflowTypes();
+  const chosen = types.find(t => t.id === wiz.workflowType);
+  const typePills = ['<button class="pill ' + (wiz.workflowType ? '' : 'on') + '" onclick="pickWorkflowType(\\'\\')">Free-form (planner)</button>']
+    .concat(types.map(t => `<button class="pill ${wiz.workflowType === t.id ? 'on' : ''}" onclick="pickWorkflowType('${esc(t.id)}')">${esc(t.label)}</button>`))
+    .join('');
+  const typeNote = chosen
+    ? `<div class="hint-panel"><b>${esc(chosen.label)} — deterministic phase spine</b>
+        ${esc(chosen.description)}<br>
+        <span class="kv">${chosen.phases.map(p => p.id + (p.hitl ? ' ⛔' : '')).join(' → ')}</span>
+        <span class="small dim"> (⛔ = waits for your approval)</span></div>`
+    : '';
   document.getElementById('wiz-body').innerHTML = `
     <div class="guide"><div><b>Describe the outcome, not the steps.</b>
-      <p>The harness decomposes your goal into typed steps itself. Put any data the task needs
-      (a report, a complaint, a document) into context — steps reference it by key.
-      Mention checkable expectations ("exactly low or high") and the plan gets verifiable checks.</p></div></div>
+      <p>Free-form goals are decomposed by the frontier agent; picking a workflow type runs
+      your goal through that named process with its built-in verification gates.
+      Put any data the task needs into context — steps reference it by key.</p></div></div>
     <div class="card">
+      <div class="field"><label>Workflow type</label>
+        <div class="pillrow">${typePills}</div>${typeNote}</div>
       <div class="field"><label>Goal</label>
         <textarea id="goal" placeholder="e.g. Read the incident report in context, classify severity as exactly low or high, summarize it for on-call, and draft the page for my approval.">${esc(wiz.goal)}</textarea></div>
       <div class="field"><label>Context (JSON, optional)</label>
@@ -348,8 +367,11 @@ async function makePlan(){
   wiz.context = {};
   if(ctxRaw){ try{ wiz.context = JSON.parse(ctxRaw); }catch(e){ msg.textContent = 'context is not valid JSON'; return; } }
   btn.disabled = true;
-  msg.innerHTML = '<span class="spin"></span> the frontier agent is planning — this can take a minute on local models…';
-  const r = await post('/api/plans', {goal: wiz.goal, context: wiz.context});
+  msg.innerHTML = wiz.workflowType
+    ? '<span class="spin"></span> expanding the workflow template…'
+    : '<span class="spin"></span> the frontier agent is planning — this can take a minute on local models…';
+  const r = await post('/api/plans', {goal: wiz.goal, context: wiz.context,
+                                      workflow_type: wiz.workflowType || ''});
   btn.disabled = false;
   if(!r.ok){ msg.textContent = 'planning failed: ' + (await r.text()).slice(0,140); return; }
   const data = await r.json();
@@ -360,7 +382,9 @@ async function makePlan(){
 /* ---------- step 3: plan review ---------- */
 function renderPlanStep(){
   const p = wiz.plan;
-  const note = wiz.planSource === 'planner'
+  const note = wiz.planSource.startsWith('template:')
+    ? badge('act', wiz.planSource.replace('template:', '') + ' template') + ' <span class="small dim">deterministic phase spine — no LLM planned this</span>'
+    : wiz.planSource === 'planner'
     ? badge('act','planned by ' + 'frontier agent')
     : badge('warn','fallback: single step') + ' <span class="small dim">the planner could not produce a valid multi-step plan</span>';
   document.getElementById('wiz-body').innerHTML = `
@@ -372,7 +396,8 @@ function renderPlanStep(){
         <div class="planstep"><div class="n">${i + 1}</div>
           <div style="flex:1"><div class="pt">${esc(s.id)}
             ${badge('dim', s.task_type)}${s.hitl ? badge('warn','HITL — waits for you') : ''}
-            ${s.success_check ? badge('ok','verifiable') : ''}</div>
+            ${s.success_check ? badge('ok','verifiable') : ''}
+            ${(s.tools || []).map(t => badge('act','🔧 ' + t)).join('')}</div>
           <div class="pd">${esc(s.objective)}</div>
           ${s.depends_on.length ? `<div class="pd mono">after: ${esc(s.depends_on.join(', '))}</div>` : ''}</div></div>`).join('')}
     </div>
@@ -606,6 +631,422 @@ async function refreshConsole(){
 setInterval(() => {
   if(document.getElementById('view-console').style.display !== 'none') refreshConsole();
 }, 3000);
+
+/* ================= SETTINGS: wizard-driven configuration ================= */
+const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null };
+
+async function renderSettings(){
+  const body = document.getElementById('settings-body');
+  try{
+    const [cfg, tools] = await Promise.all([get('/api/config'), get('/api/tools')]);
+    SET.cfg = cfg; SET.tools = tools;
+  }catch(e){ body.innerHTML = '<div class="card"><div class="empty">failed to load config</div></div>'; return; }
+  if(SET.provWiz){ body.innerHTML = renderProvWizard(); return; }
+  if(SET.agentWiz){ body.innerHTML = renderAgentWizard(); return; }
+  body.innerHTML = renderSettingsHome();
+}
+
+function renderSettingsHome(){
+  const cfg = SET.cfg;
+  const providers = Object.values(cfg.providers || {});
+  const provRows = providers.length ? providers.map(p => `
+    <div class="prov-item"><div class="pi-main">
+      <div class="pi-name">${esc(p.label || p.id)} ${p.configured ? badge('ok','configured') : badge('dim','no key')}</div>
+      <div class="kv">${esc(p.base_url)} · key ${esc(p.api_key || '—')} ${p.default_model ? '· ' + esc(p.default_model) : ''}</div></div>
+      <button class="pill" onclick="startProvWizard('${esc(p.id)}')">Edit</button>
+      <button class="pill" onclick="deleteProvider('${esc(p.id)}')">Remove</button></div>`).join('')
+    : '<div class="empty">no providers yet — add one to use remote models</div>';
+
+  const agents = cfg.agents || [];
+  const agentRows = agents.length ? agents.map(a => `
+    <div class="prov-item"><div class="pi-main">
+      <div class="pi-name">${esc(a.worker_id)} ${badge('act', a.tier)} ${badge('dim', a.kind)}</div>
+      <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
+        ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has system prompt' : ''}</div></div>
+      <button class="pill" onclick="startAgentWizardIdx(${agents.indexOf(a)})">Edit</button>
+      <button class="pill" onclick="removeAgent('${esc(a.worker_id)}')">Remove</button></div>`).join('')
+    : '<div class="empty">no durable agents — everything currently wired came from discovery and vanishes on restart</div>';
+
+  const clis = Object.entries(cfg.coding_clis || {});
+  const cliChips = clis.length
+    ? clis.map(([name, path]) => `<span class="badge ok">${esc(name)}</span> <span class="kv">${esc(path)}</span>`).join('<br>')
+    : '<span class="empty">none found on PATH (pi, codex, opencode, claude)</span>';
+
+  const mcp = Object.values(cfg.mcp_servers || {});
+  const mcpRows = mcp.length ? mcp.map(s => `
+    <div class="prov-item"><div class="pi-main">
+      <div class="pi-name">${esc(s.name)} ${badge('dim', s.transport)}</div>
+      <div class="kv">${esc(s.transport === 'http' ? s.url : s.command + ' ' + (s.args || []).join(' '))}</div></div>
+      <button class="pill" onclick="deleteMcp('${esc(s.name)}')">Remove</button></div>`).join('')
+    : '<div class="empty">no MCP servers configured</div>';
+
+  const toolsBySource = {};
+  SET.tools.forEach(t => (toolsBySource[t.source] = toolsBySource[t.source] || []).push(t));
+  const toolRows = Object.entries(toolsBySource).map(([src, ts]) =>
+    `<div class="kv" style="margin:8px 0 4px">${esc(src)}</div>` +
+    ts.map(t => `<div class="small" style="padding:2px 0"><b class="mono">${esc(t.name)}</b> <span class="dim">${esc(t.description)}</span></div>`).join('')
+  ).join('');
+
+  return `
+    <div class="card"><h2>Providers</h2>
+      <div class="sub">LLM API endpoints — keys stored obfuscated on this machine, always masked here</div>
+      ${provRows}
+      <button class="btn ghost" onclick="startProvWizard('')">+ Add provider (wizard)</button></div>
+    <div class="card" style="margin-top:16px"><h2>Agents</h2>
+      <div class="sub">Durable agent definitions — rebuilt into workers at every serve</div>
+      ${agentRows}
+      <button class="btn ghost" onclick="startAgentWizard(null)">+ Add agent (wizard)</button></div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card"><h2>Coding CLIs</h2>
+        <div class="sub">Detected on this machine — usable as coding agents</div>${cliChips}</div>
+      <div class="card"><h2>MCP servers</h2>
+        <div class="sub">Tool sources for workflows (loaded at startup)</div>${mcpRows}
+        <div class="field" style="margin-top:10px"><label>Add: name</label><input id="mcp-name" class="mono" placeholder="files"></div>
+        <div class="field"><label>Transport</label><select id="mcp-transport" onchange="document.getElementById('mcp-stdio').style.display = this.value === 'stdio' ? '' : 'none'; document.getElementById('mcp-http').style.display = this.value === 'http' ? '' : 'none'">
+          <option value="stdio">stdio (command)</option><option value="http">http (url)</option></select></div>
+        <div id="mcp-stdio"><div class="field"><label>Command + args</label>
+          <input id="mcp-cmd" class="mono" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp"></div></div>
+        <div id="mcp-http" style="display:none"><div class="field"><label>URL</label>
+          <input id="mcp-url" class="mono" placeholder="http://localhost:8000/mcp"></div></div>
+        <button class="btn ghost" onclick="addMcp()">Add MCP server</button>
+        <div class="small dim" style="margin-top:6px">restart the server (or re-run) to load its tools</div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h2>Tool catalog</h2>
+      <div class="sub">What the planner can hand to steps — each step gets a small subset, never all of it</div>
+      ${toolRows || '<div class="empty">no tools</div>'}</div>`;
+}
+
+async function deleteProvider(pid){
+  const r = await fetch('/api/config/providers/' + encodeURIComponent(pid), {method:'DELETE'});
+  toast(r.ok ? 'Removed ' + pid : 'Failed: ' + (await r.text()).slice(0,140));
+  renderSettings();
+}
+
+async function removeAgent(id){
+  const r = await fetch('/api/workers/' + encodeURIComponent(id), {method:'DELETE'});
+  toast(r.ok ? 'Retired ' + id : 'Failed: ' + (await r.text()).slice(0,140));
+  renderSettings();
+}
+
+async function addMcp(){
+  const name = document.getElementById('mcp-name').value.trim();
+  const transport = document.getElementById('mcp-transport').value;
+  if(!name){ toast('MCP server needs a name'); return; }
+  const body = {name, transport};
+  if(transport === 'stdio'){
+    const parts = document.getElementById('mcp-cmd').value.trim().split(/\\s+/);
+    if(!parts[0]){ toast('give a command'); return; }
+    body.command = parts[0]; body.args = parts.slice(1);
+  }else{
+    body.url = document.getElementById('mcp-url').value.trim();
+    if(!body.url){ toast('give a URL'); return; }
+  }
+  const r = await post('/api/config/mcp', body);
+  toast(r.ok ? 'Saved MCP server ' + name : 'Failed: ' + (await r.text()).slice(0,140));
+  renderSettings();
+}
+
+/* ---------- provider wizard: pick → connect → test & save ---------- */
+function startProvWizard(pid){
+  const existing = pid ? SET.cfg.providers[pid] : null;
+  SET.provWiz = { step: existing ? 1 : 0, id: pid || '',
+    base_url: existing ? existing.base_url : '', api_key: '',
+    default_model: existing ? (existing.default_model || '') : '', test: null };
+  renderSettings();
+}
+
+function provWizSteps(){
+  const labels = ['Pick provider','Connect','Test & save'];
+  return '<div class="subwiz-steps">' + labels.map((l, i) =>
+    `<span class="t ${i === SET.provWiz.step ? 'on' : ''} ${i < SET.provWiz.step ? 'done' : ''}">${i + 1} · ${l}</span>`).join('') + '</div>';
+}
+
+function renderProvWizard(){
+  const w = SET.provWiz;
+  const catalog = SET.cfg.catalog || [];
+  let inner = '';
+  if(w.step === 0){
+    inner = `<div class="sub">Where do this agent's completions come from?</div>
+      <div class="pillrow">${catalog.map(c =>
+        `<button class="pill ${w.id === c.id ? 'on' : ''}" onclick="provPick('${esc(c.id)}')">${esc(c.label)}</button>`).join('')}</div>`;
+  }else if(w.step === 1){
+    const entry = catalog.find(c => c.id === w.id) || {};
+    const keyless = entry.keyless;
+    inner = `
+      <div class="field"><label>Provider id</label><input id="pw-id" class="mono" value="${esc(w.id)}" ${catalog.some(c => c.id === w.id) && w.id !== 'custom' ? 'disabled' : ''}></div>
+      <div class="field"><label>Base URL</label><input id="pw-base" class="mono" value="${esc(w.base_url || entry.base_url || '')}"></div>
+      ${keyless ? '<div class="hint-panel">Local server — no API key needed. Make sure it is running.</div>' : `
+      <div class="field"><label>API key ${entry.get ? `— <a href="${esc(entry.get)}" target="_blank">get one ↗</a>` : ''}</label>
+        <input id="pw-key" class="mono" type="password" placeholder="${esc((SET.cfg.providers[w.id] || {}).api_key || 'sk-…')}"></div>`}
+      <div class="field"><label>Default model ${entry.models && entry.models.length ? '' : '(optional)'}</label>
+        <input id="pw-model" class="mono" value="${esc(w.default_model)}" list="pw-models" placeholder="model id">
+        <datalist id="pw-models">${(entry.models || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>`;
+  }else{
+    inner = `
+      <div class="hint-panel"><b>About to save</b>
+        <span class="kv">${esc(w.id)} → ${esc(w.base_url)}${w.default_model ? ' · ' + esc(w.default_model) : ''}</span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn ghost" onclick="provTest()">Test connection</button>
+        <span class="small" id="pw-test">${w.test === null ? '' : w.test.ok
+          ? `<span class="green">✔ ok · ${w.test.latency_ms}ms</span>`
+          : `<span class="red">✘ ${esc(w.test.error || w.test.detail || 'failed')}</span>`}</span></div>`;
+  }
+  return `<div class="card"><h2>${SET.cfg.providers[w.id] ? 'Edit' : 'Add'} provider</h2>
+    ${provWizSteps()}${inner}
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="provWizNav(-1)">${w.step === 0 ? 'Cancel' : '← Back'}</button>
+      ${w.step < 2
+        ? `<button class="btn" onclick="provWizNav(1)" ${w.step === 0 && !w.id ? 'disabled' : ''}>Next →</button>`
+        : `<button class="btn" onclick="provSave()">Save provider</button>`}</div></div>`;
+}
+
+function provPick(id){
+  const entry = (SET.cfg.catalog || []).find(c => c.id === id) || {};
+  SET.provWiz.id = id;
+  SET.provWiz.base_url = entry.base_url || '';
+  SET.provWiz.default_model = (SET.cfg.providers[id] || {}).default_model || '';
+  renderSettings();
+}
+
+function provCapture(){
+  const w = SET.provWiz;
+  if(w.step === 1){
+    const idEl = document.getElementById('pw-id');
+    if(idEl && !idEl.disabled) w.id = idEl.value.trim();
+    w.base_url = document.getElementById('pw-base').value.trim();
+    const keyEl = document.getElementById('pw-key');
+    if(keyEl && keyEl.value.trim()) w.api_key = keyEl.value.trim();
+    w.default_model = document.getElementById('pw-model').value.trim();
+  }
+}
+
+function provWizNav(delta){
+  provCapture();
+  const w = SET.provWiz;
+  if(w.step === 0 && delta < 0){ SET.provWiz = null; renderSettings(); return; }
+  if(w.step === 1 && delta > 0 && (!w.id || !w.base_url)){ toast('id and base URL are required'); return; }
+  w.step = Math.max(0, Math.min(2, w.step + delta));
+  renderSettings();
+}
+
+async function provTest(){
+  const w = SET.provWiz;
+  document.getElementById('pw-test').innerHTML = '<span class="spin"></span> testing…';
+  const r = await post('/api/test_worker', {kind: 'openai_compat', provider: w.id,
+    base_url: w.base_url, api_key: w.api_key, model: w.default_model});
+  w.test = r.ok ? await r.json() : {ok: false, error: (await r.text()).slice(0,140)};
+  renderSettings();
+}
+
+async function provSave(){
+  provCapture();
+  const w = SET.provWiz;
+  const entry = (SET.cfg.catalog || []).find(c => c.id === w.id) || {};
+  const body = {id: w.id, base_url: w.base_url, default_model: w.default_model,
+                label: entry.label || w.id, keyless: !!entry.keyless};
+  if(w.api_key) body.api_key = w.api_key;
+  const r = await post('/api/config/providers', body);
+  if(!r.ok){ toast('save failed: ' + (await r.text()).slice(0,140)); return; }
+  toast('Provider ' + w.id + ' saved');
+  SET.provWiz = null;
+  renderSettings();
+}
+
+/* ---------- agent wizard: kind → connection → role & prompt → test & save ---------- */
+const PROMPT_ARCHETYPES = {
+  solver: {label: 'Solver', prompt:
+`You are a focused task-solver. Work only on the task given; never invent extra scope.
+Method: read every input fully, reason step by step, then answer.
+Output discipline: give exactly what the task asks for — no preamble, no commentary.
+If the task is impossible with the given inputs, say so explicitly instead of guessing.`},
+  reviewer: {label: 'Reviewer', prompt:
+`You are an adversarial reviewer. Treat every claim in the input as unverified.
+Hunt for: requirements gamed rather than met, missing evidence, edge cases, contradictions.
+Report findings ranked by severity, each with the exact location and why it fails.
+End with a single verdict line: SHIP or NO-SHIP with one-sentence justification.
+You did not produce the work you are reviewing — judge it with fresh eyes.`},
+  planner: {label: 'Planner', prompt:
+`You are a planning specialist. Decompose objectives into small, verifiable steps.
+Each step must name its inputs, its output, and how to check it succeeded.
+Prefer few well-scoped steps; flag any step whose success cannot be checked mechanically.
+Never begin executing — your only output is the plan.`},
+  extractor: {label: 'Extractor', prompt:
+`You are a precise data extractor. Return only what is literally present in the input.
+Never infer, summarize, or normalize unless the task says to.
+If a requested field is absent, return it as null — never fabricate a value.
+Match the requested output format exactly.`},
+  coder: {label: 'Coding agent', prompt:
+`You are a careful software engineer working inside a scoped workspace.
+Follow the plan you are given; note any forced deviation explicitly.
+Write tests alongside code — never defer them. Never weaken an existing test to make it pass.
+Keep changes minimal and consistent with the surrounding code style.`},
+};
+
+function startAgentWizardIdx(i){ startAgentWizard((SET.cfg.agents || [])[i] || null); }
+
+function startAgentWizard(a){
+  SET.agentWiz = {
+    step: 0, editing: !!a,
+    kind: a ? a.kind : 'openai_compat',
+    worker_id: a ? a.worker_id : '', tier: a ? a.tier : 'small',
+    provider: a ? a.provider : '', base_url: a ? a.base_url : '',
+    model: a ? a.model : '', cli: a ? a.cli : '',
+    system_prompt: a ? a.system_prompt : '', archetype: '',
+    probed: [], test: null };
+  if(SET.cfg) renderSettings(); else showView('settings');
+}
+
+function agentWizSteps(){
+  const labels = ['Kind','Connection','Role & prompt','Test & save'];
+  return '<div class="subwiz-steps">' + labels.map((l, i) =>
+    `<span class="t ${i === SET.agentWiz.step ? 'on' : ''} ${i < SET.agentWiz.step ? 'done' : ''}">${i + 1} · ${l}</span>`).join('') + '</div>';
+}
+
+function renderAgentWizard(){
+  const w = SET.agentWiz;
+  let inner = '';
+  if(w.step === 0){
+    inner = `<div class="sub">What kind of agent is this?</div>
+      <div class="pillrow">
+        <button class="pill ${w.kind === 'openai_compat' ? 'on' : ''}" onclick="agentSet('kind','openai_compat')">LLM endpoint</button>
+        <button class="pill ${w.kind === 'coding_cli' ? 'on' : ''}" onclick="agentSet('kind','coding_cli')">Coding CLI</button>
+        <button class="pill ${w.kind === 'mock' ? 'on' : ''}" onclick="agentSet('kind','mock')">Mock (testing)</button></div>
+      <div class="hint-panel">${{
+        openai_compat: '<b>LLM endpoint</b>Any OpenAI-compatible API: a configured provider (Anthropic, OpenAI, …) or a local server (Ollama, LM Studio). Does text-work steps.',
+        coding_cli: '<b>Coding CLI</b>A full coding harness (Pi, Codex, OpenCode, Claude Code) run headless per task in a workspace. Gives the harness hands: it can implement plans and write real code.',
+        mock: '<b>Mock</b>Deterministic offline worker for demos and tests.'}[w.kind]}</div>`;
+  }else if(w.step === 1){
+    if(w.kind === 'coding_cli'){
+      const clis = Object.keys(SET.cfg.coding_clis || {});
+      inner = clis.length ? `<div class="sub">Installed coding CLIs (detected on PATH)</div>
+        <div class="pillrow">${clis.map(c =>
+          `<button class="pill ${w.cli === c ? 'on' : ''}" onclick="agentSet('cli','${esc(c)}')">${esc(c)}</button>`).join('')}</div>
+        <div class="field" style="margin-top:10px"><label>Model override (optional — CLI default otherwise)</label>
+          <input id="aw-model" class="mono" value="${esc(w.model)}" placeholder="provider/model-id"></div>`
+        : '<div class="hint-panel"><b>No coding CLIs found</b>Install pi, codex, opencode or claude and reopen this wizard.</div>';
+    }else if(w.kind === 'mock'){
+      inner = '<div class="hint-panel">Mock workers need no connection.</div>';
+    }else{
+      const provs = Object.values(SET.cfg.providers || {});
+      inner = `<div class="sub">Configured provider, or a direct endpoint URL</div>
+        <div class="pillrow">
+          <button class="pill ${!w.provider ? 'on' : ''}" onclick="agentSet('provider','')">Direct URL</button>
+          ${provs.map(p => `<button class="pill ${w.provider === p.id ? 'on' : ''}" onclick="agentSet('provider','${esc(p.id)}')">${esc(p.label || p.id)}</button>`).join('')}</div>
+        ${w.provider ? `<div class="kv" style="margin:8px 0">${esc((SET.cfg.providers[w.provider] || {}).base_url)}</div>` : `
+        <div class="field"><label>Base URL</label>
+          <div style="display:flex;gap:8px">
+            <input id="aw-base" class="mono" value="${esc(w.base_url || 'http://localhost:1234/v1')}" style="flex:1">
+            <button class="btn ghost" onclick="agentProbe()">Probe</button></div></div>`}
+        <div class="field"><label>Model</label>
+          <input id="aw-model" class="mono" value="${esc(w.model || (SET.cfg.providers[w.provider] || {}).default_model || '')}" list="aw-models" placeholder="model id">
+          <datalist id="aw-models">${w.probed.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+          <span class="small dim" id="aw-probe-msg"></span></div>`;
+    }
+  }else if(w.step === 2){
+    inner = `
+      <div class="field" style="display:flex;gap:10px">
+        <span style="flex:1"><label>Worker id</label><input id="aw-id" class="mono" value="${esc(w.worker_id)}" placeholder="review-bot" ${w.editing ? 'disabled' : ''}></span>
+        <span style="width:140px"><label>Tier</label><select id="aw-tier">
+          ${['small','mid','frontier'].map(t => `<option value="${t}" ${w.tier === t ? 'selected' : ''}>${t}</option>`).join('')}</select></span></div>
+      <div class="field"><label>System prompt — start from an archetype, then tailor it</label>
+        <div class="pillrow">${Object.entries(PROMPT_ARCHETYPES).map(([k, a]) =>
+          `<button class="pill ${w.archetype === k ? 'on' : ''}" onclick="agentArchetype('${k}')">${a.label}</button>`).join('')}</div>
+        <textarea id="aw-prompt" style="min-height:150px" placeholder="Leave empty for the neutral default worker prompt.">${esc(w.system_prompt)}</textarea></div>
+      <div class="hint-panel"><b>What a good agent system prompt does</b>
+        <ul>
+          <li><b>Role + method</b> — what it is and HOW it should work, not a personality.</li>
+          <li><b>Output discipline</b> — exactly-what-was-asked; the harness verifies literal answers.</li>
+          <li><b>Honesty valves</b> — say-so-if-impossible beats confident guessing; UNVERIFIED answers stop the pipeline safely.</li>
+          <li><b>No scope creep</b> — the task contract (objective, boundaries, schema) is appended after this prompt and always wins.</li>
+        </ul></div>`;
+  }else{
+    inner = `
+      <div class="hint-panel"><b>About to ${w.editing ? 'update' : 'register'}</b>
+        <span class="kv">${esc(w.worker_id)} · ${esc(w.tier)} · ${esc(w.kind)}
+        ${w.kind === 'coding_cli' ? '· ' + esc(w.cli) : '· ' + esc(w.provider || w.base_url) + (w.model ? ' · ' + esc(w.model) : '')}</span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn ghost" onclick="agentTest()">Test</button>
+        <span class="small" id="aw-test">${w.test === null ? '' : w.test.ok
+          ? `<span class="green">✔ ok${w.test.latency_ms ? ' · ' + w.test.latency_ms + 'ms' : ''}${w.test.reply ? ' · “' + esc(w.test.reply.slice(0,60)) + '”' : ''}</span>`
+          : `<span class="red">✘ ${esc(w.test.error || w.test.detail || 'failed')}</span>`}</span></div>
+      <div class="small dim" style="margin-top:10px">Saving registers the agent's signed identity, routes its tier to it, and persists it to config.</div>`;
+  }
+  return `<div class="card"><h2>${w.editing ? 'Edit' : 'Add'} agent</h2>
+    ${agentWizSteps()}${inner}
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="agentWizNav(-1)">${w.step === 0 ? 'Cancel' : '← Back'}</button>
+      ${w.step < 3
+        ? `<button class="btn" onclick="agentWizNav(1)">Next →</button>`
+        : `<button class="btn" onclick="agentSave()">${w.editing ? 'Update' : 'Register'} agent</button>`}</div></div>`;
+}
+
+function agentSet(key, value){ SET.agentWiz[key] = value; if(key === 'provider') SET.agentWiz.model = ''; renderSettings(); }
+
+function agentArchetype(k){
+  agentCapture();
+  SET.agentWiz.archetype = k;
+  SET.agentWiz.system_prompt = PROMPT_ARCHETYPES[k].prompt;
+  renderSettings();
+}
+
+function agentCapture(){
+  const w = SET.agentWiz;
+  const grab = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const base = grab('aw-base'); if(base !== null) w.base_url = base.trim();
+  const model = grab('aw-model'); if(model !== null) w.model = model.trim();
+  const id = grab('aw-id'); if(id !== null && !w.editing) w.worker_id = id.trim();
+  const tier = grab('aw-tier'); if(tier !== null) w.tier = tier;
+  const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
+}
+
+async function agentProbe(){
+  agentCapture();
+  const w = SET.agentWiz;
+  document.getElementById('aw-probe-msg').innerHTML = '<span class="spin"></span> probing…';
+  const data = await get('/api/probe?base_url=' + encodeURIComponent(w.base_url));
+  w.probed = data.models || [];
+  renderSettings();
+  const msg = document.getElementById('aw-probe-msg');
+  if(msg) msg.textContent = data.reachable ? `${w.probed.length} model(s) found — pick from the list` : 'endpoint unreachable';
+}
+
+function agentWizNav(delta){
+  agentCapture();
+  const w = SET.agentWiz;
+  if(w.step === 0 && delta < 0){ SET.agentWiz = null; renderSettings(); return; }
+  if(delta > 0){
+    if(w.step === 1 && w.kind === 'coding_cli' && !w.cli){ toast('pick a coding CLI'); return; }
+    if(w.step === 1 && w.kind === 'openai_compat' && !w.provider && !w.base_url){ toast('provider or base URL needed'); return; }
+    if(w.step === 2 && !w.worker_id){ toast('give the agent a worker id'); return; }
+  }
+  w.step = Math.max(0, Math.min(3, w.step + delta));
+  renderSettings();
+}
+
+async function agentTest(){
+  agentCapture();
+  const w = SET.agentWiz;
+  document.getElementById('aw-test').innerHTML = '<span class="spin"></span> testing…';
+  const r = await post('/api/test_worker', {kind: w.kind, provider: w.provider,
+    base_url: w.base_url, model: w.model, system_prompt: w.system_prompt, cli: w.cli});
+  w.test = r.ok ? await r.json() : {ok: false, error: (await r.text()).slice(0,140)};
+  renderSettings();
+}
+
+async function agentSave(){
+  agentCapture();
+  const w = SET.agentWiz;
+  if(w.editing){  // replace: retire old identity first, then re-register
+    await fetch('/api/workers/' + encodeURIComponent(w.worker_id), {method:'DELETE'});
+  }
+  const r = await post('/api/workers', {worker_id: w.worker_id, tier: w.tier, kind: w.kind,
+    provider: w.provider, base_url: w.provider ? '' : w.base_url, model: w.model,
+    system_prompt: w.system_prompt, cli: w.cli, persist: true});
+  if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,140)); return; }
+  toast(`${w.editing ? 'Updated' : 'Registered'} ${w.worker_id} on ${w.tier} tier`);
+  SET.agentWiz = null;
+  renderSettings();
+}
 
 setStep(0);
 </script>

@@ -210,3 +210,44 @@ async def test_all_learned_state_survives_restart(tmp_path):
         task_type=TaskType.EXTRACT, objective="e9",
         success_check={"equals": "never"}, max_attempts=1))
     assert state2.matrix.samples("text-small", TaskType.EXTRACT) == 3
+
+
+# -- wire: durable config agents + tool registry reach the executor path ----------
+
+
+async def test_config_agent_wired_with_tools_end_to_end(tmp_path, monkeypatch):
+    """The full new wire: AgentConfig -> factory -> registration -> wire()
+    attaches the shared ToolRegistry (through enrichment wrappers too) -> a
+    workflow step carrying tools reaches a worker whose registry can serve
+    them. Extend this test whenever a new cross-component wire appears."""
+    import metaharness.config as config_mod
+    from metaharness.config import AgentConfig, HarnessConfig
+    from metaharness.factory import build_agent_runner
+    from metaharness.harness import SelfCritique
+    from metaharness.tools import default_registry
+    from metaharness.web import HarnessState
+
+    monkeypatch.setattr(config_mod, "SALT_PATH", tmp_path / ".keysalt")
+    state = HarnessState()
+    state.tools = default_registry(workspace=tmp_path / "ws")
+    cfg = HarnessConfig()
+    cfg.upsert_agent(AgentConfig(worker_id="cfg-mock", kind="mock", tier="small"))
+    cfg.upsert_agent(AgentConfig(worker_id="cfg-llm", kind="openai_compat",
+                                 tier="mid", base_url="http://localhost:9/v1",
+                                 model="m"))
+    runner = build_agent_runner(cfg.agent("cfg-mock"), cfg)
+    llm = build_agent_runner(cfg.agent("cfg-llm"), cfg)
+    wrapped_llm = SelfCritique(llm)  # registry must reach through wrappers
+    state.register_worker(runner, runner.keypair, tiers=["small"])
+    state.wire({Tier.SMALL: runner, Tier.MID: wrapped_llm}, journal_dir=tmp_path)
+
+    assert wrapped_llm.inner.tool_registry is state.tools
+    assert state.registry.get("cfg-mock").active
+
+    # a planned step's tool subset survives StepSpec -> Task conversion
+    from metaharness.workflows.dsl import StepSpec
+    step = StepSpec(id="s", objective="grep the workspace", tools=["grep"])
+    task = step.to_task({})
+    assert task.tools == ["grep"]
+    outcome = await state.executor.execute(task)
+    assert outcome.attempts  # ran through router -> signed mock -> verifier
