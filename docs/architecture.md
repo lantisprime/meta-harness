@@ -127,6 +127,8 @@ Framed strictly as integrity/authenticity — the same guarantees you get from s
 ### 3.8 Web UI
 
 - Live run tree with step timeline (from spans), worker registry & identity status, provenance log viewer, playbook & failure-taxonomy browser, capability matrix / eval reports, and controls to launch, steer, approve gates, and stop runs.
+- **Home landing** (structure-lab pattern): a single next-action card answers "what do I do right now?" — integrity alerts first, then run approvals, pending promotions, setup steps — above stat tiles and latest-result cards. **Help** documents every view in plain language.
+- **AI companion (✦)**: one gradient sparkle marks every AI-advisory element — advisor panels on tuning candidates, the Goal-step prompt assistant. The companion runs as a normal Task through the harness's own most capable runner, schema-guarded to `{read, next_actions}` with a closed action vocabulary the UI executes deterministically; all recorded output enters its prompt inside an `<untrusted-data>` fence. Everything without the sparkle is verified, deterministic data.
 
 ### 3.9 Harness Self-Optimization (Meta-Harness outer loop)
 
@@ -151,9 +153,13 @@ research distilled in `memory/knowledge_base/meta-harness-optimization.md`):
   extraction, math, or mixed — deliberately not SDLC-only) with token cost tracked, kept
   as a **Pareto frontier**, not a greedy incumbent. A plateau detector stops stalled
   searches; a `Budget` puts a hard ceiling on the whole run.
-- **Promotion** reuses the eval gate: best-vs-seed paired go/no-go on a **held-out**
-  suite (`compare_suites`) — search-set numbers alone never promote. Promoted params land
-  in `optimization/<suite>/promoted.json`.
+- **Promotion** reuses the eval gate over the whole frontier: every contender is judged
+  on a **held-out** suite (`compare_suites`) and promotable ones are ranked by held-out
+  objectives — search-set numbers, search order, or "no regression" alone never promote.
+  CLI searches promote automatically; WebUI-started searches park the winner as a
+  **pending promotion** behind the human approval gate, and approving rewires the live
+  small-tier runner immediately. Promoted params land in
+  `optimization/<suite>/promoted.json` and re-apply at every serve boot.
 
 ## 4. Runner Adapter Contract
 

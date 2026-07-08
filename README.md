@@ -30,7 +30,7 @@ The full design (with subsystem detail and a component diagram) is in [`docs/arc
 | Evals | `src/metaharness/evals/` | Golden sets, pass^k gating, paired go/no-go comparison; `sdlc.py` grades per-phase agentic-coding capability deterministically |
 | Self-optimization | `src/metaharness/optimization/` | Meta-Harness outer loop (arXiv 2603.28052): proposer reads raw failure traces of prior candidates and searches harness configs; Pareto frontier (pass^k vs tokens); promotion only through the held-out eval gate |
 | Observability | `src/metaharness/observability/` | OpenTelemetry spans across all layers; in-memory store feeds the WebUI live |
-| Web UI | `src/metaharness/web/` | Run wizard (Agents → Goal → Plan → Run → Done, with workflow-type picker) + wizard-driven Settings (provider/agent wizards with system-prompt archetypes, MCP servers, tool catalog) + live console |
+| Web UI | `src/metaharness/web/` | Home landing (single next-action card + metrics), Run wizard (Agents → Goal → Plan → Run → Done, with ✦ prompt assistant), wizard-driven Settings, live console with Harness-tuning card (start searches, approve promotions), ✦ AI advisor panels (closed action vocabulary, advisory-only), Help manual |
 
 ## Quick start
 
@@ -79,10 +79,18 @@ Each round a proposer reads the candidate ledger — params, scores, hypotheses,
 **raw** failure traces of every prior candidate (the paper's ablation: raw traces beat
 summaries by ~15 accuracy points) — and proposes a targeted config delta with a causal
 hypothesis. Candidates are scored pass^k vs token cost on a search suite; a Pareto
-frontier is kept, and the best candidate is promoted only if it beats the seed on a
-**held-out** suite through the paired go/no-go gate. Suites are domain-general
-(`classify`, `extract`, `math`, or `mixed`), and the ledger under
+frontier is kept, and promotion requires a strict win over the seed on a **held-out**
+suite through the paired go/no-go gate. Suites are domain-general (`classify`,
+`extract`, `math`, or `mixed`), and the ledger under
 `~/.metaharness/optimization/<suite>/` survives restarts — a later run resumes the search.
+
+The same loop drives the WebUI's **Harness tuning** console card: start a search from
+the browser, watch candidates and plain-language findings appear live, and decide the
+promotion yourself — web-started searches park gate-passing winners for **your
+approval**, which then rewires the live small-tier runner immediately. Promoted params
+also apply at every `serve` boot. The ✦ sparkle marks the AI companion throughout the
+UI: advisory explanations and suggested next actions over fenced, untrusted-marked
+context — it never executes anything itself.
 
 ## Persistence
 
