@@ -26,8 +26,13 @@ Tainted ledgers archived in ~/.metaharness/optimization-archive-20260709/.
 - Report records target_model (swapping tier models made ledgers misleading).
 
 ## Next steps (priority order)
-1. **Multi-worker per tier**: router pool per tier, per-task-type pick from
-   capability matrix (user has 2 mid agents; last-configured silently wins now).
+1. **Per-task model selection** (user-requested; start here): router holds
+   per-tier POOLS instead of one runner; decide() picks the pool member with
+   the best capability-matrix pass rate for the task's type (fallback:
+   configured order); ε-exploration on verifiable tasks so benched models
+   earn evidence; add_worker appends, retire removes; UI shows pool +
+   routed-to evidence in tier rows and "Who's good at what". Escalation
+   walks tiers as today, then picks within the tier.
 2. Code-space search (coding-agent proposer over the ledger).
 3. Charge LLMProposer/advisor tokens to Budget.
 4. Advisor placements: run-ledger failure explainer, matrix advisor, Settings
