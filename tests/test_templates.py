@@ -42,6 +42,17 @@ def test_software_engineering_instantiates_deterministically():
         == spec.model_dump()
 
 
+def test_workflow_name_never_cuts_mid_word():
+    """Humanize pass: long goals are shortened at a word boundary, so the UI
+    never shows fragments like '…accepts contact de'."""
+    template = get_template("software_engineering")
+    spec = template.instantiate("build a web form that accepts contact details")
+    short = spec.name.split(":", 1)[1]
+    assert short == "build a web form that accepts contact"
+    # short goals pass through untouched
+    assert template.instantiate("tiny goal").name.endswith(":tiny goal")
+
+
 async def test_template_run_end_to_end_with_gates(tmp_path):
     """The SE template runs through the real engine: parks at the spec gate,
     then the plan gate, then the review gate, then completes."""

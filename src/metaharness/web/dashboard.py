@@ -29,7 +29,8 @@ DASHBOARD_HTML = """<!doctype html>
 }
 *{box-sizing:border-box;margin:0}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);
-  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-synthesis:none}
 button{font-family:inherit;cursor:pointer;border:0;background:none}
 .mono{font-family:var(--mono)}
 

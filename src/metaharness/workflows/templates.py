@@ -62,8 +62,11 @@ class WorkflowTemplate(BaseModel):
                 "hitl": phase.hitl,
                 "depends_on": list(phase.depends_on),
             })
+        short = goal[:40]
+        if len(goal) > 40 and " " in short:
+            short = short.rsplit(" ", 1)[0]  # cut at a word, never mid-word
         return WorkflowSpec.model_validate({
-            "name": f"{self.id}:{goal[:40]}",
+            "name": f"{self.id}:{short}",
             "steps": steps,
         })
 

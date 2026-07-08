@@ -465,6 +465,7 @@ def test_settings_reads_as_numbered_questions(page, server):
     page.wait_for_selector("#view-settings .guide b:has-text('Why this page exists')")
     for q in ("1 · Where do completions come from?", "2 · Who does the work?",
               "3 · What can they use?"):
+        page.wait_for_selector(f"h2:has-text('{q}')")
         assert page.locator(f"h2:has-text('{q}')").count() == 1
     # catalog: collapsed by default, tools revealed on toggle
     summary = page.locator("summary:has-text('Browse the full tool catalog')")
