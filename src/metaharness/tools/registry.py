@@ -72,6 +72,10 @@ def digest_text(text: str, max_chars: int = MAX_RESULT_CHARS,
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        # the jail root of this registry's file tools ("" = no file tools);
+        # workers stamp it onto WorkerResult.workspace_root so downstream
+        # consumers know where file side-effects actually landed
+        self.workspace_root: str = ""
 
     def register(self, spec: ToolSpec) -> None:
         if spec.name in self._tools:

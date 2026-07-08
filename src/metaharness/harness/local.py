@@ -221,4 +221,6 @@ class OpenAICompatWorker(BaseRunner):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=(tokens_in + tokens_out) / 1000 * self.cost_per_1k_tokens,
+            workspace_root=getattr(self.tool_registry, "workspace_root", "")
+            if self.tool_registry is not None else "",
         )

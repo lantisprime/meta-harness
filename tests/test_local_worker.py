@@ -127,3 +127,21 @@ async def test_live_local_endpoint_roundtrip():
     assert result.error is None
     assert "positive" in result.raw_text.lower()
     assert result.tokens_out > 0
+
+
+async def test_workspace_root_stamped_from_tool_registry(tmp_path):
+    """v0.4 root binding: the runner that KNOWS where file side-effects land
+    records it on the result — evidence/packaging must never infer from cwd."""
+    from metaharness.tools import default_registry
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion_response("done"))
+
+    registry = default_registry(tmp_path / "ws")
+    worker = make_worker(handler, tool_registry=registry)
+    result = await worker.run(Task(objective="do"))
+    assert result.workspace_root == str(tmp_path / "ws")
+
+    # no registry → no root claimed (never guess)
+    result = await make_worker(handler).run(Task(objective="do"))
+    assert result.workspace_root == ""

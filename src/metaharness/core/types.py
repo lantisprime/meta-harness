@@ -112,6 +112,10 @@ class WorkerResult(BaseModel):
     cost_usd: float = 0.0
     latency_s: float = 0.0
     error: Optional[str] = None
+    # the directory this worker's file side-effects land in (builtin tool jail
+    # root or coding-CLI cwd), recorded by the runner that KNOWS it — evidence
+    # collection and run packaging must never infer this from cwd or guess
+    workspace_root: str = ""
     # detached signature over `result_signing_bytes(...)`, made with the worker's
     # registered key, so the orchestrator can confirm who produced this result.
     signature_b64: Optional[str] = None

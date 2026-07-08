@@ -363,4 +363,5 @@ class CodingAgentWorker(BaseRunner):
             output=parse_output(text, expect_json=bool(task.output_schema)),
             raw_text=text,
             cost_usd=cost,
+            workspace_root=str(workspace),
         )

@@ -128,6 +128,7 @@ def _calculator(expression: str) -> str:
 
 def default_registry(workspace: Path = DEFAULT_WORKSPACE) -> ToolRegistry:
     registry = ToolRegistry()
+    registry.workspace_root = str(workspace)
     for spec in build_file_tools(workspace):
         registry.register(spec)
     registry.register(ToolSpec(

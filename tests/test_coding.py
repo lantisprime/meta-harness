@@ -170,3 +170,13 @@ async def test_list_cli_models_merges_config_registry(tmp_path, monkeypatch):
     monkeypatch.setattr(coding_mod.shutil, "which", lambda b: None)  # no binary
     models = await list_cli_models("pi")
     assert models == ["neuralwatt/glm-5.2"]  # config registry alone suffices
+
+
+async def test_workspace_root_stamped_on_cli_result(tmp_path):
+    """v0.4 root binding: coding CLIs record the exact cwd their subprocess
+    mutated — per-task dirs and explicit _workspace differ from builtin roots."""
+    ws = tmp_path / "ws"
+    binary = _stub(tmp_path, "claude", 'cat > /dev/null; echo \'{"result": "ok"}\'')
+    worker = CodingAgentWorker("cw", cli="claude", workspace=ws, binary=binary)
+    result = await worker.run(Task(objective="do"))
+    assert result.workspace_root == str(ws)
