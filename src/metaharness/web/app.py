@@ -43,6 +43,7 @@ class StartRunRequest(BaseModel):
 class GoalRequest(BaseModel):
     goal: str
     context: dict[str, Any] = {}
+    workflow_type: str = ""              # named template ("" = free-form planner)
 
 
 class AddWorkerRequest(BaseModel):
@@ -158,6 +159,17 @@ def create_app(state: HarnessState) -> FastAPI:
             _advance_in_background(run_id)
         return run_state.model_dump(mode="json")
 
+    async def _plan(req: GoalRequest, context: dict[str, Any]):
+        """Template type -> deterministic spine (no LLM); else free-form planner."""
+        if req.workflow_type:
+            from metaharness.workflows.templates import get_template
+            template = get_template(req.workflow_type)
+            if template is None:
+                raise HTTPException(422, f"unknown workflow_type {req.workflow_type!r}")
+            return template.instantiate(req.goal), f"template:{template.id}"
+        return await plan_workflow(req.goal, state.planner_runner(), context,
+                                   tools=state.tools)
+
     @app.post("/api/plans")
     async def preview_plan(req: GoalRequest) -> dict[str, Any]:
         """Plan a workflow from a goal WITHOUT starting it — the wizard's review
@@ -167,8 +179,7 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await plan_workflow(req.goal, state.planner_runner(), context,
-                                            tools=state.tools)
+        spec, source = await _plan(req, context)
         return {"workflow": spec.model_dump(mode="json"), "plan_source": source}
 
     @app.post("/api/runs")
@@ -202,8 +213,7 @@ def create_app(state: HarnessState) -> FastAPI:
         if not req.goal.strip():
             raise HTTPException(422, "goal is empty")
         context = {"goal": req.goal, **req.context}
-        spec, source = await plan_workflow(req.goal, state.planner_runner(), context,
-                                            tools=state.tools)
+        spec, source = await _plan(req, context)
         state.provenance.append(
             "orchestrator", "workflow.planned",
             {"goal": req.goal[:300], "source": source, "workflow": spec.name,
@@ -395,6 +405,11 @@ def create_app(state: HarnessState) -> FastAPI:
             "total": len(state.provenance),
             "entries": [e.model_dump(mode="json") for e in entries],
         }
+
+    @app.get("/api/workflow-types")
+    async def workflow_types() -> list[dict[str, Any]]:
+        from metaharness.workflows.templates import list_templates
+        return list_templates()
 
     @app.get("/api/tools")
     async def tools() -> list[dict[str, Any]]:
