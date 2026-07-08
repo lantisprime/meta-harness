@@ -462,6 +462,7 @@ function planNote(){
     ? badge('act', src.replace('template:', '') + ' template')
     : src === 'planner' ? badge('act', 'planned by frontier agent')
     : src === 'custom' ? badge('act', 'custom — built by hand')
+    : src === 'followup' ? badge('act', 'follow-up — planned from the last run')
     : badge('warn', 'fallback: single step');
   return base + (wiz.edited ? ' ' + badge('ok', 'edited by you') : '');
 }
@@ -854,9 +855,37 @@ function renderDoneStep(){
           ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
           </div></div>`;
       }).join('')}</div>
+    <div class="card" style="margin-top:16px"><h2>Not done yet?</h2>
+      <div class="sub">Reviewer said no-ship, or a step failed? Iterate — nothing below runs without your approval.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn ghost" onclick="runAgain()">↻ Run the same workflow again</button>
+        <button class="btn ghost" id="fu-btn" onclick="planFollowup()">Plan follow-up with frontier agent →</button></div>
+      <div class="small dim" id="fu-msg" style="margin-top:8px"></div></div>
     <div class="wiz-nav">
       <button class="btn ghost" onclick="showView('console')">Inspect in Console</button>
       <button class="btn" onclick="resetWizard()">Start another run →</button></div>`;
+}
+
+function runAgain(){
+  toast('Starting a fresh run of the same workflow');
+  startRun();
+}
+
+async function planFollowup(){
+  const msg = document.getElementById('fu-msg');
+  const btn = document.getElementById('fu-btn');
+  btn.disabled = true;
+  msg.innerHTML = '<span class="spin"></span> the frontier agent is reading the run outputs and planning remediation…';
+  const r = await post(`/api/runs/${wiz.runId}/followup`, {});
+  btn.disabled = false;
+  if(!r.ok){ msg.textContent = 'follow-up planning failed: ' + (await r.text()).slice(0, 140); return; }
+  const data = await r.json();
+  wiz.plan = data.workflow;
+  wiz.planSource = data.plan_source;
+  wiz.edited = false; wiz.editingStep = null;
+  wiz.builderMode = false; wiz.yamlMode = false;
+  toast('Follow-up plan ready — review and approve before it runs');
+  setStep(2);
 }
 
 function resetWizard(){

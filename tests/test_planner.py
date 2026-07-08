@@ -11,6 +11,7 @@ import pytest
 
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.harness import MockLLMWorker, OpenAICompatWorker, ScriptedWorker, probe_endpoint
+from metaharness.identity import KeyPair
 from metaharness.web import HarnessState, create_app
 from metaharness.workflows import WorkflowSpec, plan_workflow
 from metaharness.workflows.planner import fallback_spec
@@ -228,3 +229,62 @@ async def test_no_literal_no_derived_check():
     planner = ScriptedWorker("p", lambda t: plan)
     spec, _ = await plan_workflow("extract", planner)
     assert spec.steps[0].success_check is None
+
+
+# -- follow-up planning: rework after a finished run --------------------------------
+
+
+async def test_followup_endpoint_feeds_run_outputs_to_planner(tmp_path):
+    """Review said NO-SHIP -> /followup hands the planner the per-step
+    digest (including the reviewer's findings) and returns a remediation
+    plan for human review; the provenance chain records it."""
+    seen_tasks = []
+    followup_plan = {"name": "fix-findings", "steps": [
+        {"id": "fix-tests", "objective": "Add the missing tests the reviewer found."},
+        {"id": "re-review", "objective": "Re-review the fix.", "hitl": True,
+         "depends_on": ["fix-tests"]}]}
+
+    def handler(task):
+        if task.task_type == TaskType.PLANNING:
+            seen_tasks.append(task)
+            return followup_plan
+        if "review" in task.objective.lower():
+            return "NO-SHIP: tests for the new flag are missing entirely."
+        return "did the work"
+
+    state = HarnessState()
+    kp = KeyPair.generate()
+    worker = ScriptedWorker("w", handler, tier=Tier.FRONTIER, keypair=kp)
+    state.register_worker(worker, kp, tiers=["frontier"])
+    state.wire({Tier.FRONTIER: worker}, journal_dir=tmp_path)
+
+    spec = WorkflowSpec.model_validate({"name": "ship-it", "steps": [
+        {"id": "implement", "objective": "Implement the flag."},
+        {"id": "review", "objective": "Adversarially review; end with SHIP or NO-SHIP.",
+         "depends_on": ["implement"]}]})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(state)),
+                                 base_url="http://test") as client:
+        run = (await client.post("/api/runs", json={
+            "workflow": spec.model_dump(mode="json"),
+            "context": {"goal": "ship the flag"}, "wait": True})).json()
+        assert run["status"] == "completed"
+
+        # unfinished runs are refused
+        ghost = await client.post("/api/runs/nope/followup")
+        assert ghost.status_code == 404
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/followup")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["plan_source"] == "followup"
+        assert [s["id"] for s in data["workflow"]["steps"]] == ["fix-tests", "re-review"]
+        assert "NO-SHIP" in data["prior_summary"]
+
+        # the planner actually saw what happened, not just the goal
+        prompt = seen_tasks[0].objective
+        assert "NO-SHIP: tests for the new flag are missing" in prompt
+        assert "ship the flag" in prompt
+
+        prov = (await client.get("/api/provenance")).json()
+        assert any(e["action"] == "workflow.followup_planned" for e in prov["entries"])
+        assert prov["chain"]["ok"]

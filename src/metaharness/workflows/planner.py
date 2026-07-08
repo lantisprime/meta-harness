@@ -249,3 +249,61 @@ async def plan_workflow(
                 span.set_attribute("plan.invalid", str(exc)[:200])
         span.set_attribute("plan.source", "fallback")
         return fallback_spec(goal, context), "fallback"
+
+
+FOLLOWUP_GOAL = """\
+A previous workflow run for this goal has finished and needs follow-up work:
+
+Original goal: {goal}
+
+What happened, step by step:
+{summary}
+
+Diagnose what blocked completion or shipping — pay particular attention to
+reviewer findings and failed/skipped steps — and produce a follow-up workflow
+that addresses ONLY the outstanding problems. Reference prior results via
+$context keys where useful. Gate any step whose outcome leaves the system with
+"hitl": true. Do not redo work that already passed."""
+
+
+def summarize_run(spec, state, limit: int = 400) -> str:
+    """Per-step digest of a finished run, planner-facing: id, verdict, and a
+    truncated output — enough signal to plan remediation without replaying
+    the entire transcript (worker isolation: distilled summaries only)."""
+    lines = []
+    for step in spec.steps:
+        record = state.completed.get(step.id)
+        if record is not None:
+            output = record.output
+            text = output if isinstance(output, str) else json.dumps(
+                output, ensure_ascii=False, default=str)
+            if len(text) > limit:
+                text = text[:limit] + f"…[truncated {len(text) - limit} chars]"
+            lines.append(f"- {step.id} [{record.verdict.value}]: {text}")
+        elif step.id in state.skipped:
+            lines.append(f"- {step.id} [skipped]: {state.skipped[step.id]}")
+        elif state.failed_step == step.id:
+            lines.append(f"- {step.id} [FAILED]: the run stopped here")
+        else:
+            lines.append(f"- {step.id}: did not run")
+    return "\n".join(lines)
+
+
+async def plan_followup(
+    goal: str,
+    spec,
+    state,
+    planner: Runner,
+    context: Optional[dict[str, Any]] = None,
+    tools=None,
+) -> tuple[WorkflowSpec, str]:
+    """Plan remediation for a finished run: the planner sees what actually
+    happened (verdicts, reviewer findings, skips) and proposes the follow-up
+    workflow. Returns (spec, source) with source "followup" or "fallback" —
+    the caller shows it for human review; NOTHING runs without approval."""
+    summary = summarize_run(spec, state)
+    followup_goal = FOLLOWUP_GOAL.format(goal=goal, summary=summary)
+    context = dict(context or {})
+    context.setdefault("prior_run_summary", summary)
+    plan, source = await plan_workflow(followup_goal, planner, context, tools=tools)
+    return plan, ("followup" if source == "planner" else source)

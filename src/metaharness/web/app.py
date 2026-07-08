@@ -178,6 +178,35 @@ def create_app(state: HarnessState) -> FastAPI:
         return await plan_workflow(req.goal, state.planner_runner(), context,
                                    tools=state.tools)
 
+    @app.post("/api/runs/{run_id}/followup")
+    async def plan_run_followup(run_id: str) -> dict[str, Any]:
+        """Rework mechanism for a finished run (e.g. review said NO-SHIP):
+        the frontier planner reads what actually happened and proposes a
+        remediation workflow. Returned for HUMAN review in the plan editor —
+        it never starts on its own, and its gated steps keep their gates."""
+        from metaharness.workflows.planner import plan_followup, summarize_run
+
+        try:
+            run_state = state.engine.state(run_id)
+            spec = self_spec = state.engine._runs[run_id][0]
+        except (KeyError, AttributeError):
+            raise HTTPException(404, f"unknown run {run_id}")
+        if run_state.status.value not in ("completed", "failed"):
+            raise HTTPException(409, "follow-up planning needs a finished run")
+        goal = str(run_state.context.get("goal") or run_state.workflow)
+        followup, source = await plan_followup(
+            goal, spec, run_state, state.planner_runner(),
+            context=run_state.context, tools=state.tools)
+        state.provenance.append(
+            "orchestrator", "workflow.followup_planned",
+            {"source_run": run_id, "plan_source": source,
+             "workflow": followup.name, "steps": [s.id for s in followup.steps]},
+            keypair=state.orchestrator_keypair,
+        )
+        return {"workflow": followup.model_dump(mode="json"),
+                "plan_source": source,
+                "prior_summary": summarize_run(self_spec, run_state)}
+
     @app.post("/api/workflows/validate")
     async def validate_workflow(req: StartRunRequest) -> dict[str, Any]:
         """Validate a hand-written or hand-edited workflow WITHOUT running it:
