@@ -45,6 +45,10 @@ class StepSpec(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     hitl: bool = False    # require human approval before this step runs
     tools: list[str] = Field(default_factory=list)  # tool subset for this step
+    # conditional execution: {"step": "<id>", "equals"|"contains"|"one_of": value,
+    # "negate": bool} — evaluated deterministically against the referenced step's
+    # output at advance-time; unmet -> this step is journaled as skipped
+    when: Optional[dict[str, Any]] = None
 
     def to_task(self, resolved_inputs: dict[str, Any]) -> Task:
         boundaries = list(self.boundaries)
@@ -88,6 +92,20 @@ class WorkflowSpec(BaseModel):
             unknown = set(step.depends_on) - ids
             if unknown:
                 raise ValueError(f"step {step.id!r} depends on unknown steps: {sorted(unknown)}")
+            if step.when is not None:
+                ref = step.when.get("step")
+                if not ref or ref not in ids:
+                    raise ValueError(
+                        f"step {step.id!r} 'when' references unknown step {ref!r}")
+                if ref == step.id:
+                    raise ValueError(f"step {step.id!r} 'when' cannot reference itself")
+                kinds = [k for k in ("equals", "contains", "one_of") if k in step.when]
+                if len(kinds) != 1:
+                    raise ValueError(
+                        f"step {step.id!r} 'when' needs exactly one of equals/contains/one_of")
+                if ref not in step.depends_on:
+                    # the condition source must have run first — make it explicit
+                    step.depends_on.append(ref)
         self.topological_order()  # raises on cycles
         return self
 
@@ -152,3 +170,30 @@ def resolve_reference(value: Any, context: dict[str, Any], outputs: dict[str, An
         else:
             raise ValueError(f"reference {value!r}: {key!r} not found")
     return node
+
+
+def when_satisfied(when: dict[str, Any], outputs: dict[str, Any]) -> bool:
+    """Deterministic branch predicate: does the referenced step's output meet
+    the condition? A missing/skipped source counts as NOT satisfied."""
+    ref = when["step"]
+    if ref not in outputs:
+        return False
+    output = outputs[ref]
+    text = output.strip() if isinstance(output, str) else str(output).strip()
+    if "equals" in when:
+        want = when["equals"]
+        ok = output == want or text == str(want).strip()
+    elif "contains" in when:
+        ok = str(when["contains"]) in (output if isinstance(output, str) else str(output))
+    else:
+        ok = text in [str(v).strip() for v in when.get("one_of", [])]
+    return (not ok) if when.get("negate") else ok
+
+
+def describe_when(when: dict[str, Any]) -> str:
+    kind = next(k for k in ("equals", "contains", "one_of") if k in when)
+    value = when[kind]
+    if isinstance(value, list):
+        value = ", ".join(str(v) for v in value)
+    prefix = "unless" if when.get("negate") else "if"
+    return f"{prefix} {when['step']} {kind} {value}"

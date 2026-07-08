@@ -436,10 +436,24 @@ function checkOf(step){
   return {kind, value: Array.isArray(v) ? v.join(', ') : String(v)};
 }
 
+function buildWhen(stepId, kind, value){
+  if(!stepId || !value.trim()) return null;
+  const v = kind === 'one_of'
+    ? value.split(',').map(x => x.trim()).filter(Boolean) : value.trim();
+  return {step: stepId, [kind]: v};
+}
+
 function buildCheck(kind, value){
   if(kind === 'none' || !value.trim()) return null;
   if(kind === 'one_of') return {one_of: value.split(',').map(x => x.trim()).filter(Boolean)};
   return {[kind]: value.trim()};
+}
+
+function whenBadge(st){
+  if(!st.when) return '';
+  const kind = ['equals','contains','one_of'].find(k => k in st.when);
+  const v = Array.isArray(st.when[kind]) ? st.when[kind].join(', ') : st.when[kind];
+  return badge('dim', `${st.when.negate ? 'unless' : 'if'} ${st.when.step} ${kind} ${v}`);
 }
 
 function planNote(){
@@ -469,7 +483,7 @@ async function renderPlanStep(){
         <div class="planstep"><div class="n">${i + 1}</div>
           <div style="flex:1"><div class="pt">${esc(st.id)}
             ${badge('dim', st.task_type)}${st.hitl ? badge('warn','HITL — waits for you') : ''}
-            ${st.success_check ? badge('ok','verifiable') : ''}
+            ${st.success_check ? badge('ok','verifiable') : ''}${whenBadge(st)}
             ${(st.tools || []).map(t => badge('act','🔧 ' + t)).join('')}</div>
           <div class="pd">${esc(st.objective)}</div>
           ${(st.depends_on || []).length ? `<div class="pd mono">after: ${esc(st.depends_on.join(', '))}</div>` : ''}</div>
@@ -511,6 +525,17 @@ function stepEditForm(st, i){
         <input id="se-deps" class="mono" value="${esc((st.depends_on || []).join(', '))}"></span>
       <span style="width:190px;align-self:end"><label style="display:flex;gap:8px;align-items:center">
         <input type="checkbox" id="se-hitl" ${st.hitl ? 'checked' : ''} style="width:auto"> HITL gate</label></span></div>
+    <div class="field" style="display:flex;gap:10px">
+      <span style="width:220px"><label>Only run when (branch)</label><select id="se-when-step">
+        <option value="">— always —</option>
+        ${wiz.plan.steps.filter(o => o.id !== st.id).map(o =>
+          `<option ${st.when && st.when.step === o.id ? 'selected' : ''}>${esc(o.id)}</option>`).join('')}</select></span>
+      <span style="width:140px"><label>Condition</label><select id="se-when-kind">
+        ${['equals','contains','one_of'].map(k => {
+          const cur = st.when ? ['equals','contains','one_of'].find(x => x in st.when) : 'equals';
+          return `<option ${cur === k ? 'selected' : ''}>${k}</option>`;}).join('')}</select></span>
+      <span style="flex:1"><label>Value (one_of: comma-separated)</label>
+        <input id="se-when-val" class="mono" value="${esc(st.when ? (Array.isArray(st.when[['equals','contains','one_of'].find(x => x in st.when)]) ? st.when[['equals','contains','one_of'].find(x => x in st.when)].join(', ') : st.when[['equals','contains','one_of'].find(x => x in st.when)]) : '')}"></span></div>
     <div style="display:flex;gap:10px">
       <button class="btn" onclick="saveStep(${i})">Save step</button>
       <button class="btn ghost" onclick="wiz.editingStep=null;renderPlanStep()">Cancel</button></div></div>`;
@@ -528,6 +553,9 @@ function collectStepForm(){
                               document.getElementById('se-checkval').value),
     depends_on: document.getElementById('se-deps').value.split(',').map(x => x.trim()).filter(Boolean),
     hitl: document.getElementById('se-hitl').checked,
+    when: buildWhen(document.getElementById('se-when-step').value,
+                    document.getElementById('se-when-kind').value,
+                    document.getElementById('se-when-val').value),
   };
 }
 
@@ -573,7 +601,8 @@ async function runValidatedPlan(){
 /* -- step builder: wizard-driven custom workflow authoring -- */
 function newDraft(){
   return {id: `step-${wiz.plan.steps.length + 1}`, task_type: 'general', objective: '',
-          tools: [], hitl: false, depends_on: [], check_kind: 'none', check_value: ''};
+          tools: [], hitl: false, depends_on: [], check_kind: 'none', check_value: '',
+          when_step: '', when_kind: 'equals', when_value: ''};
 }
 
 function openStepBuilder(){
@@ -620,7 +649,15 @@ function renderStepBuilder(){
           : '<span class="small dim">first step — nothing to depend on yet</span>'}</div>
       <div class="field"><label style="display:flex;gap:8px;align-items:center">
         <input type="checkbox" id="sb-hitl" ${d.hitl ? 'checked' : ''} style="width:auto">
-        HITL gate — pause for my approval before this step runs</label></div>`;
+        HITL gate — pause for my approval before this step runs</label></div>
+      ${prior.length ? `<div class="field" style="display:flex;gap:10px">
+        <span style="width:200px"><label>Only run when (branch)</label><select id="sb-when-step">
+          <option value="">— always —</option>
+          ${prior.map(id => `<option ${d.when_step === id ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></span>
+        <span style="width:130px"><label>Condition</label><select id="sb-when-kind">
+          ${['equals','contains','one_of'].map(k => `<option ${d.when_kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
+        <span style="flex:1"><label>Value</label>
+          <input id="sb-when-val" class="mono" value="${esc(d.when_value || '')}" placeholder="e.g. high"></span></div>` : ''}`;
   }
   const added = wiz.plan.steps.map((st, i) =>
     `<div class="small" style="padding:3px 0"><span class="mono">${i + 1}. ${esc(st.id)}</span>
@@ -657,6 +694,9 @@ function builderCapture(){
   const c = grab('sb-check'); if(c !== null) d.check_kind = c;
   const cv = grab('sb-checkval'); if(cv !== null) d.check_value = cv;
   const h = document.getElementById('sb-hitl'); if(h) d.hitl = h.checked;
+  const ws = grab('sb-when-step'); if(ws !== null) d.when_step = ws;
+  const wk = grab('sb-when-kind'); if(wk !== null) d.when_kind = wk;
+  const wv = grab('sb-when-val'); if(wv !== null) d.when_value = wv;
 }
 
 function builderNav(delta){
@@ -680,7 +720,8 @@ function builderCommit(){
   wiz.plan.steps.push({id: d.id, task_type: d.task_type, objective: d.objective,
     inputs: {goal: '$context.goal'}, boundaries: [], tools: d.tools.slice(),
     depends_on: d.depends_on.slice(), hitl: d.hitl,
-    success_check: buildCheck(d.check_kind, d.check_value)});
+    success_check: buildCheck(d.check_kind, d.check_value),
+    when: buildWhen(d.when_step, d.when_kind, d.when_value)});
   wiz.edited = true;
   toast(`Added ${d.id}`);
   wiz.builder = {sub: 0, draft: newDraft()};
@@ -745,6 +786,8 @@ async function pollRun(){
 
 function stepStatus(s){
   const run = wiz.run || {completed:{}};
+  if(run.skipped && run.skipped[s.id])
+    return {cls:'', icon:'⤳', label:badge('dim', 'skipped — ' + run.skipped[s.id])};
   if(run.completed[s.id]) return {cls:'done', icon:'✓', label:badge(run.completed[s.id].verdict === 'pass' ? 'ok' : 'dim', run.completed[s.id].verdict)};
   if(run.failed_step === s.id) return {cls:'fail', icon:'✕', label:badge('bad','failed')};
   if(run.awaiting === s.id) return {cls:'now', icon:'…', label:badge('warn','waiting for you')};
@@ -805,8 +848,9 @@ function renderDoneStep(){
     <div class="card"><h2>${esc(p.name)}</h2><div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status)}</div>
       ${p.steps.map((s, i) => {
         const rec = (run.completed || {})[s.id];
-        return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : i + 1)}</div>
-          <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : badge('dim','did not run')}</div>
+        const skip = (run.skipped || {})[s.id];
+        return `<div class="planstep"><div class="n ${rec ? 'done' : (run.failed_step === s.id ? 'fail' : '')}">${rec ? '✓' : (run.failed_step === s.id ? '✕' : (skip ? '⤳' : i + 1))}</div>
+          <div style="flex:1"><div class="pt">${esc(s.id)} ${rec ? badge(rec.verdict === 'pass' ? 'ok' : 'dim', rec.verdict) : (skip ? badge('dim', 'skipped — ' + skip) : badge('dim','did not run'))}</div>
           ${rec ? `<div class="out">${esc(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output, null, 2))}</div>` : ''}
           </div></div>`;
       }).join('')}</div>

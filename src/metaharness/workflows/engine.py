@@ -19,7 +19,12 @@ from pydantic import BaseModel, Field
 from metaharness.core.executor import TaskExecutor
 from metaharness.core.types import Verdict
 from metaharness.observability.tracing import tracer
-from metaharness.workflows.dsl import WorkflowSpec, resolve_reference
+from metaharness.workflows.dsl import (
+    WorkflowSpec,
+    describe_when,
+    resolve_reference,
+    when_satisfied,
+)
 from metaharness.workflows.journal import Journal
 
 
@@ -47,6 +52,7 @@ class RunState(BaseModel):
     approved: set[str] = Field(default_factory=set)
     rejected: set[str] = Field(default_factory=set)
     failed_step: Optional[str] = None
+    skipped: dict[str, str] = Field(default_factory=dict)  # step id -> reason
     context: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -107,13 +113,21 @@ class WorkflowEngine:
             span.set_attribute("workflow.name", spec.name)
 
             for step in spec.topological_order():
-                if step.id in state.completed:
+                if step.id in state.completed or step.id in state.skipped:
                     continue
                 if step.id in state.rejected:
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
                     journal.append("run.finished", run_id, payload={"status": "failed", "reason": f"step {step.id} rejected"})
                     return state
+                skipped_deps = [d for d in step.depends_on if d in state.skipped]
+                if skipped_deps:
+                    # cascade: a step whose dependency never ran cannot run either
+                    reason = f"dependency {skipped_deps[0]!r} was skipped"
+                    state.skipped[step.id] = reason
+                    journal.append("step.skipped", run_id, step_id=step.id,
+                                   payload={"reason": reason})
+                    continue
                 unmet = [d for d in step.depends_on if d not in state.completed]
                 if unmet:  # safety net; topological order + fail-fast make this unreachable
                     state.status = RunStatus.FAILED
@@ -123,6 +137,18 @@ class WorkflowEngine:
                         payload={"status": "failed", "reason": f"step {step.id} blocked by unmet deps {unmet}"},
                     )
                     return state
+
+                if step.when is not None:
+                    outputs = {sid: rec.output for sid, rec in state.completed.items()}
+                    if not when_satisfied(step.when, outputs):
+                        # the branch not taken is journaled, never silent — and it
+                        # is decided BEFORE any HITL gate: nobody approves a step
+                        # that was never going to run
+                        reason = f"condition not met: {describe_when(step.when)}"
+                        state.skipped[step.id] = reason
+                        journal.append("step.skipped", run_id, step_id=step.id,
+                                       payload={"reason": reason})
+                        continue
 
                 if step.hitl and step.id not in state.approved:
                     state.status = RunStatus.AWAITING_APPROVAL
@@ -217,6 +243,8 @@ class WorkflowEngine:
             if entry.kind == "step.completed":
                 record = StepRecord.model_validate(entry.payload)
                 state.completed[entry.step_id] = record
+            elif entry.kind == "step.skipped" and entry.step_id:
+                state.skipped[entry.step_id] = entry.payload.get("reason", "")
             elif entry.kind == "hitl.resolved" and entry.step_id:
                 (state.approved if entry.payload.get("approved") else state.rejected).add(entry.step_id)
             elif entry.kind == "run.finished":

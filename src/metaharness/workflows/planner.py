@@ -48,6 +48,10 @@ Rules:
 - Prefer few, well-scoped steps over many vague ones.
 - Set "hitl": true on any step whose result leaves the system (sending,
   publishing, paging) so a human approves it first.
+- A step may run CONDITIONALLY: "when": {{"step": "<id>", "equals": <value>}}
+  (also "contains"/"one_of") runs it only when that prior step's output
+  matches; otherwise the harness skips it. Use for branches like
+  "page only when severity is high".
 {tool_rules}
 Goal: {goal}
 

@@ -498,3 +498,63 @@ def test_template_plan_is_editable_inline_and_via_yaml(page, server):
     page.fill("#yaml-box", yaml_text)
     page.click("button:has-text('Apply YAML')")
     page.wait_for_selector(".planstep")
+
+
+def test_branching_workflow_in_wizard_skips_untaken_path(page, server):
+    """Option-1 branching end-to-end: classify (mock answers the first one_of
+    option, 'low') -> page-oncall runs only 'if classify equals high' and is
+    visibly SKIPPED; archive runs 'if classify equals low'."""
+    base, _ = server
+    page.goto(base)
+    page.wait_for_selector(".tierrow")
+    page.click("button:has-text('Continue →')")
+    page.wait_for_selector(".pill:has-text('Custom (build by hand)')")
+    page.click(".pill:has-text('Custom (build by hand)')")
+    page.fill("#goal", "branching triage")
+    page.click("#planbtn")
+
+    # step 1: classify with a one_of check
+    page.wait_for_selector("h2:has-text('Add step 1')")
+    page.fill("#sb-id", "classify")
+    page.fill("#sb-obj", "Classify severity as exactly one of: low, high.")
+    page.click("button:has-text('Next →')")
+    page.click(".pill:has-text('classify')")
+    page.click("button:has-text('Next →')")
+    page.select_option("#sb-check", "one_of")
+    page.fill("#sb-checkval", "low, high")
+    page.click("button:has-text('Add step to workflow')")
+
+    # step 2: page-oncall, branch: if classify equals high
+    page.wait_for_selector("h2:has-text('Add step 2')")
+    page.fill("#sb-id", "page-oncall")
+    page.fill("#sb-obj", "Draft the on-call page.")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Next →')")
+    page.select_option("#sb-when-step", "classify")
+    page.select_option("#sb-when-kind", "equals")
+    page.fill("#sb-when-val", "high")
+    page.click("button:has-text('Add step to workflow')")
+
+    # step 3: archive, branch: if classify equals low
+    page.wait_for_selector("h2:has-text('Add step 3')")
+    page.fill("#sb-id", "archive")
+    page.fill("#sb-obj", "Archive the ticket quietly.")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Next →')")
+    page.select_option("#sb-when-step", "classify")
+    page.fill("#sb-when-val", "low")
+    page.click("button:has-text('Add step to workflow')")
+
+    page.click("button:has-text('Done — review workflow →')")
+    page.wait_for_selector(".planstep")
+    # review shows the branch conditions as badges
+    assert page.locator(".badge:has-text('if classify equals high')").count() == 1
+    assert page.locator(".badge:has-text('if classify equals low')").count() == 1
+
+    page.click("button:has-text('Run this plan →')")
+    page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
+    # the untaken branch is visibly skipped with its reason; the taken one ran
+    assert page.locator(".badge:has-text('skipped — condition not met')").count() == 1
+    done_text = page.locator("#wiz-body").inner_text()
+    assert "if classify equals high" in done_text   # the skip reason names it
+    assert page.locator(".planstep .n.done").count() == 2  # classify + archive
