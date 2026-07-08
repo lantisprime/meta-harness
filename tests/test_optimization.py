@@ -531,6 +531,7 @@ async def test_optimizer_persists_report_for_the_console(tmp_path):
     report = await optimizer.optimize(rounds=2)
     saved = CandidateLedger(tmp_path).load_report()
     assert saved["best_id"] == report.best_id
+    assert saved["finished_at"] > 0  # freshness stamp for the console
     assert saved["promoted"] == report.promoted
     assert saved["gate"]["go"] == report.gate.go
 

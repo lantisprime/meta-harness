@@ -1640,10 +1640,10 @@ function renderTuning(suites){
           : c.frontier ? '<span title="on the pass-vs-cost frontier">⭐</span>'
           : badge('dim', 'not worth it'),
       ].filter(Boolean).join(' ');
-      const meta = c.scores
+      const meta = (c.scores
         ? `pass^${c.scores.k} ${c.scores.pass_hat_k.toFixed(2)} · pass@1 ${c.scores.pass_at_1.toFixed(2)}`
           + ` · ${c.scores.tokens_total.toLocaleString()} tokens${c.parent ? ' · builds on ' + esc(c.parent) : ''}`
-        : 'never evaluated';
+        : 'never evaluated') + (c.created_at ? ' · ' + esc(ago(c.created_at)) : '');
       const adviceKey = s.suite + '/' + c.id;
       return `<div class="lrow"><div class="rr-main">
         <div class="rr-title">${esc(c.id)} ${marks}</div>
@@ -1667,8 +1667,23 @@ function renderTuning(suites){
         ${f.evidence && !f.story.includes(f.evidence) ? `<div class="rr-meta">${esc(f.evidence)}</div>` : ''}</div>
         ${badge(cls, label)}</div>`;
     }).join('');
+    // plain-language wrap-up of the last search, with freshness
+    let summary = '';
+    if(s.report && !s.running){
+      const rep = s.report;
+      const experiments = s.candidates.filter(c => c.status === 'evaluated').length;
+      const outcome = s.pending ? `${esc(s.pending.candidate)} is waiting for your decision`
+        : rep.promoted ? `${esc(rep.best_id)} won and was promoted`
+        : rep.stopped === 'error' ? 'the search crashed — see the note below'
+        : 'nothing beat the current setup';
+      const g2 = rep.gate;
+      summary = `<div class="small dim" style="margin:2px 0 8px">Last search${
+        rep.finished_at ? ' finished <b>' + esc(ago(rep.finished_at)) + '</b>' : ''}:
+        ${experiments} experiment${experiments === 1 ? '' : 's'} over ${rep.rounds_run} round${rep.rounds_run === 1 ? '' : 's'}
+        — ${outcome}${g2 ? ` (held-out ${g2.overall_incumbent.toFixed(2)} → ${g2.overall_candidate.toFixed(2)})` : ''}.</div>`;
+    }
     return `<div class="small" style="margin:8px 0 4px"><b>${esc(s.suite)} suite</b>
-      ${s.running ? badge('act', 'searching…') : ''}</div>` + pend + rows + gate
+      ${s.running ? badge('act', 'searching…') : ''}</div>` + summary + pend + rows + gate
       + (findings ? `<div class="small" style="margin:12px 0 2px"><b>What this means</b></div>` + findings : '');
   }).join('');
 }

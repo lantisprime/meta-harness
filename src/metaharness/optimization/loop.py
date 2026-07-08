@@ -47,6 +47,7 @@ class OptimizationReport(BaseModel):
     gate: Optional[GateReport] = None
     promoted: bool = False
     pending: Optional[str] = None    # gate-passing candidate awaiting human approval
+    finished_at: float = 0.0         # epoch seconds; the console shows freshness
     notes: list[str] = Field(default_factory=list)
 
 
@@ -147,7 +148,10 @@ class HarnessOptimizer:
     async def optimize(self, rounds: int = 6) -> OptimizationReport:
         """Run the search and persist the final report into the ledger root, so
         the WebUI can render results without holding the process."""
+        from metaharness.core.types import now
+
         report = await self._optimize(rounds)
+        report.finished_at = now()
         self.ledger.save_report(report.model_dump(mode="json"))
         return report
 

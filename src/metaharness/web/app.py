@@ -206,7 +206,7 @@ def create_app(state: HarnessState) -> FastAPI:
                 entry: dict[str, Any] = {
                     "id": c.id, "parent": c.parent, "status": c.status,
                     "hypothesis": c.hypothesis, "rejected_reason": c.rejected_reason,
-                    "frontier": c.id in frontier,
+                    "frontier": c.id in frontier, "created_at": c.created_at,
                 }
                 if c.scores is not None:
                     entry["scores"] = {**c.scores.model_dump(),
