@@ -83,8 +83,8 @@ def test_settings_provider_wizard_end_to_end(page, server):
     base, home = server
     page.goto(base)
     page.click("#nav-settings")
-    page.wait_for_selector("h2:has-text('Providers')")
-    page.click("button:has-text('+ Add provider (wizard)')")
+    page.wait_for_selector("h2:has-text('Where do completions come from?')")
+    page.click("button:has-text('+ Add a provider')")
 
     # step 1: pick a keyless local provider from the catalog
     page.wait_for_selector(".subwiz-steps")
@@ -98,7 +98,7 @@ def test_settings_provider_wizard_end_to_end(page, server):
     page.click("button:has-text('Save provider')")
 
     page.wait_for_selector(".prov-item:has-text('LM Studio')")
-    assert page.locator(".prov-item .badge.ok", has_text="configured").count() >= 1
+    assert page.locator(".prov-item .badge.ok", has_text="connected").count() >= 1
     # persisted to the ISOLATED home, keys never in plaintext
     cfg = (home / ".metaharness" / "config.json").read_text()
     assert "lmstudio" in cfg
@@ -108,8 +108,8 @@ def test_agent_wizard_with_archetype_prompt(page, server):
     base, home = server
     page.goto(base)
     page.click("#nav-settings")
-    page.wait_for_selector("h2:has-text('Agents')")
-    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector("h2:has-text('Who does the work?')")
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
 
     # step 1: kind
     page.wait_for_selector(".subwiz-steps")
@@ -183,8 +183,8 @@ def test_provider_wizard_lists_models_live(page, server):
     base, _ = server
     page.goto(base)
     page.click("#nav-settings")
-    page.wait_for_selector("h2:has-text('Providers')")
-    page.click("button:has-text('+ Add provider (wizard)')")
+    page.wait_for_selector("h2:has-text('Where do completions come from?')")
+    page.click("button:has-text('+ Add a provider')")
     page.wait_for_selector(".subwiz-steps")
     page.click(".pill:has-text('LM Studio (local)')")
     page.click("button:has-text('Next →')")
@@ -210,12 +210,12 @@ def test_agent_wizard_coding_cli_models_and_key_hint(page, server):
     base, _ = server
     page.goto(base)
     page.click("#nav-settings")
-    page.wait_for_selector("h2:has-text('Agents')")
+    page.wait_for_selector("h2:has-text('Who does the work?')")
     import httpx
     cfg = httpx.get(base + "/api/config", timeout=5).json()
     if "claude" not in cfg.get("coding_clis", {}):
         pytest.skip("claude CLI not installed on this machine")
-    page.click("button:has-text('+ Add agent (wizard)')")
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
     page.wait_for_selector(".subwiz-steps")
     page.click(".pill:has-text('Coding CLI')")
     page.click("button:has-text('Next →')")
@@ -243,8 +243,8 @@ def test_agent_wizard_subscription_kind(page, server):
     page.goto(base)
     page.click("#nav-settings")
     # settings home shows subscription status chips
-    page.wait_for_selector(".kv:has-text('SUBSCRIPTION ACCESS')")
-    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector(".kv:has-text('SUBSCRIPTIONS')")
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
     page.wait_for_selector(".subwiz-steps")
     page.click(".pill:has-text('Subscription (Claude Code / Codex)')")
     assert "No API key stored" in page.locator(".hint-panel").inner_text()
@@ -269,8 +269,8 @@ def test_agent_test_sends_provider_ref_not_stale_url(page, server):
     base, _ = server
     page.goto(base)
     page.click("#nav-settings")
-    page.wait_for_selector("h2:has-text('Agents')")
-    page.click("button:has-text('+ Add agent (wizard)')")
+    page.wait_for_selector("h2:has-text('Who does the work?')")
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
     page.wait_for_selector(".subwiz-steps")
     page.click("button:has-text('Next →')")   # kind: LLM endpoint (default)
     # direct-URL default renders first — this is the value that used to leak
@@ -343,9 +343,9 @@ def test_sweep_every_action_button_is_wired(page, server):
         assert dead_handlers() == [], f"dead onclick handler(s) on {name}"
 
     check("run wizard / agents step")
-    page.click("#nav-settings"); page.wait_for_selector("h2:has-text('Providers')")
+    page.click("#nav-settings"); page.wait_for_selector("h2:has-text('Where do completions come from?')")
     check("settings home")
-    page.click("button:has-text('+ Add provider (wizard)')")
+    page.click("button:has-text('+ Add a provider')")
     page.wait_for_selector(".subwiz-steps")
     check("provider wizard step 1")
     page.click(".pill:has-text('DeepSeek')")
@@ -355,7 +355,7 @@ def test_sweep_every_action_button_is_wired(page, server):
     check("provider wizard step 3")
     page.click("button:has-text('← Back')"); page.click("button:has-text('← Back')")
     page.click("button:has-text('Cancel')")
-    page.click("button:has-text('+ Add agent (wizard)')")
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
     page.wait_for_selector(".subwiz-steps")
     for kind in ("Coding CLI", "Subscription", "Mock (testing)", "LLM endpoint"):
         page.click(f".pill:has-text('{kind}')")
@@ -437,7 +437,7 @@ def test_console_run_ledger_reads_plain_language(page, server):
 
     page.goto(base)
     page.click("#nav-console")
-    page.wait_for_selector(".guide b:has-text('Why this page exists')")
+    page.wait_for_selector("#view-console .guide b:has-text('Why this page exists')")
     row = page.locator(".runrow", has_text="Prove the ledger reads like english")
     row.wait_for()
     # the machine-y composite name never leads the row
@@ -453,6 +453,25 @@ def test_console_run_ledger_reads_plain_language(page, server):
     assert "draft reply" in head          # step id prettified
     assert "unverified" not in head       # enum value never shown raw
     assert row.locator(".badge", has_text="done").count() >= 1
+
+
+def test_settings_reads_as_numbered_questions(page, server):
+    """Humanize pass (design handoff 08-admin): Settings is organised as
+    numbered plain-language questions, the guide banner explains the page, and
+    the tool catalog is collapsed behind a summary instead of dumped inline."""
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-settings")
+    page.wait_for_selector("#view-settings .guide b:has-text('Why this page exists')")
+    for q in ("1 · Where do completions come from?", "2 · Who does the work?",
+              "3 · What can they use?"):
+        assert page.locator(f"h2:has-text('{q}')").count() == 1
+    # catalog: collapsed by default, tools revealed on toggle
+    summary = page.locator("summary:has-text('Browse the full tool catalog')")
+    assert summary.count() == 1
+    assert page.locator("#settings-body details .mono").first.is_hidden()
+    summary.click()
+    assert page.locator("#settings-body details .mono").first.is_visible()
 
 
 def test_console_panels_speak_plain_language(page, server):

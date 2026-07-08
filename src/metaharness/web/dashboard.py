@@ -290,7 +290,10 @@ details.jt details.jt,.jrow{margin-left:16px}
 <!-- ================= SETTINGS ================= -->
 <div id="view-settings" class="view" style="display:none">
   <div class="eyebrow">Configuration</div>
-  <h1 class="greet">Providers, agents, tools — all wizard-driven.</h1>
+  <h1 class="greet">Where completions come from, and who does the work.</h1>
+  <div class="guide"><div class="fx">ƒ</div><div><b>Why this page exists</b>
+    <p>Three questions set up the whole harness — a wizard walks you through each.
+    Anything sensitive stays on this machine and is always shown masked.</p></div></div>
   <div id="settings-body"><div class="card"><div class="empty">loading…</div></div></div>
 </div>
 
@@ -526,7 +529,7 @@ async function renderAgentsStep(){
       The frontier agent also plans your workflows. Defaults are fine — just continue.</p></div></div>
     <div class="card"><h2>Tier assignments</h2><div class="sub">Who answers when the router calls</div>${tiers}
       <div style="margin-top:14px;display:flex;gap:10px">
-        <button class="btn ghost" onclick="openAgentWizard()">+ Add an agent (wizard)</button>
+        <button class="btn ghost" onclick="openAgentWizard()">+ Add an agent</button>
         <button class="btn ghost" onclick="showView('settings')">Open Settings</button></div></div>
     <div class="wiz-nav"><span></span>
       <button class="btn" ${Object.keys(byTier).length ? '' : 'disabled'} onclick="setStep(1)">Continue →</button></div>`;
@@ -1350,64 +1353,66 @@ function renderSettingsHome(){
   const providers = Object.values(cfg.providers || {});
   const provRows = providers.length ? providers.map(p => `
     <div class="prov-item"><div class="pi-main">
-      <div class="pi-name">${esc(p.label || p.id)} ${p.configured ? badge('ok','configured') : badge('dim','no key')}</div>
+      <div class="pi-name">${esc(p.label || p.id)} ${p.configured ? badge('ok','✓ connected') : badge('dim','no key yet')}</div>
       <div class="kv">${esc(p.base_url)} · key ${esc(p.api_key || '—')} ${p.default_model ? '· ' + esc(p.default_model) : ''}</div></div>
-      <button class="pill" onclick="startProvWizard('${esc(p.id)}')">Edit</button>
-      <button class="pill" onclick="deleteProvider('${esc(p.id)}')">Remove</button></div>`).join('')
-    : '<div class="empty">no providers yet — add one to use remote models</div>';
+      <button class="pill" data-act="prov_edit" data-id="${esc(p.id)}">Edit</button>
+      <button class="pill" data-act="prov_del" data-id="${esc(p.id)}">Remove</button></div>`).join('')
+    : '<div class="empty">none yet — add one to give your agents a brain in the cloud</div>';
 
   const agents = cfg.agents || [];
-  const agentRows = agents.length ? agents.map(a => `
+  const agentRows = agents.length ? agents.map((a, i) => `
     <div class="prov-item"><div class="pi-main">
-      <div class="pi-name">${esc(a.worker_id)} ${badge('act', a.tier)} ${badge('dim', a.kind)}</div>
+      <div class="pi-name">${esc(a.worker_id)} ${badge('act', a.tier + ' tier')} ${badge('dim', {
+        openai_compat: 'LLM endpoint', coding_cli: 'coding CLI',
+        subscription_cli: 'subscription', mock: 'mock'}[a.kind] || a.kind)}</div>
       <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
-        ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has system prompt' : ''}</div></div>
-      <button class="pill" onclick="startAgentWizardIdx(${agents.indexOf(a)})">Edit</button>
-      <button class="pill" onclick="removeAgent('${esc(a.worker_id)}')">Remove</button></div>`).join('')
-    : '<div class="empty">no durable agents — everything currently wired came from discovery and vanishes on restart</div>';
+        ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}</div></div>
+      <button class="pill" data-act="agent_edit" data-id="${i}">Edit</button>
+      <button class="pill" data-act="agent_del" data-id="${esc(a.worker_id)}">Remove</button></div>`).join('')
+    : '<div class="empty">no saved agents — the ones running now were auto-discovered and vanish when the server restarts</div>';
 
   const clis = Object.entries(cfg.coding_clis || {});
   const cliChips = clis.length
     ? clis.map(([name, path]) => `<span class="badge ok">${esc(name)}</span> <span class="kv">${esc(path)}</span>`).join('<br>')
-    : '<span class="empty">none found on PATH (pi, codex, opencode, claude)</span>';
+    : '<span class="empty">none found on this machine (looked for pi, codex, opencode, claude)</span>';
 
   const mcp = Object.values(cfg.mcp_servers || {});
   const mcpRows = mcp.length ? mcp.map(s => `
     <div class="prov-item"><div class="pi-main">
       <div class="pi-name">${esc(s.name)} ${badge('dim', s.transport)}</div>
       <div class="kv">${esc(s.transport === 'http' ? s.url : s.command + ' ' + (s.args || []).join(' '))}</div></div>
-      <button class="pill" onclick="deleteMcp('${esc(s.name)}')">Remove</button></div>`).join('')
-    : '<div class="empty">no MCP servers configured</div>';
+      <button class="pill" data-act="mcp_del" data-id="${esc(s.name)}">Remove</button></div>`).join('')
+    : '<div class="empty">none configured — fine for most workflows</div>';
 
   const toolsBySource = {};
   SET.tools.forEach(t => (toolsBySource[t.source] = toolsBySource[t.source] || []).push(t));
   const toolRows = Object.entries(toolsBySource).map(([src, ts]) =>
-    `<div class="kv" style="margin:8px 0 4px">${esc(src)}</div>` +
+    `<div class="kv" style="margin:8px 0 4px">${esc(src)} — ${ts.length} tool${ts.length === 1 ? '' : 's'}</div>` +
     ts.map(t => `<div class="small" style="padding:2px 0"><b class="mono">${esc(t.name)}</b> <span class="dim">${esc(t.description)}</span></div>`).join('')
   ).join('');
 
   return `
-    <div class="card"><h2>Providers</h2>
-      <div class="sub">LLM API endpoints — keys stored obfuscated on this machine, always masked here</div>
+    <div class="card"><h2>1 · Where do completions come from?</h2>
+      <div class="sub">Providers are the LLM services behind your agents. Keys are stored obfuscated on this machine and never shown unmasked.</div>
       ${provRows}
-      <button class="btn ghost" onclick="startProvWizard('')">+ Add provider (wizard)</button></div>
-    <div class="card" style="margin-top:16px"><h2>Agents</h2>
-      <div class="sub">Durable agent definitions — rebuilt into workers at every serve</div>
+      <button class="btn ghost" onclick="startProvWizard('')">+ Add a provider</button></div>
+    <div class="card" style="margin-top:16px"><h2>2 · Who does the work?</h2>
+      <div class="sub">Your saved agents. Each one is rebuilt and re-verifies its identity every time the server starts.</div>
       ${agentRows}
-      <button class="btn ghost" onclick="startAgentWizard(null)">+ Add agent (wizard)</button></div>
+      <button class="btn ghost" onclick="startAgentWizard(null)">+ Add an agent</button></div>
     <div class="grid" style="margin-top:16px">
-      <div class="card"><h2>CLIs & subscriptions</h2>
-        <div class="sub">Coding CLIs detected on PATH — usable as coding agents or subscription LLM providers</div>
+      <div class="card"><h2>3 · What can they use?</h2>
+        <div class="sub">Coding CLIs found on this machine — they give agents hands, or answer through a subscription you’re already signed in to.</div>
         ${cliChips}
-        <div class="kv" style="margin:12px 0 6px">SUBSCRIPTION ACCESS</div>
+        <div class="kv" style="margin:12px 0 6px">SUBSCRIPTIONS</div>
         ${Object.entries(cfg.subscriptions || {}).map(([name, st]) => `
           <div class="small" style="padding:3px 0">${
             st.installed && st.authenticated ? badge('ok','signed in')
             : st.installed ? badge('warn','not signed in')
             : badge('dim','not installed')} <b>${esc(st.label)}</b>
             ${st.installed && !st.authenticated ? `<span class="dim"> — ${esc(st.login_hint)}</span>` : ''}</div>`).join('')}</div>
-      <div class="card"><h2>MCP servers</h2>
-        <div class="sub">Tool sources for workflows (loaded at startup)</div>${mcpRows}
+      <div class="card"><h2>Extra tool servers</h2>
+        <div class="sub">MCP servers add tools your workflows can call — they load when the server starts.</div>${mcpRows}
         <div class="field" style="margin-top:10px"><label>Add: name</label><input id="mcp-name" class="mono" placeholder="files"></div>
         <div class="field"><label>Transport</label><select id="mcp-transport" onchange="document.getElementById('mcp-stdio').style.display = this.value === 'stdio' ? '' : 'none'; document.getElementById('mcp-http').style.display = this.value === 'http' ? '' : 'none'">
           <option value="stdio">stdio (command)</option><option value="http">http (url)</option></select></div>
@@ -1418,9 +1423,31 @@ function renderSettingsHome(){
         <button class="btn ghost" onclick="addMcp()">Add MCP server</button>
         <div class="small dim" style="margin-top:6px">restart the server (or re-run) to load its tools</div></div>
     </div>
-    <div class="card" style="margin-top:16px"><h2>Tool catalog</h2>
-      <div class="sub">What the planner can hand to steps — each step gets a small subset, never all of it</div>
-      ${toolRows || '<div class="empty">no tools</div>'}</div>`;
+    <div class="card" style="margin-top:16px">
+      <details><summary style="cursor:pointer"><b>Browse the full tool catalog</b>
+        <span class="dim">— ${SET.tools.length} tool${SET.tools.length === 1 ? '' : 's'} the planner can hand to a step; each step only ever gets a small, relevant subset</span></summary>
+      ${toolRows || '<div class="empty">no tools loaded</div>'}</details></div>`;
+}
+
+/* Delegated clicks for user-authored ids (providers, agents, MCP servers, model
+   picks) — ids ride in HTML-escaped data-* attributes, never inline JS strings. */
+document.getElementById('settings-body').addEventListener('click', ev => {
+  const el = ev.target.closest('[data-act]');
+  if(!el) return;
+  const id = el.dataset.id;
+  ({prov_edit: () => startProvWizard(id),
+    prov_del:  () => deleteProvider(id),
+    agent_edit:() => startAgentWizardIdx(+id),
+    agent_del: () => removeAgent(id),
+    mcp_del:   () => deleteMcp(id),
+    pick:      () => pickModel(el.dataset.input, el.dataset.value),
+  })[el.dataset.act]?.();
+});
+
+async function deleteMcp(name){
+  const r = await fetch('/api/config/mcp/' + encodeURIComponent(name), {method:'DELETE'});
+  toast(r.ok ? 'Removed tool server ' + name : 'Failed: ' + (await r.text()).slice(0,140));
+  renderSettings(true);
 }
 
 async function deleteProvider(pid){
@@ -1460,7 +1487,7 @@ function modelPickList(listId, inputId, models, filter){
   const needle = (filter || '').toLowerCase();
   const hits = needle ? models.filter(m => m.toLowerCase().includes(needle)) : models;
   const rows = hits.slice(0, PICK_CAP).map(m =>
-    `<div class="pl-row" onclick="pickModel('${esc(inputId)}','${esc(m)}')">${esc(m)}</div>`).join('');
+    `<div class="pl-row" data-act="pick" data-input="${esc(inputId)}" data-value="${esc(m)}">${esc(m)}</div>`).join('');
   const more = hits.length > PICK_CAP
     ? `<div class="pl-more">…${hits.length - PICK_CAP} more — type to narrow</div>` : '';
   const none = hits.length ? '' : '<div class="pl-more">no model matches the filter</div>';
