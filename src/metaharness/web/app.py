@@ -45,6 +45,10 @@ class ApprovalDecision(BaseModel):
     approved: bool = True
 
 
+class CoverageRequest(BaseModel):
+    n: int = 6
+
+
 class AdviseRequest(BaseModel):
     page: str                 # 'tuning' | 'goal'
     subject: str = ""         # candidate id, or the user's raw goal text
@@ -246,7 +250,9 @@ def create_app(state: HarnessState) -> FastAPI:
         if req.suite in _tuning_running:
             raise HTTPException(409, f"a search is already running for {req.suite!r}")
         try:
-            search, holdout = search_and_holdout(req.suite)
+            search, holdout = search_and_holdout(
+                req.suite, extras_dir=Path(state.optimization_root) / req.suite
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc))
         if req.proposer == "llm":
@@ -281,6 +287,84 @@ def create_app(state: HarnessState) -> FastAPI:
 
         asyncio.get_running_loop().create_task(_run())
         return {"suite": req.suite, "status": "running", "target": target.worker_id}
+
+    @app.post("/api/optimization/{suite}/coverage")
+    async def extend_suite(suite: str, req: CoverageRequest) -> dict[str, Any]:
+        """Grow a suite with frontier-agent-generated questions. Every item
+        must be scoreable; arithmetic answers are recomputed exactly, never
+        trusted from the generator. A mislabeled non-math item biases both
+        sides of the paired gate equally, so comparisons stay fair."""
+        import json as _json
+        from pathlib import Path
+
+        from metaharness.core.types import Task, TaskType
+        from metaharness.harness.enrichment import SchemaGuard
+        from metaharness.harness.sandbox import SandboxError, eval_arithmetic
+        from metaharness.optimization.suites import (
+            load_extras,
+            save_extras,
+            search_and_holdout,
+        )
+
+        if state.optimization_root is None:
+            raise HTTPException(409, "harness not wired for tuning")
+        try:
+            builtin_search, _ = search_and_holdout(suite)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        try:
+            runner = state.planner_runner()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc))
+
+        allowed_types = {t.task_type for t in builtin_search}
+        examples = [t.model_dump(include={"task_type", "objective", "inputs", "success_check"})
+                    for t in builtin_search[:3]]
+        task = Task(
+            task_type=TaskType.GENERAL,
+            objective=(
+                f"Write {req.n} NEW evaluation questions in the same JSON shape as the "
+                "examples in the inputs — same domains, HARDER difficulty, fresh content "
+                "(never repeat an example). Every item must have task_type, objective, "
+                "inputs, and success_check with an exact 'equals' answer. Return JSON: "
+                '{"tasks": [...]}.'
+            ),
+            inputs={"examples": _json.dumps(examples)},
+            output_schema={"type": "object", "required": ["tasks"],
+                           "properties": {"tasks": {"type": "array"}}},
+        )
+        result = await SchemaGuard(runner).run(task)
+        if result.error:
+            raise HTTPException(502, f"question generation failed: {result.error}")
+
+        suite_dir = Path(state.optimization_root) / suite
+        existing = load_extras(suite_dir)
+        seen = {(t.objective, _json.dumps(t.inputs, sort_keys=True, default=str))
+                for t in [*builtin_search, *existing]}
+        added: list[Task] = []
+        for raw in (result.output or {}).get("tasks", []):
+            try:
+                candidate = Task.model_validate(raw)
+            except Exception:
+                continue
+            check = candidate.success_check or {}
+            if candidate.task_type not in allowed_types or "equals" not in check:
+                continue
+            if candidate.task_type == TaskType.ARITHMETIC:
+                expr = candidate.inputs.get("expression")
+                try:
+                    check["equals"] = eval_arithmetic(str(expr))  # never trust the generator's math
+                except SandboxError:
+                    continue
+            key = (candidate.objective, _json.dumps(candidate.inputs, sort_keys=True, default=str))
+            if key in seen:
+                continue
+            seen.add(key)
+            added.append(candidate)
+        if not added:
+            raise HTTPException(502, "the generator produced no usable questions — try again")
+        save_extras(suite_dir, [*existing, *added])
+        return {"suite": suite, "added": len(added), "total_extras": len(existing) + len(added)}
 
     @app.post("/api/optimization/{suite}/approval")
     async def resolve_tuning_approval(suite: str, req: ApprovalDecision) -> dict[str, Any]:

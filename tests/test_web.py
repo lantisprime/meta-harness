@@ -322,3 +322,52 @@ async def test_tuning_accepts_llm_proposer_and_rejects_unknown(wired_state, tmp_
                 break
             await asyncio.sleep(0.05)
         assert suites[0]["report"] is not None   # the llm-proposer search completed
+
+
+async def test_coverage_extends_suite_with_validated_questions(wired_state, tmp_path):
+    """add_coverage end to end: the generator's items are validated (bad
+    types and unscoreable items dropped, arithmetic answers RECOMPUTED — the
+    generator's math is never trusted) and future searches include them."""
+    import json
+
+    from metaharness.core.types import Task, TaskType, WorkerResult
+    from metaharness.harness.runner import Runner
+    from metaharness.optimization.suites import search_and_holdout
+
+    generated = {"tasks": [
+        {"task_type": "arithmetic", "objective": "Compute 19*21. Answer with the number only.",
+         "inputs": {"expression": "19*21"}, "success_check": {"equals": 12345}},  # wrong answer on purpose
+        {"task_type": "arithmetic", "objective": "Compute nonsense.",
+         "inputs": {"expression": "import os"}, "success_check": {"equals": 1}},   # unevaluable -> dropped
+        {"task_type": "planning", "objective": "Plan a heist.",
+         "inputs": {}, "success_check": {"equals": "x"}},                          # wrong domain -> dropped
+        {"task_type": "classify", "objective": "Classify the sentiment...",
+         "inputs": {"review": "utterly broken", "labels": ["positive", "negative"]}},  # no equals -> dropped
+    ]}
+
+    class Generator(Runner):
+        worker_id, tier, model = "gen", Tier.SMALL, "gen"
+        keypair = None
+        async def run(self, task: Task) -> WorkerResult:
+            return WorkerResult(task_id=task.id, worker_id="gen", tier=self.tier,
+                                model="gen", output=generated, raw_text=json.dumps(generated))
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    wired_state.router.runners[Tier.SMALL] = Generator()  # planner_runner picks it up
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/math/coverage", json={"n": 4})
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"suite": "math", "added": 1, "total_extras": 1}
+        # idempotent-ish: the same generation adds nothing new
+        assert (await c.post("/api/optimization/math/coverage", json={"n": 4})).status_code == 502
+
+    extras_file = json.loads((tmp_path / "optimization" / "math" / "extra_tasks.json").read_text())
+    assert len(extras_file) == 1
+    assert extras_file[0]["success_check"]["equals"] == 399   # recomputed, not 12345
+
+    base_search, base_holdout = search_and_holdout("math")
+    search, holdout = search_and_holdout("math", extras_dir=tmp_path / "optimization" / "math")
+    assert len(search) + len(holdout) == len(base_search) + len(base_holdout) + 1
+    assert any(t.success_check == {"equals": 399} for t in search + holdout)

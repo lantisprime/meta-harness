@@ -212,8 +212,8 @@ def _run_optimize(args) -> None:
         search_and_holdout,
     )
 
-    search, holdout = search_and_holdout(args.suite)
     root = Path(args.root) if args.root else Path.home() / ".metaharness" / "optimization" / args.suite
+    search, holdout = search_and_holdout(args.suite, extras_dir=root)
     ledger = CandidateLedger(root)
 
     found: list[tuple[str, str, float]] = []

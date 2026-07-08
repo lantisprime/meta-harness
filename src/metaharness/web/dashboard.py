@@ -1724,7 +1724,8 @@ function renderAdvicePanel(key, c){
   const body = a.loading ? '<div class="empty">thinking…</div>'
     : a.error ? `<div class="empty">${esc(a.error)}</div>`
     : `<p>${esc(a.read)}</p><div class="nba">${a.next_actions.filter(x => x.action !== 'none')
-        .map(x => `<button class="btn small" data-advise-act="${esc(x.action)}">${esc(x.label)}</button>`).join('')}</div>`;
+        .map(x => `<button class="btn small" data-advise-act="${esc(x.action)}"
+          data-suite="${esc(key.split('/')[0])}">${esc(x.label)}</button>`).join('')}</div>`;
   return `<div class="rr-detail"><div class="advisor">${facts}<div class="takes">
     <div class="h">Advisor’s read <span class="ai-chip"><svg style="width:11px;height:11px"><use href="#sparkle"/></svg>AI companion — advisory, not verified</span></div>
     ${body}</div></div></div>`;
@@ -1759,7 +1760,15 @@ document.getElementById('tuning').addEventListener('click', async ev => {
     } else if(action === 'prefill_goal'){
       showView('wizard');
     } else if(action === 'add_coverage'){
-      toast('Suite extension isn’t built yet — the built-in questions live in optimization/suites.py');
+      const suite = act.dataset.suite || TUNE.suite;
+      toast('Asking the frontier agent for harder questions…');
+      const r = await post(`/api/optimization/${encodeURIComponent(suite)}/coverage`, {n: 6});
+      if(r.ok){
+        const d = await r.json();
+        toast(`Added ${d.added} harder question${d.added === 1 ? '' : 's'} to the ${suite} suite — run Tune harness again`);
+      } else {
+        toast('Question generation failed — try again in a moment');
+      }
     } else {
       toast('That suggestion needs a human — see the Help tab for how');
     }

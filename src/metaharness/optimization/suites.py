@@ -6,8 +6,18 @@ math) plus extraction, so the loop is exercised well beyond the SDLC use case.
 Search and holdout sets are disjoint instances of the same distribution: the
 search set drives the proposer, the holdout set feeds the promotion gate only
 (the paper holds the test set out until final frontier evaluation).
+
+Suites are extensible: extra questions live in `extra_tasks.json` under the
+suite's ledger dir and are merged in (alternating search/holdout) by
+`search_and_holdout`. A generated item with a mislabeled answer biases both
+sides of the paired comparison equally — the gate's sign test cancels task
+difficulty — but arithmetic answers are always recomputed exactly.
 """
 from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Optional
 
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.sandbox import eval_arithmetic
@@ -87,18 +97,45 @@ _BUILDERS = {
 SUITE_NAMES = ["mixed", *sorted(_BUILDERS)]
 
 
-def search_and_holdout(suite: str) -> tuple[list[Task], list[Task]]:
+def extras_path(suite_dir: Path | str) -> Path:
+    return Path(suite_dir) / "extra_tasks.json"
+
+
+def load_extras(suite_dir: Path | str) -> list[Task]:
+    path = extras_path(suite_dir)
+    if not path.is_file():
+        return []
+    return [Task.model_validate(t) for t in json.loads(path.read_text(encoding="utf-8"))]
+
+
+def save_extras(suite_dir: Path | str, tasks: list[Task]) -> None:
+    Path(suite_dir).mkdir(parents=True, exist_ok=True)
+    extras_path(suite_dir).write_text(
+        json.dumps([t.model_dump() for t in tasks], indent=1, default=str),
+        encoding="utf-8",
+    )
+
+
+def search_and_holdout(
+    suite: str, extras_dir: Optional[Path | str] = None
+) -> tuple[list[Task], list[Task]]:
     """Disjoint (search, holdout) task lists for a named suite. 'mixed' spans
-    every domain — the default, so optimization never overfits to one shape."""
+    every domain — the default, so optimization never overfits to one shape.
+    Extras from `extras_dir` are merged in, alternating search/holdout so both
+    sides grow together."""
     if suite == "mixed":
         searches, holdouts = [], []
         for name in sorted(_BUILDERS):
             s, h = search_and_holdout(name)
             searches.extend(s)
             holdouts.extend(h)
-        return searches, holdouts
-    if suite not in _BUILDERS:
+    elif suite in _BUILDERS:
+        build, data = _BUILDERS[suite]
+        split = len(data) - len(data) // 3  # ~2/3 search, ~1/3 holdout, disjoint
+        searches, holdouts = build(list(data[:split])), build(list(data[split:]))
+    else:
         raise ValueError(f"unknown suite {suite!r}; expected one of {SUITE_NAMES}")
-    build, data = _BUILDERS[suite]
-    split = len(data) - len(data) // 3  # ~2/3 search, ~1/3 holdout, disjoint
-    return build(list(data[:split])), build(list(data[split:]))
+    if extras_dir is not None:
+        for i, task in enumerate(load_extras(extras_dir)):
+            (searches if i % 2 == 0 else holdouts).append(task)
+    return searches, holdouts
