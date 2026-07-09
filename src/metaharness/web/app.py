@@ -460,6 +460,22 @@ def create_app(state: HarnessState) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(409, str(exc))
 
+        def _top_failures() -> list[tuple[str, str, int]]:
+            """Top-10 (task_type, mast_mode, count) failure triples, ranked
+            deterministically (count desc, then key asc) so identical state always
+            produces identical context — shared by the failures and playbook pages."""
+            triples = [
+                (task_type, mode, count)
+                for task_type, modes in state.learning.stats.as_dict().items()
+                for mode, count in modes.items()
+            ]
+            triples.sort(key=lambda t: (-t[2], t[0], t[1]))
+            return triples[:10]
+
+        def _suites() -> list[str]:
+            """The deterministic list of suites start_tune/add_coverage may target."""
+            return [d.name for d in _tuning_suite_dirs()]
+
         if req.page == "goal":
             question = "the goal they are about to run — rewrite it into a sharp delegation contract"
             context = {
@@ -482,6 +498,87 @@ def create_app(state: HarnessState) -> FastAPI:
                 "on_frontier": cand.id in {c.id for c in ledger.frontier()},
                 "raw_failure_traces": ledger.failure_traces(cand.id, limit=4),
                 "report": ledger.load_report(),
+            }
+        elif req.page == "routing":
+            # subject unused — this is card-level advice over the whole routing state
+            pool_models = {
+                m.model for members in state.router.pools.values() for m in members
+            }
+            question = (
+                "the harness's routing state — per-tier model pools and the measured "
+                "capability matrix. Identify the highest-leverage routing change (a pool "
+                "member that should be re-picked, benched, or promoted), or say the "
+                "routing is healthy."
+            )
+            context = {
+                "pools": {
+                    tier.value: [{"worker_id": m.worker_id, "model": m.model}
+                                 for m in members]
+                    for tier, members in state.router.pools.items()
+                },
+                # the matrix is filtered to models that actually sit in a pool —
+                # benched/foreign models are dropped so the context stays
+                # proportional to pool size, not to every model ever measured
+                "matrix": {
+                    model: cells
+                    for model, cells in state.matrix.as_dict().items()
+                    if model in pool_models
+                },
+                "routed": state.router.route_evidence(),
+                "hint": "navigation-only advice: use open_settings when a pool should be "
+                        "re-picked, else none; flag matrix cells with samples < 5 as thin "
+                        "evidence, not fact",
+            }
+        elif req.page == "failures":
+            # subject unused
+            question = (
+                "the failure counts grouped by task type and MAST failure mode. Turn the "
+                "top failure cluster into the single highest-leverage fix."
+            )
+            context = {
+                "failures": _top_failures(),
+                # the active lessons already on file, so it recommends against what
+                # exists rather than duplicating it
+                "playbook_active": [
+                    {"id": b.id, "text": b.text,
+                     "task_type": b.task_type.value if b.task_type else None}
+                    for b in sorted(state.playbook.bullets(),
+                                    key=lambda b: (-b.score(), b.created_at))[:20]
+                ],
+                "suites": _suites(),
+                "hint": "prefer start_tune with params {suite} when a harness-parameter "
+                        "experiment could fix the cluster, add_coverage with params {suite} "
+                        "when evidence is too thin; suite MUST be one of context.suites — if "
+                        "none fits the failing task type, use none and say so in the read",
+            }
+        elif req.page == "playbook":
+            # subject unused. Show the top and bottom of the active playbook plus the
+            # most recently retired lessons, so curation advice sees both ends and the
+            # recent history (deterministic caps: 20 top + 5 bottom + 5 deprecated)
+            active = sorted(state.playbook.bullets(),
+                            key=lambda b: (-b.score(), b.created_at))
+            deprecated = sorted(
+                (b for b in state.playbook.bullets(include_deprecated=True) if not b.active),
+                key=lambda b: b.updated_at, reverse=True,
+            )
+            bullets, seen_ids = [], set()
+            for b in [*active[:20], *active[-5:], *deprecated[:5]]:
+                if b.id in seen_ids:  # dedupe when the caps overlap (small playbooks)
+                    continue
+                seen_ids.add(b.id)
+                bullets.append(b.model_dump(mode="json"))
+            question = (
+                "the learned playbook — lessons with helpful/harmful track records. "
+                "Recommend curation: which lessons are earning their place, which look "
+                "harmful or stale, and what's missing given the failure stats."
+            )
+            context = {
+                "bullets": bullets,
+                "failures": _top_failures(),
+                "suites": _suites(),
+                "hint": "there is no retire action in the vocabulary; phrase curation "
+                        "advice in the read; next_actions only start_tune/add_coverage "
+                        "(params {suite}, suite from context.suites) or none",
             }
         else:
             raise HTTPException(422, f"unknown advise page {req.page!r}")
