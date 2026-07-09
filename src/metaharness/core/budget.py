@@ -20,6 +20,10 @@ class Budget:
 
     The token target is a *hard* ceiling, not advisory — once spent reaches total,
     further work raises BudgetExceeded rather than silently overrunning.
+
+    A cap-less Budget (every ``max_*`` left None) is a pure ACCUMULATOR: it tallies
+    spend and never raises. That is deliberate — the web harness always wires one so
+    accounting is on by default (F1, panel 2026-07-09), and real caps are opt-in.
     """
 
     max_cost_usd: Optional[float] = None
@@ -34,6 +38,8 @@ class Budget:
         self.check()
 
     def check(self) -> None:
+        # cap-less means unbounded: with every max_* None, nothing here fires, so
+        # a default Budget accumulates forever without ever raising.
         if self.max_cost_usd is not None and self.spent_cost_usd > self.max_cost_usd:
             raise BudgetExceeded(
                 f"cost {self.spent_cost_usd:.4f} > cap {self.max_cost_usd:.4f}"

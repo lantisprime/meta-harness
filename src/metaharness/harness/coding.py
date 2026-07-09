@@ -355,6 +355,13 @@ class CodingAgentWorker(BaseRunner):
 
         text, cost = self.adapter.parse(stdout)
         from metaharness.harness.local import parse_output
+        # F3 (panel 2026-07-09, GLM P2): coding CLIs (codex/opencode) report cost
+        # 0.0 and no token usage, so CodeProposer charged ~nothing for the most
+        # expensive calls in the harness. No adapter surfaces a token count today,
+        # so ESTIMATE from character length (~4 chars/token) — a rough but non-zero
+        # figure so budget accounting reflects that these calls are not free.
+        tokens_in = len(prompt) // 4
+        tokens_out = len(text) // 4
         return WorkerResult(
             task_id=task.id,
             worker_id=self.worker_id,
@@ -362,6 +369,8 @@ class CodingAgentWorker(BaseRunner):
             model=self.model,
             output=parse_output(text, expect_json=bool(task.output_schema)),
             raw_text=text,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
             cost_usd=cost,
             workspace_root=str(workspace),
         )

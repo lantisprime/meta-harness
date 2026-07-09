@@ -53,6 +53,11 @@ class HarnessState:
     def __post_init__(self) -> None:
         if self.learning is None:
             self.learning = LearningLoop(self.playbook)
+        # F1 (panel 2026-07-09): a None budget silently no-op'd every budget=
+        # wire (tune endpoint, /api/advise). Default to a cap-less accumulator so
+        # accounting is always on; `serve --max-*` swaps in real ceilings.
+        if self.budget is None:
+            self.budget = Budget()
         # the orchestrator is itself a registered actor, so provenance entries
         # it signs are verifiable through the same registry as everyone else
         if self.registry.get("orchestrator") is None:

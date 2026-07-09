@@ -269,8 +269,18 @@ class SchemaGuard(_Wrapper):
             return result
         problems = check_schema(result.output, task.output_schema)
         retries = 0
+        # F2 (panel 2026-07-09, codex+GLM+kimi): retries rebind `result`, so every
+        # attempt but the last was billed at zero. Carry the discarded attempts'
+        # usage forward and fold it onto the returned result (SelfConsistency /
+        # SelfCritique already accumulate this way) so the budget sees the true cost.
+        prior_in = prior_out = 0
+        prior_cost = prior_latency = 0.0
         while problems and retries < self.max_retries:
             retries += 1
+            prior_in += result.tokens_in
+            prior_out += result.tokens_out
+            prior_cost += result.cost_usd
+            prior_latency += result.latency_s
             with tracer().start_as_current_span("enrich.schema_retry") as span:
                 span.set_attribute("task.id", task.id)
                 span.set_attribute("enrich.violations", "; ".join(problems))
@@ -283,6 +293,12 @@ class SchemaGuard(_Wrapper):
                 result.task_id = task.id
                 self._resign(result)
                 problems = check_schema(result.output, task.output_schema)
+        # accumulate all attempts' tokens/cost onto the survivor (tokens/cost are
+        # not signed — the signature vouches for the untouched output).
+        result.tokens_in += prior_in
+        result.tokens_out += prior_out
+        result.cost_usd += prior_cost
+        result.latency_s += prior_latency
         if problems:
             result.error = f"schema: {'; '.join(problems)}"
             self._resign(result)

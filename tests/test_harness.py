@@ -226,6 +226,38 @@ async def test_schema_guard_retry_then_error():
     assert result.error and result.error.startswith("schema:")
 
 
+async def test_schema_guard_accumulates_tokens_across_retries():
+    """F2 (panel 2026-07-09, codex+GLM+kimi undercount): each retry rebound
+    `result`, discarding the earlier attempt's tokens/cost, so the budget saw only
+    the final attempt. The returned WorkerResult must carry the SUM of every
+    attempt (mirroring SelfConsistency/SelfCritique)."""
+    from metaharness.core.budget import Budget
+
+    schema = {"type": "object", "required": ["label"],
+              "properties": {"label": {"type": "string"}}}
+    calls = {"n": 0}
+
+    def flaky(task):
+        calls["n"] += 1
+        return {} if calls["n"] == 1 else {"label": "a"}  # invalid, then valid
+
+    class Billed(ScriptedWorker):
+        async def _execute(self, task):
+            r = await super()._execute(task)
+            r.tokens_in, r.tokens_out, r.cost_usd = 100, 50, 0.01
+            return r
+
+    guard = SchemaGuard(Billed("s", flaky))
+    result = await guard.run(Task(objective="classify", output_schema=schema))
+    assert result.error is None and calls["n"] == 2
+    assert result.tokens_in == 200 and result.tokens_out == 100   # both attempts summed
+    assert result.cost_usd == pytest.approx(0.02)
+
+    budget = Budget()
+    budget.charge(cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out)
+    assert budget.spent_tokens == 300
+
+
 # -- composition ---------------------------------------------------------------------
 
 

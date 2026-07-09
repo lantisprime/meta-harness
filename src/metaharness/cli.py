@@ -323,6 +323,10 @@ def main() -> None:
                        help="pin a tier to a model by substring, e.g. --pick frontier=qwen3.6 (repeatable)")
     serve.add_argument("--critique", action="store_true",
                        help="draft→critique→revise round for unverified open-ended tasks (slower, better plans)")
+    serve.add_argument("--max-cost-usd", type=float, default=None,
+                       help="hard USD ceiling on the served harness's shared budget (default: unbounded accounting)")
+    serve.add_argument("--max-tokens", type=int, default=None,
+                       help="hard token ceiling on the served harness's shared budget (default: unbounded accounting)")
 
     from metaharness.optimization.suites import SUITE_NAMES
 
@@ -364,6 +368,15 @@ def main() -> None:
             state = _build_local_state(endpoints, prefer=prefer, critique=args.critique)
         else:
             state = _build_mock_state()
+        # F1 (panel 2026-07-09): the state always carries a cap-less accumulator;
+        # these flags upgrade it to a hard ceiling on the SAME object the executor
+        # and endpoints already hold a reference to (mutated in place after wiring).
+        if args.max_cost_usd is not None:
+            state.budget.max_cost_usd = args.max_cost_usd
+        if args.max_tokens is not None:
+            state.budget.max_tokens = args.max_tokens
+        if args.max_cost_usd is not None or args.max_tokens is not None:
+            print(f"  budget cap: max_cost_usd={args.max_cost_usd} max_tokens={args.max_tokens}")
         uvicorn.run(create_app(state), host=args.host, port=args.port)
 
 

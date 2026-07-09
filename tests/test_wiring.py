@@ -216,6 +216,48 @@ async def test_all_learned_state_survives_restart(tmp_path):
     assert state2.matrix.samples("text-small", TaskType.EXTRACT) == 3
 
 
+async def test_default_state_budget_accumulates_through_real_boot(tmp_path):
+    """F1 (panel 2026-07-09, GLM P1 budget wiring no-op): HarnessState.budget
+    defaulted to None and nothing in the web bootstrap assigned it, so every
+    budget= wire (tune endpoint, /api/advise) silently charged nothing. A state
+    built the way `metaharness serve` builds it — no explicit budget — must now
+    carry a cap-less accumulator that /api/advise AND a tuning run actually charge."""
+    from metaharness.core.budget import Budget
+    from metaharness.harness import MockLLMWorker
+    from metaharness.optimization import (
+        CandidateLedger,
+        HarnessOptimizer,
+        RuleProposer,
+        search_and_holdout,
+    )
+
+    state = HarnessState()  # exactly how _build_mock_state starts — no budget arg
+    kp = KeyPair.generate()
+    runner = MockLLMWorker("w-small", Tier.SMALL, keypair=kp, seed=1)
+    state.register_worker(runner, kp, tiers=["small"])
+    state.wire({Tier.SMALL: runner}, journal_dir=tmp_path)
+    assert isinstance(state.budget, Budget)   # the None default is gone
+    assert state.budget.spent_tokens == 0
+
+    app = create_app(state)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://t") as c:
+        goal = (await c.post("/api/advise",
+                             json={"page": "goal", "subject": "ship the thing"})).json()
+        assert goal["advisory"] is True
+    assert state.budget.spent_tokens > 0      # advise charged the SAME wired budget
+
+    before = state.budget.spent_tokens
+    search, holdout = search_and_holdout("math")
+    optimizer = HarnessOptimizer(
+        lambda: MockLLMWorker("opt", Tier.SMALL, keypair=KeyPair.generate(), seed=7),
+        RuleProposer(), search, holdout, CandidateLedger(tmp_path / "opt"),
+        k=1, budget=state.budget,
+    )
+    await optimizer.optimize(rounds=1)
+    assert state.budget.spent_tokens > before  # a tuning run charged it too
+
+
 # -- wire: durable config agents + tool registry reach the executor path ----------
 
 

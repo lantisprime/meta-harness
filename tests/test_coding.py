@@ -180,3 +180,15 @@ async def test_workspace_root_stamped_on_cli_result(tmp_path):
     worker = CodingAgentWorker("cw", cli="claude", workspace=ws, binary=binary)
     result = await worker.run(Task(objective="do"))
     assert result.workspace_root == str(ws)
+
+
+async def test_execute_estimates_tokens_for_budget(tmp_path):
+    """F3 (panel 2026-07-09, GLM P2 zero-cost coding calls): codex/opencode report
+    cost 0.0 and no token usage, so CodeProposer charged ~nothing for the priciest
+    calls. _execute now estimates tokens from char length so accounting is non-zero."""
+    binary = _stub(tmp_path, "codex",
+                   'cat > /dev/null; echo "created hello.py and wired it into the build"')
+    worker = CodingAgentWorker("cx", cli="codex", workspace=tmp_path / "ws", binary=binary)
+    result = await worker.run(_task(objective="write a reasonably long objective for tokens"))
+    assert result.error is None
+    assert result.tokens_in > 0 and result.tokens_out > 0

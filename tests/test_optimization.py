@@ -986,6 +986,18 @@ async def test_code_proposer_returns_proposal_and_charges_budget(tmp_path):
     assert budget.spent_cost_usd == pytest.approx(0.02)             # charged like LLMProposer
 
 
+async def test_code_proposer_charges_estimated_tokens(tmp_path):
+    """F3 (panel 2026-07-09, GLM P2): the coding CLI surfaces no token usage, so
+    before the char-length estimate CodeProposer — the priciest proposer — charged
+    the budget zero tokens. The estimate makes the token charge non-zero."""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+    binary = _cli_stub(tmp_path / "claude", _claude_stub_script(_PROPOSAL_CHATTER))
+    worker = CodingAgentWorker("cw", cli="claude", binary=binary)
+    budget = Budget(max_tokens=10_000, max_cost_usd=1.0)
+    await CodeProposer(worker, budget=budget).propose(ledger)
+    assert budget.spent_tokens > 0
+
+
 async def test_code_proposer_rejects_garbage_output(tmp_path):
     ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
     binary = _cli_stub(tmp_path / "claude",
