@@ -23,6 +23,7 @@ never search-set numbers, search order, or "no regression" alone (the paper
 holds test data out until final frontier evaluation)."""
 from __future__ import annotations
 
+import shutil
 from typing import Callable, Optional
 
 from pydantic import BaseModel, Field, ValidationError
@@ -33,9 +34,20 @@ from metaharness.evals.gate import EvalTaskResult, GateReport, SuiteResult, comp
 from metaharness.evals.verifiers import verify_output
 from metaharness.harness.runner import Runner
 from metaharness.observability.tracing import tracer
+from metaharness.optimization.code_gate import validate_code
 from metaharness.optimization.ledger import Candidate, CandidateLedger, CandidateScores
 from metaharness.optimization.params import HarnessParams
 from metaharness.optimization.proposer import ProposalError, Proposer
+
+
+def _dedupe_key(params: HarnessParams) -> dict:
+    """Identity of a candidate for duplicate detection: every knob PLUS
+    code_hash, but NOT code_ref. Identical source proposed twice is a duplicate
+    even at two different paths (same code_hash); the same knobs with different
+    source are distinct (different code_hash)."""
+    key = params.model_dump()
+    key.pop("code_ref", None)
+    return key
 
 
 class OptimizationReport(BaseModel):
@@ -145,6 +157,25 @@ class HarnessOptimizer:
             span.set_attribute("optimize.pass_hat_k", scores.pass_hat_k)
         return suite, scores, traces
 
+    def _canonicalize_code(self, cid: str, params: HarnessParams) -> HarnessParams:
+        """Freeze a code candidate's validated artifact into its immutable
+        per-candidate location and rewrite code_ref to that canonical path.
+
+        A proposer stages code anywhere under the ledger root (convention:
+        staging/<slug>/harness.py). Evaluation may run against that staged path,
+        but the RECORDED/promotable artifact must be the frozen per-candidate
+        copy — a later round could overwrite the staged file. Byte-identical
+        copy, so the scores computed on the staged file still hold."""
+        if params.code_ref is None:
+            return params
+        src = (self.ledger.root / params.code_ref).resolve()
+        dest_rel = f"candidates/{cid}/harness.py"
+        dest = self.ledger.root / dest_rel
+        if src != dest.resolve():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+        return params.model_copy(update={"code_ref": dest_rel})
+
     # -- the loop ---------------------------------------------------------------
 
     async def optimize(self, rounds: int = 6) -> OptimizationReport:
@@ -213,8 +244,26 @@ class HarnessOptimizer:
                     status="rejected", rejected_reason=f"interface validation failed: {exc}",
                 ))
                 continue
+            # code gate: a proposal that changes the code artifact must clear the
+            # deterministic code-space gate (interface + edit-scope + decontamination)
+            # before it is evaluated — the code counterpart to interface validation.
+            # Gate failure is recorded as a rejected candidate, exactly like above.
+            if params.code_ref != parent.params.code_ref:
+                if params.code_ref is None:
+                    params = params.model_copy(update={"code_hash": None})
+                else:
+                    gate = validate_code(self.ledger.root, params.code_ref, self.holdout_tasks)
+                    if not gate.ok:
+                        self.ledger.record(Candidate(
+                            id=cid, parent=parent.id, hypothesis=proposal.hypothesis,
+                            status="rejected", rejected_reason=gate.reason,
+                        ))
+                        continue
+                    params = params.model_copy(update={"code_hash": gate.code_hash})
             duplicate = next(
-                (c for c in self.ledger.candidates() if c.params == params), None
+                (c for c in self.ledger.candidates()
+                 if c.params is not None and _dedupe_key(c.params) == _dedupe_key(params)),
+                None,
             )
             if duplicate is not None:
                 self.ledger.record(Candidate(
@@ -235,6 +284,9 @@ class HarnessOptimizer:
                 report.stopped = "budget"
                 report.notes.append(f"stopped: {exc}")
                 break
+            # freeze a code candidate's artifact into candidates/<cid>/harness.py
+            # before recording, so the promotable candidate is immutable.
+            params = self._canonicalize_code(cid, params)
             self.ledger.record(Candidate(
                 id=cid, parent=parent.id, hypothesis=proposal.hypothesis,
                 params=params, scores=scores,

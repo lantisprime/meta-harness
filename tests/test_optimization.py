@@ -3,6 +3,7 @@ gate, ledger Pareto math, both proposers, and the end-to-end
 seed → propose → evaluate → held-out gate → promote path."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -763,3 +764,166 @@ async def test_rule_proposer_suggests_a_prompt_directive_for_format_misses(tmp_p
     proposal = await RuleProposer().propose(seeded_ledger(tmp_path, [close_miss]))
     assert "prompt_directives" in proposal.delta
     assert "one word" in proposal.delta["prompt_directives"][0]
+
+
+# -- code gate + code-space loop integration -----------------------------------------
+
+from metaharness.optimization.code_gate import validate_code  # noqa: E402
+
+
+# A code artifact that fixes TranscribeOnlyWorker's arithmetic by wrapping it in
+# ToolOffload — the knob's effect, expressed as code. Contains no digits, so it
+# never trips decontamination against the math suite's numeric answers.
+CODE_FIX_SRC = """\
+from metaharness.harness.enrichment import ToolOffload
+
+
+def build(base):
+    return ToolOffload(base)
+"""
+
+
+def test_code_gate_rejects_parent_escape(tmp_path):
+    result = validate_code(tmp_path, "../evil.py", [])
+    assert not result.ok and "path invalid" in result.reason
+
+
+def test_code_gate_rejects_symlink_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "evil.py").write_text(CODE_FIX_SRC, encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "link.py").symlink_to(outside / "evil.py")
+    result = validate_code(root, "link.py", [])
+    assert not result.ok and "escapes" in result.reason
+
+
+def test_code_gate_rejects_syntax_error(tmp_path):
+    (tmp_path / "bad.py").write_text("def build(base) return base\n", encoding="utf-8")
+    result = validate_code(tmp_path, "bad.py", [])
+    assert not result.ok and "syntax error" in result.reason
+
+
+def test_code_gate_rejects_import_that_raises(tmp_path):
+    (tmp_path / "boom.py").write_text(
+        "raise RuntimeError('boom')\n\ndef build(base):\n    return base\n", encoding="utf-8"
+    )
+    result = validate_code(tmp_path, "boom.py", [])
+    assert not result.ok and "failed to import" in result.reason
+
+
+def test_code_gate_rejects_module_without_build(tmp_path):
+    (tmp_path / "nobuild.py").write_text("VALUE = 1\n", encoding="utf-8")
+    result = validate_code(tmp_path, "nobuild.py", [])
+    assert not result.ok and "no callable build" in result.reason
+
+
+def test_code_gate_rejects_import_that_hangs(tmp_path):
+    (tmp_path / "slow.py").write_text(
+        "import time\ntime.sleep(5)\n\ndef build(base):\n    return base\n", encoding="utf-8"
+    )
+    result = validate_code(tmp_path, "slow.py", [], timeout=1.0)
+    assert not result.ok and "timeout" in result.reason
+
+
+def test_code_gate_rejects_decontamination_hit(tmp_path):
+    holdout = [Task(task_type=TaskType.EXTRACT, success_check={"equals": "1932"})]
+    (tmp_path / "leak.py").write_text(
+        'ANSWER = "1932"\n\ndef build(base):\n    return base\n', encoding="utf-8"
+    )
+    result = validate_code(tmp_path, "leak.py", holdout)
+    assert not result.ok and "held-out answer" in result.reason
+
+
+def test_code_gate_skips_trivially_short_answers(tmp_path):
+    # "1" is too common to be evidence of leakage — decontamination skips it.
+    holdout = [Task(task_type=TaskType.ARITHMETIC, success_check={"equals": "1"})]
+    (tmp_path / "ok.py").write_text(
+        "X = 1\n\ndef build(base):\n    return base\n", encoding="utf-8"
+    )
+    result = validate_code(tmp_path, "ok.py", holdout)
+    assert result.ok
+
+
+def test_code_gate_happy_path_returns_hash(tmp_path):
+    module = tmp_path / "harness.py"
+    module.write_text(CODE_FIX_SRC, encoding="utf-8")
+    result = validate_code(tmp_path, "harness.py", [])
+    assert result.ok and result.reason == ""
+    assert result.code_hash == hashlib.sha256(module.read_bytes()).hexdigest()
+
+
+async def test_loop_evaluates_and_freezes_a_code_candidate(tmp_path):
+    """Deterministic e2e: a scripted proposer stages a code artifact that fixes
+    the worker's arithmetic. The loop gates it, evaluates it, freezes it into
+    the immutable per-candidate location, and the held-out gate promotes it —
+    re-building the winner from the CANONICAL code_ref with ledger_root."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    staged = tmp_path / "staging" / "fix" / "harness.py"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(CODE_FIX_SRC, encoding="utf-8")
+
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([{"code_ref": "staging/fix/harness.py"}]),
+        search, holdout, ledger, k=2,
+    )
+    report = await optimizer.optimize(rounds=1)
+
+    best = ledger.get(report.best_id)
+    assert best.params.code_ref == f"candidates/{best.id}/harness.py"
+    canonical = tmp_path / best.params.code_ref
+    assert canonical.is_file()
+    assert canonical.read_bytes() == staged.read_bytes()       # frozen, byte-identical
+    assert best.params.code_hash == hashlib.sha256(staged.read_bytes()).hexdigest()
+    assert best.scores.pass_hat_k == 1.0                        # the code fixed arithmetic
+    assert report.promoted                                      # held-out gate said GO
+
+
+async def test_loop_rejects_identical_code_at_a_second_path_as_duplicate(tmp_path):
+    """Same source proposed twice at different staging paths is a duplicate —
+    dedupe keys on code_hash, not code_ref."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    for slug in ("a", "b"):
+        staged = tmp_path / "staging" / slug / "harness.py"
+        staged.parent.mkdir(parents=True)
+        staged.write_text(CODE_FIX_SRC, encoding="utf-8")
+
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([
+            {"code_ref": "staging/a/harness.py"},
+            {"code_ref": "staging/b/harness.py"},
+        ]),
+        search, holdout, ledger, k=2,
+    )
+    await optimizer.optimize(rounds=2)
+
+    rejected = [c for c in ledger.candidates() if c.status == "rejected"]
+    assert len(rejected) == 1
+    assert "duplicate" in rejected[0].rejected_reason
+
+
+async def test_loop_records_a_gate_failing_code_proposal_as_rejected(tmp_path):
+    """A code artifact that fails the gate is recorded as rejected with the
+    gate's precise reason — the code counterpart to interface validation."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    staged = tmp_path / "staging" / "bad" / "harness.py"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("def build(base) return base\n", encoding="utf-8")  # syntax error
+
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([{"code_ref": "staging/bad/harness.py"}]),
+        search, holdout, ledger, k=2,
+    )
+    await optimizer.optimize(rounds=1)
+
+    rejected = [c for c in ledger.candidates() if c.status == "rejected"]
+    assert len(rejected) == 1
+    assert "syntax error" in rejected[0].rejected_reason
+    assert not (tmp_path / "candidates" / rejected[0].id / "harness.py").exists()

@@ -147,8 +147,20 @@ research distilled in `memory/knowledge_base/meta-harness-optimization.md`):
 - **Search space (v1)** is config-space: the enrichment stack (tool offload, consistency
   k, schema retries, critique rounds) plus additive-only prompt directives. Pydantic
   bounds are the paper's interface-validation gate — invalid deltas are rejected loudly,
-  never silently evaluated. Code-space search via the coding-agent workers is the
-  designed follow-on.
+  never silently evaluated.
+- **Code-space search** extends the candidate beyond knobs: a candidate may carry a CODE
+  artifact — `params.code_ref`, a ledger-root-relative `.py` module defining
+  `build(base) -> Runner` — applied OUTERMOST over the knob stack (`params.build` requires
+  a `ledger_root` for code-backed params and enforces realpath containment, so the three
+  build sites — evaluation, serve-boot apply, web approval — never resolve against the
+  cwd). A deterministic, LLM-free `code_gate` is the code counterpart to the pydantic gate,
+  enforcing the paper's interface-validation + edit-scope + decontamination trio: the
+  module must present the `build` contract (checked by importing in a timeout-bound
+  subprocess), stay inside the ledger root, and never embed a held-out answer. Gate
+  failures are recorded as rejected candidates exactly like a bad delta; a passing artifact
+  is frozen into an immutable `candidates/<cid>/harness.py` and dedup'd on `code_hash` (same
+  source at two paths is one candidate). The `CodeProposer`, CLI flag, and dashboard wiring
+  are the designed follow-on.
 - **Scoring** is multi-objective: pass^k against a domain suite (classification,
   extraction, math, or mixed — deliberately not SDLC-only) with token cost tracked, kept
   as a **Pareto frontier**, not a greedy incumbent. A plateau detector stops stalled
