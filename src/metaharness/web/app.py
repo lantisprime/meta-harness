@@ -223,6 +223,11 @@ def create_app(state: HarnessState) -> FastAPI:
                 if c.scores is not None:
                     entry["scores"] = {**c.scores.model_dump(),
                                        "tokens_total": c.scores.tokens_total}
+                # code-space candidates carry a frozen artifact — surface its
+                # canonical path so the dashboard can badge it (knob-only
+                # candidates omit the key entirely).
+                if c.params is not None and c.params.code_ref:
+                    entry["code_ref"] = c.params.code_ref
                 candidates.append(entry)
             out.append({
                 "suite": suite_dir.name,
@@ -268,6 +273,29 @@ def create_app(state: HarnessState) -> FastAPI:
             proposer = LLMProposer(state.planner_runner(), budget=state.budget)
         elif req.proposer == "rule":
             proposer = RuleProposer()
+        elif req.proposer == "code":
+            # a real coding agent greps the raw ledger and stages code/knob
+            # deltas; it authenticates itself via its own CLI. Requires a coding
+            # CLI on the server host — a clean 422 (not a 500) when none exists.
+            from metaharness.harness import (
+                CLI_ADAPTERS,
+                CodingAgentWorker,
+                available_clis,
+            )
+            from metaharness.optimization import CodeProposer
+
+            clis = available_clis()
+            if not clis:
+                raise HTTPException(
+                    422,
+                    "proposer 'code' needs a coding CLI on the server host; none "
+                    f"found (supported: {', '.join(sorted(CLI_ADAPTERS))})",
+                )
+            cli_name, cli_path = next(iter(clis.items()))
+            proposer = CodeProposer(
+                CodingAgentWorker("opt-code-proposer", cli=cli_name, binary=cli_path),
+                budget=state.budget,
+            )
         else:
             raise HTTPException(422, f"unknown proposer {req.proposer!r}")
         small = state.router.pool(Tier.SMALL)

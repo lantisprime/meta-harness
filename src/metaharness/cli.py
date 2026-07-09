@@ -206,10 +206,17 @@ def _run_optimize(args) -> None:
     fixed worker against a domain suite; promote through the held-out gate."""
     from metaharness.core.budget import Budget
     from metaharness.core.types import Tier
-    from metaharness.harness import MockLLMWorker, OpenAICompatWorker
+    from metaharness.harness import (
+        CLI_ADAPTERS,
+        CodingAgentWorker,
+        MockLLMWorker,
+        OpenAICompatWorker,
+        available_clis,
+    )
     from metaharness.identity import KeyPair
     from metaharness.optimization import (
         CandidateLedger,
+        CodeProposer,
         HarnessOptimizer,
         LLMProposer,
         RuleProposer,
@@ -252,6 +259,23 @@ def _run_optimize(args) -> None:
             keypair=KeyPair.generate(), max_tokens=2000,
         ), budget=budget)
         print(f"  proposer  ← {p_model}  [{p_size:g}B]")
+    elif args.proposer == "code":
+        # a real coding agent reads the raw ledger itself (arXiv 2603.28052);
+        # it authenticates ITSELF, so no --local target is required. Use the
+        # first coding CLI detected on PATH.
+        clis = available_clis()
+        if not clis:
+            raise SystemExit(
+                "--proposer code needs a coding CLI on PATH; none found "
+                f"(supported: {', '.join(sorted(CLI_ADAPTERS))})"
+            )
+        cli_name, cli_path = next(iter(clis.items()))
+        proposer = CodeProposer(
+            CodingAgentWorker("opt-code-proposer", cli=cli_name,
+                              keypair=KeyPair.generate(), binary=cli_path),
+            budget=budget,
+        )
+        print(f"  proposer  ← coding agent [{cli_name}] reading the ledger directly")
     else:
         proposer = RuleProposer()
         print("  proposer  ← deterministic rules (--proposer llm for the paper-shaped agentic proposer)")
@@ -310,8 +334,10 @@ def main() -> None:
                      help="domain suite to optimize against (default: mixed — classification+extraction+math)")
     opt.add_argument("--rounds", type=int, default=6, help="max proposer rounds (default 6)")
     opt.add_argument("--k", type=int, default=3, help="attempts per task for pass^k (default 3)")
-    opt.add_argument("--proposer", choices=["rule", "llm"], default="rule",
-                     help="rule = deterministic diagnosis; llm = agentic proposer over raw traces (needs --local)")
+    opt.add_argument("--proposer", choices=["rule", "llm", "code"], default="rule",
+                     help="rule = deterministic diagnosis; llm = agentic proposer over raw traces "
+                          "(needs --local); code = coding agent reads the ledger and stages code/knob "
+                          "deltas (uses the first coding CLI on PATH)")
     opt.add_argument("--local", action="store_true",
                      help="use discovered local models (smallest = optimization target, largest = llm proposer)")
     opt.add_argument("--endpoint", action="append", default=None,

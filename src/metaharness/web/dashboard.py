@@ -1683,6 +1683,7 @@ function renderTuning(suites){
       padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
       <option value="rule" ${TUNE.proposer === 'rule' ? 'selected' : ''}>built-in ideas</option>
       <option value="llm" ${TUNE.proposer === 'llm' ? 'selected' : ''}>✦ frontier agent reads the traces</option>
+      <option value="code" ${TUNE.proposer === 'code' ? 'selected' : ''}>✦ coding agent writes harness code</option>
     </select>
     <button class="btn ghost" data-tune-start="1" ${busy ? 'disabled' : ''}>
       ${busy ? 'searching…' : 'Tune harness'}</button></div>`;
@@ -1710,6 +1711,7 @@ function renderTuning(suites){
       const marks = [
         c.id === promotedId ? badge('ok', s.active ? 'promoted — in use' : 'promoted — applies at restart') : '',
         seed ? badge('dim', 'the original setup') : '',
+        c.code_ref ? badge('act', 'code') : '',
         c.status === 'rejected' ? badge('bad', 'rejected')
           : c.frontier ? '<span title="on the pass-vs-cost frontier">⭐</span>'
           : badge('dim', 'not worth it'),
@@ -1717,7 +1719,9 @@ function renderTuning(suites){
       const meta = (c.scores
         ? `pass^${c.scores.k} ${c.scores.pass_hat_k.toFixed(2)} · pass@1 ${c.scores.pass_at_1.toFixed(2)}`
           + ` · ${c.scores.tokens_total.toLocaleString()} tokens${c.parent ? ' · builds on ' + esc(c.parent) : ''}`
-        : 'never evaluated') + (c.created_at ? ' · ' + esc(ago(c.created_at)) : '');
+        : 'never evaluated')
+        + (c.code_ref ? ' · code <span class="mono">' + esc(c.code_ref) + '</span>' : '')
+        + (c.created_at ? ' · ' + esc(ago(c.created_at)) : '');
       const adviceKey = s.suite + '/' + c.id;
       return `<div class="lrow"><div class="rr-main">
         <div class="rr-title">${esc(c.id)} ${marks}</div>

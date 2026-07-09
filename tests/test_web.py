@@ -413,3 +413,85 @@ async def test_coverage_extends_suite_with_validated_questions(wired_state, tmp_
     search, holdout = search_and_holdout("math", extras_dir=tmp_path / "optimization" / "math")
     assert len(search) + len(holdout) == len(base_search) + len(base_holdout) + 1
     assert any(t.success_check == {"equals": 399} for t in search + holdout)
+
+
+def _claude_proposal_stub(path, delta: dict, parent: str = "c0001") -> str:
+    """A fake `claude` CLI that prints a Proposal JSON (wrapped in chatter) in
+    claude's --output-format json envelope — no real coding CLI needed."""
+    import json
+    import stat
+
+    proposal = json.dumps({"hypothesis": "web code-proposer test",
+                           "parent": parent, "delta": delta})
+    envelope = json.dumps({"result": f"Read the ledger. Final: {proposal}",
+                           "total_cost_usd": 0.0})
+    path.write_text(f"#!/bin/sh\ncat > /dev/null\ncat <<'OUT'\n{envelope}\nOUT\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return str(path)
+
+
+async def test_tuning_code_proposer_kicks_a_run_with_stubbed_detection(wired_state, tmp_path, monkeypatch):
+    """POST proposer=code with a stubbed coding-CLI detection: the run is
+    accepted (202) and the background search completes — the code proposer is
+    wired end to end through the endpoint."""
+    import asyncio
+
+    import metaharness.harness as harness_pkg
+
+    stub = _claude_proposal_stub(tmp_path / "claude", {"self_consistency_k": 2})
+    monkeypatch.setattr(harness_pkg, "available_clis", lambda: {"claude": stub})
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/runs",
+                            json={"suite": "math", "rounds": 1, "k": 1, "proposer": "code"})
+        assert resp.status_code == 202, resp.text
+        for _ in range(200):
+            suites = (await c.get("/api/optimization")).json()
+            if suites and suites[0]["report"] and not suites[0]["running"]:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("code-proposer search never finished")
+        assert suites[0]["suite"] == "math"
+
+
+async def test_tuning_code_proposer_without_a_cli_is_a_clean_422(wired_state, tmp_path, monkeypatch):
+    """No coding CLI on the host -> a clean 422 with the reason, never a 500."""
+    import metaharness.harness as harness_pkg
+
+    monkeypatch.setattr(harness_pkg, "available_clis", lambda: {})
+    wired_state.optimization_root = tmp_path / "optimization"
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/runs",
+                            json={"suite": "math", "proposer": "code"})
+        assert resp.status_code == 422
+        assert "coding CLI" in resp.json()["detail"]
+
+
+async def test_optimization_payload_carries_code_ref_for_code_candidates(wired_state, tmp_path):
+    """A code-carrying candidate surfaces its canonical code_ref in the
+    /api/optimization payload so the dashboard can badge it; knob-only
+    candidates omit the key entirely."""
+    from metaharness.optimization import CandidateLedger, HarnessParams
+    from tests.test_optimization import evaluated_candidate
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    ledger = CandidateLedger(tmp_path / "optimization" / "math")
+    ledger.record(evaluated_candidate("c0001", 0.4, 100))
+    ledger.record(evaluated_candidate(
+        "c0002", 0.9, 90, parent="c0001",
+        params=HarnessParams(code_ref="candidates/c0002/harness.py", code_hash="deadbeef"),
+    ))
+
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        suites = (await c.get("/api/optimization")).json()
+    cands = {x["id"]: x for x in suites[0]["candidates"]}
+    assert cands["c0002"]["code_ref"] == "candidates/c0002/harness.py"
+    assert "code_ref" not in cands["c0001"]
