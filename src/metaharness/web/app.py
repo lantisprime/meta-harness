@@ -408,7 +408,9 @@ def create_app(state: HarnessState) -> FastAPI:
             params = HarnessParams.model_validate(pending["params"])
             small = state.router.pools[Tier.SMALL]
             base = _tuning_base(small[0])
-            wrapped = params.build(base)
+            # code-backed params resolve their artifact under the suite ledger
+            # root (== suite_dir), the same dir this approval's params live in.
+            wrapped = params.build(base, ledger_root=suite_dir)
             wrapped._tuning_base = base
             small[0] = wrapped
             applied = True

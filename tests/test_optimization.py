@@ -130,6 +130,85 @@ async def test_prompt_directives_are_additive():
     assert task.boundaries == ["existing rule"]  # original task untouched
 
 
+# -- params: code-carrying candidates ------------------------------------------------
+
+
+# A code artifact: `build(base)` wraps the runner OUTERMOST. CodeFix is a plain
+# _Wrapper so `.inner` exposes the knob stack it sits above, making load order
+# observable in tests (knobs inside, code outside).
+CODE_MODULE_SRC = """\
+from metaharness.harness.enrichment import _Wrapper
+
+
+class CodeFix(_Wrapper):
+    async def run(self, task):
+        return await self.inner.run(task)
+
+
+def build(base):
+    return CodeFix(base)
+"""
+
+
+def test_params_code_ref_rejects_unsafe_paths():
+    with pytest.raises(ValidationError):
+        HarnessParams(code_ref="/etc/passwd.py")     # absolute
+    with pytest.raises(ValidationError):
+        HarnessParams(code_ref="../escape.py")        # parent-escape
+    with pytest.raises(ValidationError):
+        HarnessParams(code_ref="staging/harness.txt") # not a .py module
+
+
+def test_build_code_ref_requires_ledger_root():
+    """build is called from evaluation, serve-boot apply, and web approval; a
+    cwd-relative resolve would silently load the wrong file, so we refuse."""
+    p = HarnessParams(code_ref="harness.py")
+    with pytest.raises(ValueError, match="ledger_root"):
+        p.build(StubWorker())
+
+
+def test_build_loads_code_module_and_wraps_outermost(tmp_path):
+    (tmp_path / "harness.py").write_text(CODE_MODULE_SRC, encoding="utf-8")
+    p = HarnessParams(tool_offload=True, code_ref="harness.py")
+    stack = p.build(StubWorker(), ledger_root=tmp_path)
+    assert type(stack).__name__ == "CodeFix"       # code artifact is OUTERMOST
+    assert isinstance(stack.inner, ToolOffload)      # the knob stack is inside it
+
+
+def test_build_rejects_symlink_escaping_ledger_root(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "evil.py").write_text(CODE_MODULE_SRC, encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "link.py").symlink_to(outside / "evil.py")  # relative name, escapes on resolve
+    p = HarnessParams(code_ref="link.py")
+    with pytest.raises(RuntimeError, match="link.py"):
+        p.build(StubWorker(), ledger_root=root)
+
+
+def test_build_missing_module_is_runtime_error(tmp_path):
+    p = HarnessParams(code_ref="nope.py")
+    with pytest.raises(RuntimeError, match="nope.py"):
+        p.build(StubWorker(), ledger_root=tmp_path)
+
+
+def test_build_module_without_build_is_runtime_error(tmp_path):
+    (tmp_path / "nobuild.py").write_text("VALUE = 1\n", encoding="utf-8")
+    p = HarnessParams(code_ref="nobuild.py")
+    with pytest.raises(RuntimeError, match="build"):
+        p.build(StubWorker(), ledger_root=tmp_path)
+
+
+def test_params_roundtrip_through_ledger_with_code_fields(tmp_path):
+    ledger = CandidateLedger(tmp_path)
+    params = HarnessParams(code_ref="candidates/c0001/harness.py", code_hash="deadbeef")
+    ledger.record(evaluated_candidate("c0001", 0.5, 100, params=params))
+    reloaded = CandidateLedger(tmp_path).get("c0001")
+    assert reloaded.params.code_ref == "candidates/c0001/harness.py"
+    assert reloaded.params.code_hash == "deadbeef"
+
+
 # -- ledger: persistence and Pareto math ---------------------------------------------
 
 

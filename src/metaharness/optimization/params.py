@@ -13,7 +13,9 @@ never silently evaluated.
 """
 from __future__ import annotations
 
-from typing import Any
+import importlib.util
+from pathlib import Path, PurePosixPath
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,6 +43,14 @@ class HarnessParams(BaseModel):
     schema_guard_retries: int = Field(default=0, ge=0, le=3)
     self_critique_rounds: int = Field(default=0, ge=0, le=2)
     prompt_directives: list[str] = Field(default_factory=list, max_length=MAX_DIRECTIVES)
+    # Code-space search (arXiv 2603.28052 §edit-scope): a candidate may carry a
+    # CODE artifact — a Python module under the ledger root that wraps the runner
+    # — instead of, or on top of, the knob stack. code_ref is a ledger-root
+    # RELATIVE POSIX path to a `.py` module defining `def build(base) -> Runner`.
+    code_ref: Optional[str] = None
+    # sha256 hex of the module source. MACHINE-MANAGED: the code gate/loop sets
+    # it after validating the artifact; proposers never write it directly.
+    code_hash: Optional[str] = None
 
     @field_validator("prompt_directives")
     @classmethod
@@ -52,17 +62,41 @@ class HarnessParams(BaseModel):
                 raise ValueError(f"directive over {MAX_DIRECTIVE_CHARS} chars: {d[:60]}…")
         return v
 
+    @field_validator("code_ref")
+    @classmethod
+    def _code_ref_is_safe_relative(cls, v: Optional[str]) -> Optional[str]:
+        """The interface-validation gate for the code path (mirrors the knob
+        bounds above): a code_ref must be a ledger-root-relative `.py` path with
+        no way to escape the root. Realpath containment is enforced later, at
+        load time in build(); this rejects the obviously-malformed shapes early."""
+        if v is None:
+            return v
+        if v.startswith("/") or PurePosixPath(v).is_absolute():
+            raise ValueError("code_ref must be ledger-root-relative, not absolute")
+        if not v.endswith(".py"):
+            raise ValueError("code_ref must name a .py module")
+        if ".." in PurePosixPath(v).parts:
+            raise ValueError("code_ref must not contain '..' segments")
+        return v
+
     def with_delta(self, delta: dict[str, Any]) -> "HarnessParams":
         """Merge a proposer delta over these params, re-validating everything.
         Raises pydantic.ValidationError on unknown knobs or out-of-bounds
         values — the caller records that as a rejected candidate."""
         return HarnessParams.model_validate({**self.model_dump(), **delta})
 
-    def build(self, base: Runner) -> Runner:
+    def build(self, base: Runner, *, ledger_root: Path | None = None) -> Runner:
         """Compose the enrichment stack this candidate describes around a bare
         worker. Order mirrors the existing convention: offload innermost, then
         consistency voting, then schema retries, then critique; directives
-        outermost so every inner call sees the amended contract."""
+        outermost so every inner call sees the amended contract.
+
+        A code-carrying candidate (`code_ref` set) wraps the knob stack with a
+        CODE artifact loaded from `ledger_root / code_ref`, applied OUTERMOST so
+        it sees the fully-composed knob stack. `ledger_root` is REQUIRED when
+        `code_ref` is set — build runs from three places (evaluation, serve-boot
+        promotion apply, web approval) and a cwd-relative resolve would silently
+        load the wrong file, so we refuse rather than guess."""
         runner = base
         if self.tool_offload:
             runner = ToolOffload(runner)
@@ -74,7 +108,39 @@ class HarnessParams(BaseModel):
             runner = SelfCritique(runner, rounds=self.self_critique_rounds)
         if self.prompt_directives:
             runner = PromptDirectives(runner, self.prompt_directives)
+        if self.code_ref is not None:
+            runner = self._load_code_module(ledger_root).build(runner)
         return runner
+
+    def _load_code_module(self, ledger_root: Path | None):
+        """Resolve and import this candidate's code artifact, returning the
+        module (which must expose a callable `build`). Refuses to resolve
+        without a ledger_root, enforces realpath containment under the root
+        (symlink-escape safe), and wraps every load failure in a RuntimeError
+        that names the code_ref."""
+        if ledger_root is None:
+            raise ValueError("code-backed params require ledger_root")
+        root = Path(ledger_root).resolve()
+        target = (root / self.code_ref).resolve()
+        if not target.is_relative_to(root):
+            raise RuntimeError(
+                f"code_ref {self.code_ref!r} resolves outside the ledger root"
+            )
+        if not target.is_file():
+            raise RuntimeError(f"code_ref {self.code_ref!r} is not a file: {target}")
+        spec = importlib.util.spec_from_file_location(f"metaharness_code::{target}", target)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"code_ref {self.code_ref!r} could not be loaded as a module")
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as exc:  # any import-time error, named for the ledger
+            raise RuntimeError(f"code_ref {self.code_ref!r} failed to import: {exc}") from exc
+        if not callable(getattr(module, "build", None)):
+            raise RuntimeError(
+                f"code_ref {self.code_ref!r} defines no callable build(base) -> Runner"
+            )
+        return module
 
 
 class PromptDirectives(_Wrapper):

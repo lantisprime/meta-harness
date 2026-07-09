@@ -95,7 +95,7 @@ class HarnessOptimizer:
     ) -> tuple[SuiteResult, CandidateScores, list[dict]]:
         """Score one candidate stack: every task k times, deterministic verify,
         raw per-attempt trace rows. UNVERIFIED never counts as a pass."""
-        runner = params.build(self.base_factory())
+        runner = params.build(self.base_factory(), ledger_root=self.ledger.root)
         suite = SuiteResult(model=label, k=self.k)
         scores = CandidateScores(
             pass_hat_k=0.0, pass_at_1=0.0, tokens_in=0, tokens_out=0,

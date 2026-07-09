@@ -157,7 +157,9 @@ def _apply_promoted(runners) -> None:
     if params is None:
         return
     base = runners[Tier.SMALL][0]  # tuning targets the small tier's primary member
-    wrapped = params.build(base)
+    # code-backed params resolve their artifact relative to the suite's ledger
+    # root — the same dir the promoted/active params were read from.
+    wrapped = params.build(base, ledger_root=root / suite)
     wrapped._tuning_base = base  # web approvals replace exactly this layer
     runners[Tier.SMALL][0] = wrapped
     defaults = HarnessParams().model_dump()
