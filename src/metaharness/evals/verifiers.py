@@ -26,6 +26,37 @@ from metaharness.core.types import (
 )
 from metaharness.harness.enrichment import check_schema
 
+MAX_TOL = 1.0  # a tol above this stops being a float-rounding tolerance and makes
+               # non-adjacent answers match — treat as corruption / unscoreable.
+
+
+def scoreable_tol(value: Any) -> Optional[float]:
+    """A tol usable by math.isclose: coerce to a finite, non-negative float within MAX_TOL.
+    Returns None if it is not (junk, non-finite, negative, over-large, or overflows float())."""
+    try:
+        tol = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(tol) or tol < 0 or tol > MAX_TOL:
+        return None
+    return tol
+
+
+def scoreable_number(value: Any) -> bool:
+    """True unless `value` is a numeric ground-truth that math.isclose cannot score: a huge int
+    that overflows float() (e.g. a 400-digit int), OR a non-finite float — inf/nan, which
+    eval_arithmetic("1e999")/("1e999-1e999") and a generator's JSON `1e999` all produce WITHOUT
+    raising. Symmetric with scoreable_tol's math.isfinite check (Issue #9 panel: opus/codex/kimi/
+    GLM converged — an inf equals PASSes any "inf" output, a nan equals FAILs every output).
+    Non-numeric (str) equals/one_of members pass."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return True
+    try:
+        coerced = float(value)
+    except OverflowError:
+        return False
+    return math.isfinite(coerced)
+
 
 def _values_equal(got: Any, want: Any, tol: float = 1e-9) -> bool:
     if isinstance(got, bool) != isinstance(want, bool):
@@ -34,10 +65,13 @@ def _values_equal(got: Any, want: Any, tol: float = 1e-9) -> bool:
     if isinstance(want, (int, float)) and isinstance(got, str):
         try:
             got = float(got.strip().rstrip("."))
-        except ValueError:
+        except ValueError:  # non-numeric answer text; float(str) never raises OverflowError (→ inf)
             return False
     if isinstance(got, (int, float)) and isinstance(want, (int, float)):
-        return math.isclose(float(got), float(want), rel_tol=tol, abs_tol=tol)
+        try:
+            return math.isclose(float(got), float(want), rel_tol=tol, abs_tol=tol)
+        except OverflowError:  # a huge numeric got/want/one_of member → non-match, never a crash
+            return False
     if isinstance(got, str) and isinstance(want, str):
         return got.strip() == want.strip()  # LLM answers carry incidental whitespace
     return got == want
@@ -45,7 +79,12 @@ def _values_equal(got: Any, want: Any, tol: float = 1e-9) -> bool:
 
 def verify_output(task: Task, result: WorkerResult) -> VerificationResult:
     """Deterministic verdict for one attempt. FAIL always carries a reason; a
-    missing ground-truth signal yields UNVERIFIED, never a fake PASS."""
+    missing ground-truth signal yields UNVERIFIED, never a fake PASS.
+
+    UNVERIFIED is the least-bad verdict for malformed ground truth: it avoids
+    deterministic false-blame and matrix FAIL recording (gate.py:100 only records
+    PASS/FAIL), but it is NOT fully neutral — the optimization loop still counts
+    non-PASS as a miss (loop.py:125). (codex P2.)"""
     if result.error:
         mode = MASTMode.SCHEMA_INVALID if result.error.startswith("schema:") else MASTMode.TOOL_ERROR
         return VerificationResult(
@@ -67,9 +106,23 @@ def verify_output(task: Task, result: WorkerResult) -> VerificationResult:
             detail="no checkable success signal for this task", scorer="none",
         )
 
+    # malformed GROUND TRUTH → UNVERIFIED, never crash, never fake-PASS, never unfairly FAIL
+    if ("tol" in check and scoreable_tol(check["tol"]) is None) \
+            or not scoreable_number(check.get("equals")) \
+            or ("one_of" in check and isinstance(check["one_of"], list)
+                and not all(scoreable_number(v) for v in check["one_of"])):
+        return VerificationResult(
+            verdict=Verdict.UNVERIFIED, score=0.5,
+            detail="success_check ground-truth value is not numerically scoreable", scorer="none")
+
     if "equals" in check:
         want = check["equals"]
-        tol = float(check.get("tol", 1e-9))
+        # the guard above already rejected an unscoreable present tol, so this is
+        # non-None; `is None` (not `or`) preserves an explicit tol=0 (exact match)
+        # instead of silently widening it to the 1e-9 default.
+        tol = scoreable_tol(check.get("tol", 1e-9))
+        if tol is None:
+            tol = 1e-9
         if _values_equal(result.output, want, tol):
             return VerificationResult(verdict=Verdict.PASS, score=1.0, scorer="deterministic")
         return VerificationResult(

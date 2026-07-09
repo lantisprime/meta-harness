@@ -398,9 +398,16 @@ def create_app(state: HarnessState) -> FastAPI:
             if candidate.task_type == TaskType.ARITHMETIC:
                 expr = candidate.inputs.get("expression")
                 try:
-                    check["equals"] = eval_arithmetic(str(expr))  # never trust the generator's math
+                    recomputed = eval_arithmetic(str(expr))  # never trust the generator's math
                 except Exception:  # a div-by-zero / evaluator crash drops the task, never 500s
                     continue
+                # panel (kimi): build a fresh check and re-validate BEFORE persisting — don't
+                # mutate candidate.success_check in place, mirroring harvest.py's copy pattern so
+                # a recomputed bigint/inf can never partially persist.
+                new_check = {**check, "equals": recomputed}
+                if not check_value_ok(new_check):   # recomputed bigint/inf → drop, never 500
+                    continue
+                candidate.success_check = new_check
             key = (candidate.objective, _json.dumps(candidate.inputs, sort_keys=True, default=str))
             if key in seen:
                 continue

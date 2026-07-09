@@ -243,7 +243,10 @@ def _evaluate_step(
             # the evaluator throws means "no trustworthy answer", not "abort
             # the whole harvest".
             return "arithmetic_unevaluable", None
-        task.success_check = {**task.success_check, "equals": recomputed}
+        new_check = {**task.success_check, "equals": recomputed}
+        if not check_value_ok(new_check):   # recomputed bigint overflows float() at tuning time
+            return "bad_check_value", None
+        task.success_check = new_check
 
     if len(json.dumps(task.model_dump(), default=str)) > max_task_chars:
         return "oversized", None

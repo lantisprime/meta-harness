@@ -120,3 +120,54 @@ def test_values_equal_coerces_llm_text_answers():
     assert not _values_equal("3768", 3767)
     assert not _values_equal("about 3767", 3767)
     assert not _values_equal("true", True)   # bool guard stays strict
+
+
+def test_verify_output_unscoreable_ground_truth_is_unverified():
+    """Issue #9 (codex P1 / GLM / kimi): the verifier is the real boundary. A
+    ground-truth value that overflows float() (a 401-digit equals/one_of member)
+    or a tol above MAX_TOL used to crash math.isclose / silently corrupt scoring;
+    it now returns UNVERIFIED (least-bad — never a fake PASS, never false-blame).
+    A huge MODEL OUTPUT against a normal check is the got-side guard: non-match
+    FAIL, never a crash."""
+    from metaharness.core.types import Verdict, WorkerResult
+    from metaharness.evals.verifiers import verify_output
+
+    def _result(task, output):
+        return WorkerResult(task_id=task.id, worker_id="w", tier=Tier.SMALL,
+                            model="m", output=output, raw_text=str(output))
+
+    def _task(success_check):
+        return Task(task_type=TaskType.ARITHMETIC, objective="x",
+                    inputs={"expression": "x"}, success_check=success_check)
+
+    bigint = _task({"equals": 10 ** 400})           # was OverflowError crash
+    assert verify_output(bigint, _result(bigint, "1")).verdict == Verdict.UNVERIFIED
+    bigtol = _task({"equals": 5, "tol": 10 ** 400})
+    assert verify_output(bigtol, _result(bigtol, "5")).verdict == Verdict.UNVERIFIED
+    bigmember = _task({"one_of": [10 ** 400]})
+    assert verify_output(bigmember, _result(bigmember, "1")).verdict == Verdict.UNVERIFIED
+    # got-side guard: a 401-digit model OUTPUT vs a normal check is a non-match, not a crash
+    normal = _task({"equals": 5})
+    assert verify_output(normal, _result(normal, "1" + "0" * 400)).verdict == Verdict.FAIL
+    # tol=0 means EXACT match — the scoreable_tol guard must NOT widen it to the 1e-9
+    # default (a value inside 1e-9 but not exact must still FAIL).
+    exact = _task({"equals": 5, "tol": 0})
+    assert verify_output(exact, _result(exact, "5")).verdict == Verdict.PASS
+    assert verify_output(exact, _result(exact, "5.0000000004")).verdict == Verdict.FAIL
+    # Issue #9 panel (opus/codex/kimi/GLM): non-finite float ground truth. inf equals used to
+    # PASS any "inf" output (silent corruption); nan equals FAILed every output (false blame).
+    inf_eq = _task({"equals": float("inf")})
+    assert verify_output(inf_eq, _result(inf_eq, "inf")).verdict == Verdict.UNVERIFIED
+    nan_eq = _task({"equals": float("nan")})
+    assert verify_output(nan_eq, _result(nan_eq, "0")).verdict == Verdict.UNVERIFIED
+    inf_member = _task({"one_of": [float("inf"), 1]})
+    assert verify_output(inf_member, _result(inf_member, "inf")).verdict == Verdict.UNVERIFIED
+    # tol cap boundary AT THE VERIFIER (both gates share scoreable_tol): 1.0 scores, 1.5 → UNVERIFIED.
+    assert verify_output(_task({"equals": 5, "tol": 1.0}),
+                         _result(_task({"equals": 5}), "5")).verdict == Verdict.PASS
+    over = _task({"equals": 5, "tol": 1.5})
+    assert verify_output(over, _result(over, "5")).verdict == Verdict.UNVERIFIED
+    # got-side: a huge-int model OUTPUT OBJECT (not a string) vs a normal check exercises the
+    # math.isclose OverflowError guard → non-match FAIL, never a crash.
+    normal2 = _task({"equals": 5})
+    assert verify_output(normal2, _result(normal2, 10 ** 400)).verdict == Verdict.FAIL

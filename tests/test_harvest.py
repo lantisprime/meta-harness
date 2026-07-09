@@ -13,7 +13,7 @@ import json
 import pytest
 
 from metaharness.cli import main
-from metaharness.core.types import Task, TaskType, Tier, WorkerResult
+from metaharness.core.types import Task, TaskType, Tier, Verdict, WorkerResult
 from metaharness.evals.verifiers import verify_output
 import metaharness.optimization.harvest as harvest_mod
 from metaharness.optimization.harvest import HarvestReport, harvest_journals
@@ -386,14 +386,15 @@ def test_bad_check_value_cases_skipped_and_never_crash_verifier(tmp_path):
     assert report.skipped["bad_check_vocab"] == 1   # two primary keys
     assert not extras_path(tmp_path / "opt" / "mixed").exists()
 
-    # regression: the non-float-tol check really would crash the verifier, which is
-    # exactly why harvest must never let it reach extras.
+    # regression: a non-float-tol check used to crash the verifier (ValueError),
+    # which is why harvest must never let it reach extras. Issue #9 also hardened
+    # the verifier boundary itself — the same malformed tol now returns UNVERIFIED
+    # instead of crashing (never a fake PASS, never false-blame).
     crafted = Task(task_type=TaskType.CLASSIFY, objective="x", inputs={},
                    success_check={"equals": "1", "tol": "not-a-float"})
     result = WorkerResult(task_id=crafted.id, worker_id="w", tier=Tier.SMALL,
                           model="m", output="1", raw_text="1")
-    with pytest.raises(ValueError):
-        verify_output(crafted, result)
+    assert verify_output(crafted, result).verdict == Verdict.UNVERIFIED
 
 
 # -- panel-review regressions --------------------------------------------------------
@@ -443,6 +444,19 @@ def test_check_value_ok_branches_directly():
     assert not check_value_ok({"equals": 5, "tol": float("inf")})
     assert not check_value_ok({"equals": 5, "tol": float("nan")})
     assert not check_value_ok({"equals": 5, "tol": 10 ** 400})   # OverflowError, not ValueError
+    # Issue #9 (codex P1 / GLM / kimi): finite-huge tol capped, large-int equals/one_of rejected
+    assert not check_value_ok({"equals": 5, "tol": 1e308})       # finite-huge tol now rejected
+    assert check_value_ok({"equals": 5, "tol": 1.0})             # boundary: cap is inclusive
+    assert not check_value_ok({"equals": 5, "tol": 1.5})         # just over cap
+    assert not check_value_ok({"equals": 10 ** 400})             # huge-int equals rejected
+    assert check_value_ok({"equals": 42})                        # normal int still fine
+    assert not check_value_ok({"one_of": [10 ** 400]})           # huge-int one_of member rejected
+    # Issue #9 panel (opus/codex/kimi/GLM converged): non-finite float ground truth — inf/nan from
+    # eval_arithmetic("1e999")/JSON 1e999 — must be rejected too (symmetric with the tol guard).
+    assert not check_value_ok({"equals": float("inf")})
+    assert not check_value_ok({"equals": float("nan")})
+    assert not check_value_ok({"one_of": [float("inf"), 1]})
+    assert not check_value_ok({"one_of": [float("nan")]})
     # one_of branch
     assert not check_value_ok({"one_of": []})
     assert not check_value_ok({"one_of": "positive"})
@@ -469,6 +483,38 @@ def test_arithmetic_division_by_zero_skipped_not_fatal(tmp_path):
     report = harvest_journals(journals, "mixed", tmp_path / "opt")
     assert report.skipped["arithmetic_unevaluable"] == 1
     assert report.added == 1  # harvest continued past the throwing expression
+    (task,) = load_extras(tmp_path / "opt" / "mixed")
+    assert task.success_check["equals"] == 9
+
+
+def test_recomputed_bigint_and_huge_tol_rejected_not_fatal(tmp_path):
+    """Issue #9 (codex P1 / kimi): eval_arithmetic caps the EXPONENT at 1000, not
+    the result — '10**400' recomputes to a 401-digit int that overflows float() at
+    tuning time. Re-validating the recomputed equals drops it as bad_check_value
+    (not added, not fatal). A harvested step carrying a finite-huge tol (1e308) is
+    likewise dropped, while a sibling clean arithmetic step still harvests. Panel
+    (opus/codex/kimi/GLM): '1e999' / '1e999-1e999' recompute to inf/nan WITHOUT
+    raising and must be dropped the same way."""
+    journals = tmp_path / "journals"
+    steps = [
+        _step("huge", "arithmetic", "Compute 10**400.", {"expression": "10**400"},
+              {"equals": 1}),
+        _step("bigtol", "extract", "Finite-huge tol.", {"text": "a"},
+              {"equals": "1", "tol": 1e308}),
+        _step("inf", "arithmetic", "Compute 1e999.", {"expression": "1e999"},
+              {"equals": 1}),
+        _step("nan", "arithmetic", "Compute 1e999-1e999.", {"expression": "1e999-1e999"},
+              {"equals": 1}),
+        _step("fine", "arithmetic", "Compute 3*3.", {"expression": "3*3"},
+              {"equals": 9}),
+    ]
+    _journal(journals, "run_big", steps,
+             [_completed("huge", 0), _completed("bigtol", "1"), _completed("inf", 0),
+              _completed("nan", 0), _completed("fine", 9)])
+
+    report = harvest_journals(journals, "mixed", tmp_path / "opt")
+    assert report.skipped["bad_check_value"] == 4
+    assert report.added == 1
     (task,) = load_extras(tmp_path / "opt" / "mixed")
     assert task.success_check["equals"] == 9
 

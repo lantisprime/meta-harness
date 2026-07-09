@@ -418,9 +418,11 @@ async def test_coverage_extends_suite_with_validated_questions(wired_state, tmp_
 async def test_coverage_hardens_check_values_and_survives_div_by_zero(wired_state, tmp_path):
     """Check-value hardening on the coverage endpoint, end to end: a negative
     tol, a mixed primary key ({equals}+{one_of}), an over-large tol (float()
-    OverflowError), and a div-by-zero recompute are each dropped — the last two
-    WITHOUT 500ing the endpoint — while the one clean {equals, tol} item is
-    added with its arithmetic answer recomputed and its valid tol preserved."""
+    OverflowError), a finite-huge tol (Issue #9, 1e308 over MAX_TOL), a
+    recomputed 401-digit int (Issue #9, '10**400') and a div-by-zero recompute
+    are each dropped — the overflowing/recomputed/div cases WITHOUT 500ing the
+    endpoint — while the one clean {equals, tol} item is added with its
+    arithmetic answer recomputed and its valid tol preserved."""
     import json
 
     from metaharness.core.types import Task, WorkerResult
@@ -435,6 +437,12 @@ async def test_coverage_hardens_check_values_and_survives_div_by_zero(wired_stat
          "inputs": {"expression": "1/0"}, "success_check": {"equals": 1}},                    # recompute raises -> dropped
         {"task_type": "arithmetic", "objective": "Compute 5+5. Answer with the number only.",
          "inputs": {"expression": "5+5"}, "success_check": {"equals": 10, "tol": 10 ** 400}},  # OverflowError tol -> dropped, not 500
+        {"task_type": "arithmetic", "objective": "Compute 7+7. Answer with the number only.",
+         "inputs": {"expression": "7+7"}, "success_check": {"equals": 14, "tol": 1e308}},      # Issue #9: finite-huge tol -> dropped
+        {"task_type": "arithmetic", "objective": "Compute 10**400. Answer with the number only.",
+         "inputs": {"expression": "10**400"}, "success_check": {"equals": 1}},                 # Issue #9: recompute -> 401-digit int -> dropped, not 500
+        {"task_type": "arithmetic", "objective": "Compute 1e999. Answer with the number only.",
+         "inputs": {"expression": "1e999"}, "success_check": {"equals": 1}},                   # Issue #9 panel: recompute -> inf (no raise) -> dropped
         {"task_type": "arithmetic", "objective": "Compute 6*7. Answer with the number only.",
          "inputs": {"expression": "6*7"}, "success_check": {"equals": 0, "tol": 0.5}},        # clean -> added (equals=42)
     ]}
