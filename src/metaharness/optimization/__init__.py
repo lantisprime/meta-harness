@@ -1,5 +1,6 @@
 """Harness self-optimization: the Meta-Harness outer loop (arXiv 2603.28052)
 applied to this harness's own enrichment stack. See loop.py for the shape."""
+from metaharness.optimization.code_proposer import CodeProposer, build_code_proposal_prompt
 from metaharness.optimization.ledger import Candidate, CandidateLedger, CandidateScores
 from metaharness.optimization.loop import HarnessOptimizer, OptimizationReport
 from metaharness.optimization.params import HarnessParams, PromptDirectives
@@ -16,9 +17,11 @@ __all__ = [
     "Candidate",
     "CandidateLedger",
     "CandidateScores",
+    "CodeProposer",
     "HarnessOptimizer",
     "HarnessParams",
     "LLMProposer",
+    "build_code_proposal_prompt",
     "OptimizationReport",
     "Proposal",
     "ProposalError",
