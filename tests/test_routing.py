@@ -105,6 +105,58 @@ def test_matrix_as_dict_shape():
     assert cell["samples"] == 2 and cell["pass_rate"] == 0.5
 
 
+def test_matrix_persist_is_best_effort_on_disk_error(tmp_path, monkeypatch):
+    """GLM F3 (2026-07-09): a sync, unwrapped write_text on every observation
+    crashed runs whenever the disk erred. save() is now best-effort — a failing
+    write records last_persist_error and never raises, in-memory stats keep
+    updating, and a later successful write clears the error."""
+    import pathlib
+
+    path = tmp_path / "matrix.json"
+    matrix = CapabilityMatrix(persist_path=path, persist_min_interval_s=0.0)
+
+    def boom(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", boom)
+    matrix.record("m", TaskType.CLASSIFY, passed=True)  # must NOT raise
+    assert matrix.samples("m", TaskType.CLASSIFY) == 1  # in-memory stat still updated
+    assert matrix.last_persist_error is not None and "disk full" in matrix.last_persist_error
+    assert matrix.health()["last_persist_error"] == matrix.last_persist_error
+
+    monkeypatch.undo()  # disk recovers
+    matrix.record("m", TaskType.CLASSIFY, passed=False)
+    assert matrix.last_persist_error is None  # a good write clears the flag
+    assert path.exists()
+
+
+def test_matrix_debounces_writes_and_flush_forces_pending(tmp_path, monkeypatch):
+    """A large debounce interval coalesces a burst of observations into a single
+    write; flush() forces the deferred write out durably (e.g. on shutdown)."""
+    import pathlib
+
+    writes: list[int] = []
+    real = pathlib.Path.write_text
+
+    def counting(self, data, *a, **k):
+        writes.append(1)
+        return real(self, data, *a, **k)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", counting)
+    path = tmp_path / "matrix.json"
+    matrix = CapabilityMatrix(persist_path=path, persist_min_interval_s=1000.0)
+    for _ in range(5):
+        matrix.record("m", TaskType.CLASSIFY, passed=True)
+    assert len(writes) == 1  # only the first observation wrote; the rest debounced
+
+    matrix.flush()
+    assert len(writes) == 2  # flush forced the pending burst out
+    assert CapabilityMatrix.load(path).samples("m", TaskType.CLASSIFY) == 5
+
+    matrix.flush()  # nothing pending -> no-op
+    assert len(writes) == 2
+
+
 # -- per-tier pools: within-tier member selection ----------------------------------
 
 

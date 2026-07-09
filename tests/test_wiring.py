@@ -200,6 +200,10 @@ async def test_all_learned_state_survives_restart(tmp_path):
     assert state.matrix.samples("text-small", TaskType.EXTRACT) == 2
     assert state.learning.stats.count("extract", __import__("metaharness.core.types", fromlist=["MASTMode"]).MASTMode.DISOBEY_TASK_SPEC) == 2
 
+    # a clean shutdown flushes debounced matrix observations (the app's shutdown
+    # hook does this in production); without it the last burst stays deferred
+    state.matrix.flush()
+
     # "restart": a brand-new state loads everything back
     state2 = build(persist_dir)
     assert state2.matrix.samples("text-small", TaskType.EXTRACT) == 2

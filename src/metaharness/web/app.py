@@ -125,6 +125,13 @@ def create_app(state: HarnessState) -> FastAPI:
             status = f"{entry['tools']} tool(s)" if entry.get("ok") else f"FAILED: {entry['detail']}"
             print(f"  MCP {name}: {status}")
 
+    @app.on_event("shutdown")
+    async def _flush_persistent_state() -> None:
+        """Force any debounced capability-matrix observations out to disk on a
+        clean shutdown — the routing evidence earned in the run's final second
+        must survive the restart, not sit unpersisted behind the debounce."""
+        state.matrix.flush()
+
     @app.on_event("startup")
     async def _resume_interrupted_runs() -> None:
         """Runs adopted from journals in RUNNING state were interrupted mid-run

@@ -13,7 +13,9 @@ tier silently becomes an expensive downstream failure.
 """
 from __future__ import annotations
 
+import logging
 import random
+import time
 from typing import Optional, Union
 
 from pydantic import BaseModel
@@ -22,6 +24,8 @@ from metaharness.core.budget import Budget
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.harness.runner import Runner
 from metaharness.observability.tracing import tracer
+
+_log = logging.getLogger(__name__)
 
 TIER_ORDER = [Tier.SMALL, Tier.MID, Tier.FRONTIER]
 
@@ -53,29 +57,70 @@ class CapabilityMatrix:
     """Observed pass rates per (model, task type), Laplace-smoothed toward the
     prior so a single unlucky sample doesn't flip routing.
 
-    With `persist_path` set, every observation is written through to disk —
-    routing evidence is expensive to earn and must survive restarts."""
+    With `persist_path` set, observations are written through to disk — routing
+    evidence is expensive to earn and must survive restarts. Persistence is
+    best-effort and debounced: a disk error is recorded (never crashes the run)
+    and per-observation rewrites coalesce within `persist_min_interval_s`; call
+    `flush()` (e.g. on shutdown) to force any pending write out durably."""
 
-    def __init__(self, smoothing: float = 4.0, persist_path=None) -> None:
+    def __init__(
+        self, smoothing: float = 4.0, persist_path=None,
+        persist_min_interval_s: float = 1.0,
+    ) -> None:
         self._stats: dict[tuple[str, TaskType], list[int]] = {}
         self.smoothing = smoothing
         self.persist_path = persist_path
+        self.persist_min_interval_s = persist_min_interval_s
+        # populated when the most recent write failed; a later success clears it
+        self.last_persist_error: Optional[str] = None
+        self._dirty = False
+        self._last_write: Optional[float] = None  # monotonic clock of last write attempt
 
     def record(self, model: str, task_type: TaskType, passed: bool) -> None:
         cell = self._stats.setdefault((model, task_type), [0, 0])
         cell[0] += int(passed)
         cell[1] += 1
-        if self.persist_path is not None:
+        self._dirty = True
+        # debounce: persist the first observation immediately (never written yet),
+        # then coalesce a burst; interval 0 restores write-every-observation
+        if self.persist_path is not None and (
+            self._last_write is None
+            or time.monotonic() - self._last_write >= self.persist_min_interval_s
+        ):
+            self.save(self.persist_path)
+
+    def flush(self) -> None:
+        """Force any pending observation to disk now. Best-effort like save();
+        callers use it where durability matters (initial wiring, shutdown)."""
+        if self.persist_path is not None and self._dirty:
             self.save(self.persist_path)
 
     def save(self, path) -> None:
         import json
         from pathlib import Path
 
+        self._last_write = time.monotonic()
         data: dict[str, dict[str, list[int]]] = {}
         for (model, task_type), cell in self._stats.items():
             data.setdefault(model, {})[task_type.value] = list(cell)
-        Path(path).write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+        try:
+            Path(path).write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+        except OSError as exc:
+            # never crash a run on a persistence failure; warn once per distinct
+            # error string so a broken disk doesn't spam the log per observation
+            msg = str(exc)
+            if self.last_persist_error is None or not self.last_persist_error.endswith(msg):
+                _log.warning("capability matrix could not persist to %s: %s", path, exc)
+            from metaharness.core.types import now
+            self.last_persist_error = f"{now():.0f}: {msg}"
+            return
+        self.last_persist_error = None
+        self._dirty = False
+
+    def health(self) -> dict[str, Optional[str]]:
+        """Persistence health for the dashboard/API: the last write error (with
+        its timestamp) or None when the most recent write succeeded."""
+        return {"last_persist_error": self.last_persist_error}
 
     @classmethod
     def load(cls, path, smoothing: float = 4.0) -> "CapabilityMatrix":

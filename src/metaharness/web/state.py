@@ -99,6 +99,7 @@ class HarnessState:
             if self.router is not None:
                 self.router.matrix = loaded
         self.matrix.persist_path = matrix_path
+        self.matrix.flush()  # initial durable write of any pending in-memory state
 
         stats_path = directory / "failures.json"
         if stats_path.exists():
