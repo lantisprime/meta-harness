@@ -159,13 +159,17 @@ class HarnessOptimizer:
 
     def _canonicalize_code(self, cid: str, params: HarnessParams) -> HarnessParams:
         """Freeze a code candidate's validated artifact into its immutable
-        per-candidate location and rewrite code_ref to that canonical path.
+        per-candidate location, rewrite code_ref to that canonical path, and
+        (re)stamp code_hash from the CANONICAL bytes.
 
         A proposer stages code anywhere under the ledger root (convention:
-        staging/<slug>/harness.py). Evaluation may run against that staged path,
-        but the RECORDED/promotable artifact must be the frozen per-candidate
-        copy — a later round could overwrite the staged file. Byte-identical
-        copy, so the scores computed on the staged file still hold."""
+        staging/<slug>/harness.py). F4 (panel 2026-07-09) moves this BEFORE
+        evaluation: the candidate is scored against its frozen copy, so what runs
+        is exactly what is recorded and promoted — a staged-file rewrite mid-eval
+        can no longer smuggle unscored bytes in under a stale hash. code_hash is
+        recomputed from the canonical bytes (the ones build() will re-verify)."""
+        import hashlib
+
         if params.code_ref is None:
             return params
         src = (self.ledger.root / params.code_ref).resolve()
@@ -174,7 +178,8 @@ class HarnessOptimizer:
         if src != dest.resolve():
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dest)
-        return params.model_copy(update={"code_ref": dest_rel})
+        code_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
+        return params.model_copy(update={"code_ref": dest_rel, "code_hash": code_hash})
 
     # -- the loop ---------------------------------------------------------------
 
@@ -238,7 +243,10 @@ class HarnessOptimizer:
                 continue
             try:
                 params = parent.params.with_delta(proposal.delta)
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
+                # ValidationError = bad knob; ValueError = a delta touching a
+                # machine-managed field (F6, panel 2026-07-09). Both are recorded
+                # as a rejected candidate, never allowed to escape the loop.
                 self.ledger.record(Candidate(
                     id=cid, parent=parent.id, hypothesis=proposal.hypothesis,
                     status="rejected", rejected_reason=f"interface validation failed: {exc}",
@@ -273,6 +281,10 @@ class HarnessOptimizer:
                 ))
                 continue
 
+            # F4 (panel 2026-07-09): freeze a code candidate's validated artifact
+            # into its immutable per-candidate home and re-hash it BEFORE scoring,
+            # so evaluation runs against the canonical bytes build() will re-verify.
+            params = self._canonicalize_code(cid, params)
             try:
                 _, scores, traces = await self._evaluate(cid, params, self.search_tasks)
             except BudgetExceeded as exc:
@@ -284,9 +296,17 @@ class HarnessOptimizer:
                 report.stopped = "budget"
                 report.notes.append(f"stopped: {exc}")
                 break
-            # freeze a code candidate's artifact into candidates/<cid>/harness.py
-            # before recording, so the promotable candidate is immutable.
-            params = self._canonicalize_code(cid, params)
+            except (RuntimeError, AttributeError, TypeError) as exc:
+                # F5 (panel 2026-07-09, opus P2): a code-carrying candidate whose
+                # build()/run() throws must be recorded rejected and skipped — a bad
+                # proposal can't be allowed to kill the whole search. Deliberate
+                # exception set (not bare-except); only BudgetExceeded stops the loop.
+                self.ledger.record(Candidate(
+                    id=cid, parent=parent.id, hypothesis=proposal.hypothesis,
+                    status="rejected", params=params,
+                    rejected_reason=f"evaluation failed: {type(exc).__name__}: {exc}",
+                ))
+                continue
             self.ledger.record(Candidate(
                 id=cid, parent=parent.id, hypothesis=proposal.hypothesis,
                 params=params, scores=scores,

@@ -929,6 +929,189 @@ async def test_loop_records_a_gate_failing_code_proposal_as_rejected(tmp_path):
     assert not (tmp_path / "candidates" / rejected[0].id / "harness.py").exists()
 
 
+# -- code-space integrity: canonical eval, verified hashes, robust gate --------------
+
+# build() writes its own __file__ to a marker on every call, so a test can prove
+# WHICH copy of the artifact evaluation actually loaded (canonical vs staged).
+CODE_MARKER_SRC = """\
+from pathlib import Path
+from metaharness.harness.enrichment import ToolOffload
+
+
+def build(base):
+    Path(__file__).with_name("loaded_from.marker").write_text(__file__, encoding="utf-8")
+    return ToolOffload(base)
+"""
+
+# Clears the gate (build returns a runner with a callable run) but throws when the
+# runner is actually exercised — the loop must reject it and keep searching.
+CODE_RUN_RAISES_SRC = """\
+from metaharness.harness.enrichment import _Wrapper
+
+
+class Boom(_Wrapper):
+    async def run(self, task):
+        raise RuntimeError("boom at run time")
+
+
+def build(base):
+    return Boom(base)
+"""
+
+
+async def test_loop_evaluates_against_canonical_not_staged(tmp_path):
+    """F4 (panel 2026-07-09, codex+GLM+kimi+opus TOCTOU): the artifact is frozen
+    and hashed BEFORE evaluation, so build() loads the canonical copy — never the
+    staged file a candidate's own code could rewrite mid-eval."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    staged = tmp_path / "staging" / "mark" / "harness.py"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(CODE_MARKER_SRC, encoding="utf-8")
+
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([{"code_ref": "staging/mark/harness.py"}]),
+        search, holdout, ledger, k=2,
+    )
+    report = await optimizer.optimize(rounds=1)
+
+    best = ledger.get(report.best_id)
+    canonical_dir = tmp_path / "candidates" / best.id
+    marker = canonical_dir / "loaded_from.marker"
+    # a marker in the CANONICAL dir naming the canonical file can only be written
+    # by a build() whose __file__ is the canonical copy — i.e. evaluation loaded
+    # the frozen artifact, not the staged one. (The gate's build(stub) probe runs
+    # on the staged file in a subprocess; that is validation, not scoring.)
+    assert marker.is_file()
+    assert marker.read_text() == str((canonical_dir / "harness.py").resolve())
+    # and the frozen bytes are exactly the source that was scored
+    assert (canonical_dir / "harness.py").read_text() == CODE_MARKER_SRC
+
+
+def test_load_code_module_rejects_tampered_canonical_bytes(tmp_path):
+    """F4 (panel 2026-07-09): build() re-verifies the file bytes against the
+    recorded code_hash — tampering the canonical file after recording is caught at
+    rebuild instead of silently running unscored bytes."""
+    canon = tmp_path / "candidates" / "c0001" / "harness.py"
+    canon.parent.mkdir(parents=True)
+    canon.write_text(CODE_FIX_SRC, encoding="utf-8")
+    good_hash = hashlib.sha256(canon.read_bytes()).hexdigest()
+    params = HarnessParams(code_ref="candidates/c0001/harness.py", code_hash=good_hash)
+    params.build(StubWorker(), ledger_root=tmp_path)                    # clean bytes: fine
+    canon.write_text(CODE_FIX_SRC + "\n# tampered\n", encoding="utf-8")  # promote-time tamper
+    with pytest.raises(RuntimeError, match="does not match recorded hash"):
+        params.build(StubWorker(), ledger_root=tmp_path)
+
+
+def test_code_gate_rejects_build_returning_none(tmp_path):
+    """F5 (panel 2026-07-09, opus P2): the probe now calls build(stub), so a
+    `def build(base): return None` is rejected with a distinct reason instead of
+    passing the gate and later crashing the whole evaluate step."""
+    (tmp_path / "nil.py").write_text("def build(base):\n    return None\n", encoding="utf-8")
+    result = validate_code(tmp_path, "nil.py", [])
+    assert not result.ok
+    assert "returned None or a non-runner" in result.reason
+
+
+async def test_loop_rejects_code_candidate_whose_run_raises_and_continues(tmp_path):
+    """F5 (panel 2026-07-09, opus P2): a candidate that clears the gate but throws
+    at run time is recorded rejected and the search CONTINUES — only BudgetExceeded
+    stops the loop, a bad proposal never kills it."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    for slug, src in (("boom", CODE_RUN_RAISES_SRC), ("fix", CODE_FIX_SRC)):
+        p = tmp_path / "staging" / slug / "harness.py"
+        p.parent.mkdir(parents=True)
+        p.write_text(src, encoding="utf-8")
+
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([
+            {"code_ref": "staging/boom/harness.py"},
+            {"code_ref": "staging/fix/harness.py"},
+        ]),
+        search, holdout, ledger, k=2,
+    )
+    report = await optimizer.optimize(rounds=2)   # must not raise
+
+    assert report.rounds_run == 2                 # the loop kept going after the crash
+    rejected = [c for c in ledger.candidates() if c.status == "rejected"]
+    assert any("evaluation failed: RuntimeError" in (c.rejected_reason or "") for c in rejected)
+    evaluated_code = [c for c in ledger.evaluated()
+                      if c.params and c.params.code_ref and c.id != report.seed_id]
+    assert evaluated_code and evaluated_code[-1].scores.pass_hat_k == 1.0   # the good fix ran
+
+
+def test_serve_boot_tolerates_a_broken_promoted_code_config(tmp_path, monkeypatch, capsys):
+    """F5 (panel 2026-07-09, opus P2): a promoted code artifact that fails to build
+    must not crash serve boot — _apply_promoted logs and serves the base worker."""
+    import json
+
+    from metaharness import cli
+
+    monkeypatch.setattr(cli, "JOURNAL_DIR", tmp_path / "journals")
+    root = tmp_path / "optimization"
+    (root / "math").mkdir(parents=True)
+    (root / "active.json").write_text(json.dumps({
+        "suite": "math", "candidate": "c0002",
+        "params": HarnessParams(code_ref="candidates/c0002/harness.py",
+                                code_hash="deadbeef").model_dump(),
+    }))
+    base = StubWorker()
+    runners = {Tier.SMALL: [base]}
+    cli._apply_promoted(runners)                     # must not raise
+    assert runners[Tier.SMALL][0] is base            # served unwrapped
+    assert "failed to build" in capsys.readouterr().out
+
+
+def test_with_delta_rejects_machine_managed_code_hash():
+    """F6 (panel 2026-07-09, opus P3+kimi): a delta setting code_hash would skip
+    the gate and poison dedupe; with_delta refuses it."""
+    with pytest.raises(ValueError, match="code_hash is machine-managed"):
+        HarnessParams().with_delta({"code_hash": "deadbeef"})
+
+
+async def test_loop_records_delta_setting_code_hash_as_rejected(tmp_path):
+    """F6 (panel 2026-07-09): the loop turns that ValueError into a clean rejected
+    candidate rather than letting it escape."""
+    search, holdout = search_and_holdout("math")
+    ledger = CandidateLedger(tmp_path)
+    optimizer = HarnessOptimizer(
+        TranscribeOnlyWorker,
+        SequenceProposer([{"code_hash": "deadbeef"}]),
+        search, holdout, ledger, k=2,
+    )
+    await optimizer.optimize(rounds=1)               # must not raise
+    rejected = [c for c in ledger.candidates() if c.status == "rejected"]
+    assert rejected and "code_hash is machine-managed" in rejected[0].rejected_reason
+
+
+def test_code_gate_folds_split_string_literal(tmp_path):
+    """F7 (panel 2026-07-09, codex P1): exact-substring decon is bypassed by
+    "19"+"32"; AST constant-folding catches the assembled holdout answer."""
+    holdout = [Task(task_type=TaskType.EXTRACT, success_check={"equals": "1932"})]
+    (tmp_path / "sneaky.py").write_text(
+        'ANSWER = "19" + "32"\n\ndef build(base):\n    return base\n', encoding="utf-8"
+    )
+    result = validate_code(tmp_path, "sneaky.py", holdout)
+    assert not result.ok and "held-out answer" in result.reason
+
+
+def test_code_gate_rejects_hard_link(tmp_path):
+    """F8 (panel 2026-07-09, kimi P2): resolve()+is_relative_to catches symlinks but
+    not hard links; a hard link under the root to an outside inode is refused."""
+    import os
+
+    outside = tmp_path / "outside.py"
+    outside.write_text(CODE_FIX_SRC, encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    os.link(outside, root / "linked.py")             # hard link: same inode, nlink=2
+    result = validate_code(root, "linked.py", [])
+    assert not result.ok and "hard link" in result.reason
+
+
 # -- CodeProposer: coding-agent proposals over the ledger ----------------------------
 
 import stat as _stat  # noqa: E402

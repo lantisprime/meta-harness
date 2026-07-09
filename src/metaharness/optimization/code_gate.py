@@ -15,7 +15,10 @@ of deterministic checks that never invoke the model:
 - **decontamination** — does the source smuggle a held-out task's expected
   answer? The paper holds the test set out until final frontier evaluation; a
   module that hard-codes a holdout answer would poison that gate, so any such
-  overlap is rejected.
+  overlap is rejected. This is BEST-EFFORT, at the string/AST-literal level:
+  raw substrings and constant-folded split literals ("19"+"32") are caught;
+  determined obfuscation (chr() chains, runtime construction) is out of scope
+  and mitigated by held-out inspection instead, the same posture as the paper.
 
 This is parallel to — not a replacement for — the HarnessParams pydantic gate:
 that one validates the knob surface, this one validates the code surface. A
@@ -53,15 +56,31 @@ MIN_DECON_LEN = 3
 # Default import-probe timeout; overridable for tests that assert the hang path.
 DEFAULT_IMPORT_TIMEOUT = 10.0
 
-# Import probe: exit 0 iff the module at argv[1] imports AND exposes a callable
-# `build`. Exit 3 distinguishes "imported but no build" from a nonzero import
-# crash, so the two produce distinct rejection reasons.
+# Import probe: exit 0 iff the module at argv[1] imports, exposes a callable
+# `build`, AND build(stub) returns a runner-shaped object. Distinct exit codes
+# give distinct rejection reasons (F5, panel 2026-07-09, opus P2): a probe that
+# only checked callable(build) passed `def build(base): return None`, which then
+# crashed the whole evaluate step.
+#   3 = imported but no callable build
+#   4 = build(stub) returned None or an object with no callable `run`
+#   5 = build(stub) itself raised
 _PROBE_SRC = (
     "import importlib.util, sys\n"
     "spec = importlib.util.spec_from_file_location('_probe', sys.argv[1])\n"
     "module = importlib.util.module_from_spec(spec)\n"
     "spec.loader.exec_module(module)\n"
-    "sys.exit(0 if callable(getattr(module, 'build', None)) else 3)\n"
+    "build = getattr(module, 'build', None)\n"
+    "if not callable(build):\n"
+    "    sys.exit(3)\n"
+    "class _Stub:\n"
+    "    worker_id = 'probe'; model = 'probe'; tier = None\n"
+    "    async def run(self, task):\n"
+    "        return None\n"
+    "try:\n"
+    "    runner = build(_Stub())\n"
+    "except Exception:\n"
+    "    sys.exit(5)\n"
+    "sys.exit(0 if (runner is not None and callable(getattr(runner, 'run', None))) else 4)\n"
 )
 
 
@@ -73,6 +92,59 @@ class CodeGateResult(BaseModel):
     ok: bool
     reason: str = ""
     code_hash: Optional[str] = None
+
+
+def _fold_node(node: ast.AST) -> Optional[object]:
+    """Constant-fold a single expression node, or None if it is not a pure
+    constant. Handles literals and BinOps (string concat + simple arithmetic)
+    over already-constant operands; any non-constant subtree yields None so we
+    never guess at runtime values."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BinOp):
+        left = _fold_node(node.left)
+        right = _fold_node(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Mod):
+                return left % right
+            if isinstance(node.op, ast.FloorDiv):
+                return left // right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.Pow):
+                # bound the exponent so a giant literal can't hang the gate
+                if isinstance(right, int) and right > 64:
+                    return None
+                return left ** right
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+    return None
+
+
+def _folded_literals(source: str) -> list[str]:
+    """F7 (panel 2026-07-09, codex P1): exact-substring decontamination is
+    trivially bypassed by splitting a literal — "19"+"32" never contains "1932".
+    Constant-fold the AST so a holdout answer assembled from string concatenation
+    or simple arithmetic is caught too. Best-effort by design (see module doc)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp):
+            folded = _fold_node(node)
+            if isinstance(folded, (str, int, float)) and not isinstance(folded, bool):
+                out.append(str(folded))
+    return out
 
 
 def _holdout_answers(holdout_tasks: Sequence[Task]) -> list[str]:
@@ -117,10 +189,20 @@ def validate_code(
     if not target.is_relative_to(root.resolve()):
         return CodeGateResult(ok=False, reason=f"code_ref {code_ref!r} escapes the ledger root")
 
-    # 1c. file exists, is a regular file, within the size cap.
+    # 1c. file exists, is a regular file, not a hard link, within the size cap.
     if not target.is_file():
         return CodeGateResult(ok=False, reason=f"code_ref {code_ref!r} is not a regular file")
-    size = target.stat().st_size
+    stat_result = target.stat()
+    # F8 (panel 2026-07-09, kimi P2): resolve()+is_relative_to() catches symlinks
+    # but NOT hard links — a link under the root to an outside inode passes
+    # containment. Refuse any file with extra links; the recorded content is still
+    # pinned by hash verification (F4) regardless, this just closes the door early.
+    if stat_result.st_nlink > 1:
+        return CodeGateResult(
+            ok=False,
+            reason=f"code_ref {code_ref!r} is a hard link (st_nlink>1) to a shared inode — refused",
+        )
+    size = stat_result.st_size
     if size > MAX_CODE_BYTES:
         return CodeGateResult(
             ok=False,
@@ -153,14 +235,28 @@ def validate_code(
         return CodeGateResult(
             ok=False, reason="code artifact defines no callable build(base) -> Runner"
         )
+    if proc.returncode == 4:
+        return CodeGateResult(
+            ok=False,
+            reason="code artifact's build(base) returned None or a non-runner (no callable run)",
+        )
+    if proc.returncode == 5:
+        tail = (proc.stderr or "").strip().splitlines()
+        why = tail[-1] if tail else "raised"
+        return CodeGateResult(ok=False, reason=f"code artifact's build(base) raised: {why}")
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()
         why = tail[-1] if tail else f"exit code {proc.returncode}"
         return CodeGateResult(ok=False, reason=f"code artifact failed to import: {why}")
 
-    # 4. decontamination — the source must not contain any holdout answer.
+    # 4. decontamination — the source must not contain any holdout answer, in raw
+    # form OR assembled by constant-folding a split literal ("19"+"32" -> "1932").
+    # Best-effort at the string/AST-literal level (see module doc); determined
+    # obfuscation (chr() chains, runtime construction) is out of scope, mitigated
+    # by held-out inspection instead.
+    folded = _folded_literals(source)
     for answer in _holdout_answers(holdout_tasks):
-        if answer in source:
+        if answer in source or any(answer in value for value in folded):
             return CodeGateResult(
                 ok=False,
                 reason=f"code artifact embeds a held-out answer ({answer!r}) — decontamination failed",

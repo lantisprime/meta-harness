@@ -83,6 +83,12 @@ class HarnessParams(BaseModel):
         """Merge a proposer delta over these params, re-validating everything.
         Raises pydantic.ValidationError on unknown knobs or out-of-bounds
         values — the caller records that as a rejected candidate."""
+        # F6 (panel 2026-07-09, opus P3+kimi): code_hash is MACHINE-MANAGED — the
+        # code gate stamps it from the validated bytes. A delta that sets it (e.g.
+        # a fresh hash with an unchanged code_ref) would skip the gate and poison
+        # dedupe, so refuse it outright (the loop turns this into a rejection).
+        if "code_hash" in delta:
+            raise ValueError("code_hash is machine-managed and cannot be set via a delta")
         return HarnessParams.model_validate({**self.model_dump(), **delta})
 
     def build(self, base: Runner, *, ledger_root: Path | None = None) -> Runner:
@@ -128,6 +134,19 @@ class HarnessParams(BaseModel):
             )
         if not target.is_file():
             raise RuntimeError(f"code_ref {self.code_ref!r} is not a file: {target}")
+        # F4 (panel 2026-07-09, codex P1 + GLM P3 + kimi P2 + opus, TOCTOU/trust):
+        # when a code_hash was recorded, the bytes on disk must still match it, or
+        # a candidate's own code (or a later round) could rewrite the file and get
+        # unscored bytes promoted/run under a stale hash. Verify before importing.
+        if self.code_hash is not None:
+            import hashlib
+
+            actual = hashlib.sha256(target.read_bytes()).hexdigest()
+            if actual != self.code_hash:
+                raise RuntimeError(
+                    f"code artifact does not match recorded hash for code_ref "
+                    f"{self.code_ref!r} (expected {self.code_hash}, got {actual})"
+                )
         spec = importlib.util.spec_from_file_location(f"metaharness_code::{target}", target)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"code_ref {self.code_ref!r} could not be loaded as a module")

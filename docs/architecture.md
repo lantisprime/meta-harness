@@ -158,9 +158,14 @@ research distilled in `memory/knowledge_base/meta-harness-optimization.md`):
   module must present the `build` contract (checked by importing in a timeout-bound
   subprocess), stay inside the ledger root, and never embed a held-out answer. Gate
   failures are recorded as rejected candidates exactly like a bad delta; a passing artifact
-  is frozen into an immutable `candidates/<cid>/harness.py` and dedup'd on `code_hash` (same
-  source at two paths is one candidate). The `CodeProposer`, CLI flag, and dashboard wiring
-  are the designed follow-on.
+  is frozen into an immutable `candidates/<cid>/harness.py` **before** it is scored, its
+  `code_hash` is taken over those canonical bytes, and `build()` re-verifies the hash on
+  every load — so what runs is exactly what is recorded and promoted, and dedup keys on
+  `code_hash` (same source at two paths is one candidate). Decontamination is **best-effort**,
+  at the string/AST-literal level: raw substrings and constant-folded split literals
+  (`"19"+"32"`) are caught, but determined obfuscation (`chr()` chains, runtime construction)
+  is out of scope — the same posture as the paper, mitigated by held-out inspection instead.
+  The `CodeProposer`, CLI flag, and dashboard wiring are the designed follow-on.
 - **Scoring** is multi-objective: pass^k against a domain suite (classification,
   extraction, math, or mixed — deliberately not SDLC-only) with token cost tracked, kept
   as a **Pareto frontier**, not a greedy incumbent. A plateau detector stops stalled

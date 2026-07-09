@@ -159,7 +159,15 @@ def _apply_promoted(runners) -> None:
     base = runners[Tier.SMALL][0]  # tuning targets the small tier's primary member
     # code-backed params resolve their artifact relative to the suite's ledger
     # root — the same dir the promoted/active params were read from.
-    wrapped = params.build(base, ledger_root=root / suite)
+    # F5 (panel 2026-07-09, opus P2): a promoted code artifact that fails to build
+    # (missing/tampered file, hash mismatch, bad build) must NOT crash serve boot —
+    # log it and serve the unwrapped worker instead.
+    try:
+        wrapped = params.build(base, ledger_root=root / suite)
+    except (RuntimeError, AttributeError, TypeError) as exc:
+        print(f"  WARNING: promoted harness config for {suite!r} failed to build "
+              f"({type(exc).__name__}: {exc}); serving the unwrapped small-tier worker")
+        return
     wrapped._tuning_base = base  # web approvals replace exactly this layer
     runners[Tier.SMALL][0] = wrapped
     defaults = HarnessParams().model_dump()
