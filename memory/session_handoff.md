@@ -1,62 +1,42 @@
-# Session Handoff — meta-harness (2026-07-09, session 8)
+# Session Handoff — meta-harness (2026-07-09, session 10)
 
-## State: 3 roadmap items SHIPPED on main + model-bench harness built. Tree clean.
-383 tests (was 331). Server :8321 restarted onto the pools build (verified via
-/api/routing: techlead-bot + pi-coder-bot both pooled on mid). Commits 911ba71→5186b2e.
+## State: next-step #1 (harvest: suites from real run journals) SHIPPED. 422 tests green.
+Commit a53494b on main (single per-concern commit). Main is now 17 commits ahead of
+origin — NOT PUSHED (push only if user asks). Tree: uncommitted `.gitignore` edit
+(episodic-memory tooling added HMAC-key ignore rules — harmless, not feature-related);
+untracked `.review-store/`, `.agents/`, `.claude/`, `uv.lock` — all tooling side-effects,
+left out deliberately.
 
-## What shipped (next-steps #1, #2, #4 + server restart)
-1. **Code-space search** (paper arXiv 2603.28052): CodeProposer runs a coding CLI
-   rooted at the ledger so it greps raw traces itself. HarnessParams.code_ref/code_hash
-   with root-bound build(base, *, ledger_root); code_gate.py (path containment, ast,
-   subprocess import probe that CALLS build(stub), AST-folded decontamination, hard-link
-   refusal); loop canonicalizes staged→candidates/<cid>/harness.py BEFORE eval, hashes
-   canonical bytes, build() re-verifies hash on every load. CLI --proposer code, web
-   proposer="code", dashboard code badge. Commits ecff506, 6f4e384, d36c71e, bb06d99.
-2. **Budget charging**: LLMProposer/CodeProposer/advise() charge WorkerResult usage;
-   loop catches BudgetExceeded→stopped="budget"; SchemaGuard accumulates retry usage;
-   HarnessState defaults a cap-less Budget (was silently None→no-op); serve --max-cost-usd
-   /--max-tokens; CodingAgentWorker estimates tokens (~4 chars/tok). Commits ae4019e, 0576fb1.
-3. **GLM F3 fixed**: CapabilityMatrix atomic save (tempfile+os.replace), guarded load
-   (corrupt→empty+last_load_error, no boot crash), _last_write advances only on success,
-   non-blocking shutdown flush via asyncio.to_thread. Commits 1db8ab0, 655c92b.
+## What shipped
+`metaharness harvest [--suite mixed|classify|extract|math] [--journals] [--root]
+[--dry-run] [--max-task-chars]`: scans run journals, reconstructs executed steps
+($context/$steps inputs resolved via dsl.resolve_reference against journaled data),
+validates checks (finite non-negative tol, single primary key, arithmetic recomputed),
+dedupes on (objective, inputs), appends to <root>/<suite>/extra_tasks.json. Idempotent,
+byte-stable, per-file corruption tolerance, exit 0=ran / 1=couldn't. New
+`optimization/harvest.py` + cli.py (`main(argv=None)` now testable) + 22 tests.
+Real corpus: 23 journals -> 6 tasks harvested.
 
-## Process (worked well — reuse)
-codex plan review (2 P1 fixed pre-build) → 3 opus build stages (frozen-diff handoffs) →
-4-seat panel (codex+opus+GLM-5.2+kimi-k2.7-code) on full diff: 9 distinct findings, 2
-convergences, ALL fixed w/ regression tests → verify: MiniMax-M3 endpoint flaked (timeouts
-+ prompt-shield per-action gate = unworkable), so orchestrator wrote its own independent
-probes /tmp/m3-verify/probe.py → 8/8 PASS. Durable: [[model-bench-harness]],
-[[agent-roster-verified-capabilities]] (11-model×3-tier matrix), openrouter-pricing KB.
+## Process (playbook v5 + session-10 delta, episode 20260709-085134)
+codex plan review (P1: check-VALUE validation) -> opus build -> 3-seat panel
+(codex+opus+kimi): 6 findings fixed w/ regression tests -> verify probe 22/22 vs real
+corpus -> fix-parity review. Gotchas learned (in episode): second-opinion.mjs dispatch
+ENOBUFS on big codex output -> fallback `codex exec ... > file`; pi llmAuto persists in
+pi's config across sessions; dialog watcher regex needs "How should Pi handle"; `pi -ne`
+good for one-shot probes; kimi seat cost $0.41 (~10x cheaper than opus seat).
 
-## Also built: ~/.model-bench/ (git repo, weekly cron Mon 09:00)
-Reusable instrumentation sweep (bin/sweep.sh) + review panel (bin/panel.sh). Model profile
-matrix: deepseek-v4-flash fastest all tiers; GLM-5.2/kimi deep-review seats; qwen3.7-plus
-clean; M3 behavioral-verify only (slow, flaky); gemma-4-31b best US/EU; fast tier
-hallucinates asyncio races. Re-run when >30 days stale.
-
-## Known issues (deferred)
-- Budget.max_wall_s configured but never enforced (pre-existing; 4 models spotted it).
-- Decontamination is best-effort (string+AST-literal); chr()/runtime obfuscation out of
-  scope, mitigated by held-out inspection (documented in code + architecture.md §3.9).
-- No coding-CLI adapter surfaces real token usage → CodeProposer charges estimates.
-
-## Late-session addendum: pi-driver classifier fix (memory-only, no repo change)
-Diagnosed why a sibling Claude session "couldn't launch the pi driver": the Claude Code
-auto-mode CLASSIFIER denies `--permission-mode auto` in the send-keys string at LAUNCH
-("Create Unsafe Agents"). Proven fix (tested live): launch pi in DEFAULT mode (no auto
-flag) + answer each dialog "Allow once" (bare Enter on highlighted default); pin tmux
-socket with `-L <name>`; add `set -g extended-keys-format csi-u` to ~/.tmux.conf. Bigger
-lesson: when a CLI seat is classifier-blocked, DELEGATE to a Claude Agent subagent — do
-NOT fall back to solo-coding. Updated [[agent-roster-verified-capabilities]] recipe +
-revised global playbook episode 20260709-044122 (v4, supersedes 032537). Optional TODO:
-draft settings.json allowlist for codex-drive/pi-drive control-file reads.
+## Issues filed
+- #7 extra_tasks.json cross-writer locking (harvest re-read-before-save mitigation
+  shipped; coverage endpoint side untouched)
+- #8 coverage endpoint lacks harvest's check-value hardening (fix-parity find: accepts
+  tol=inf, only catches SandboxError)
+Open from before: #1 exec-verification, #2 coding-CLI timeout/UI, #4 server-side action
+enforcement, #5 budget charge-before-error, #6 playbook determinism.
 
 ## Next steps (priority order)
-1. Advisor placements (was #3; mockup artifact 28edffa2 — fetch from artifact gallery,
-   not in-repo). Only goal+tuning wired; /api/routing, /api/failures, /api/playbook unadvised.
-2. Suites from real run journals (was #5): 24 journals in ~/.metaharness/journals/;
-   extract (context, output, verdict) → Task into suites' extra_tasks.json format.
-3. Charge real coding-CLI token usage once an adapter exposes it (replace estimate).
-4. Enforce Budget.max_wall_s. Carried: Issues #1/#2, gemma-vs-qwen eval.
+1. Advisor issues #4 (server-side enforcement), #5, #6.
+2. #8 shared check-value validation (small, well-specified — good warm-up).
+3. Charge real coding-CLI token usage; enforce Budget.max_wall_s.
+4. Push main to origin if desired (17 ahead).
 
 Reset context now.
