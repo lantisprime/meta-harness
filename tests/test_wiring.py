@@ -258,6 +258,33 @@ async def test_default_state_budget_accumulates_through_real_boot(tmp_path):
     assert state.budget.spent_tokens > before  # a tuning run charged it too
 
 
+def test_matrix_json_exists_and_torn_load_surfaces_after_enable_persistence(tmp_path):
+    """probe reviews 2026-07-09 (deepseek/GLM): enable_persistence forces an initial
+    durable write so matrix.json exists from wiring time, and a torn matrix.json at
+    boot starts empty + surfaces the error via health() without crashing — even
+    after the clean rewrite."""
+    from metaharness.routing import CapabilityMatrix
+
+    # fresh boot: matrix.json exists right after enable_persistence
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    state = HarnessState()
+    state.enable_persistence(fresh)
+    assert (fresh / "matrix.json").is_file()
+    assert state.matrix.health()["last_persist_error"] is None
+
+    # torn boot: a corrupt matrix.json must not crash enable_persistence
+    torn = tmp_path / "torn"
+    torn.mkdir()
+    (torn / "matrix.json").write_text('{"mock-small": {"clas', encoding="utf-8")
+    state2 = HarnessState()
+    state2.enable_persistence(torn)                               # must not raise
+    assert state2.matrix.as_dict() == {}                         # started empty
+    assert "load failed" in (state2.matrix.health()["last_persist_error"] or "")
+    assert (torn / "matrix.json").is_file()                      # rewritten clean
+    assert CapabilityMatrix.load(torn / "matrix.json").as_dict() == {}  # clean next boot
+
+
 # -- wire: durable config agents + tool registry reach the executor path ----------
 
 

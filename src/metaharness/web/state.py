@@ -104,7 +104,11 @@ class HarnessState:
             if self.router is not None:
                 self.router.matrix = loaded
         self.matrix.persist_path = matrix_path
-        self.matrix.flush()  # initial durable write of any pending in-memory state
+        # F9d (probe reviews 2026-07-09, deepseek): force an unconditional initial
+        # write so matrix.json exists (and is well-formed) from wiring time — a
+        # plain flush() was a no-op on a fresh/loaded, not-yet-dirty matrix. A torn
+        # load rewrites a clean file here but its error stays visible via health().
+        self.matrix.flush(force=True)
 
         stats_path = directory / "failures.json"
         if stats_path.exists():

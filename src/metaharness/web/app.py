@@ -129,8 +129,11 @@ def create_app(state: HarnessState) -> FastAPI:
     async def _flush_persistent_state() -> None:
         """Force any debounced capability-matrix observations out to disk on a
         clean shutdown — the routing evidence earned in the run's final second
-        must survive the restart, not sit unpersisted behind the debounce."""
-        state.matrix.flush()
+        must survive the restart, not sit unpersisted behind the debounce.
+
+        F9e (probe reviews 2026-07-09, M2.7): flush() does blocking disk I/O, so it
+        runs in a worker thread rather than stalling the event loop during shutdown."""
+        await asyncio.to_thread(state.matrix.flush)
 
     @app.on_event("startup")
     async def _resume_interrupted_runs() -> None:

@@ -157,6 +157,49 @@ def test_matrix_debounces_writes_and_flush_forces_pending(tmp_path, monkeypatch)
     assert len(writes) == 2
 
 
+def test_matrix_load_tolerates_torn_file(tmp_path):
+    """probe reviews 2026-07-09 (GLM/deepseek): a torn/corrupt matrix.json must not
+    crash load() — JSONDecodeError is a ValueError, not an OSError. Start empty,
+    surface the error via health(), never raise."""
+    path = tmp_path / "matrix.json"
+    path.write_text('{"mock-small": {"classi', encoding="utf-8")   # truncated mid-write
+    matrix = CapabilityMatrix.load(path)                           # must not raise
+    assert matrix.samples("mock-small", TaskType.CLASSIFY) == 0    # started empty
+    assert "load failed" in (matrix.health()["last_persist_error"] or "")
+
+
+def test_matrix_failed_write_recovers_on_next_record_without_debounce_suppression(
+    tmp_path, monkeypatch
+):
+    """probe reviews 2026-07-09 (kimi): a failed write must NOT advance the debounce
+    clock, so the very next observation retries immediately instead of being
+    suppressed for a full interval. The write is also atomic (temp + os.replace)."""
+    import pathlib
+
+    path = tmp_path / "matrix.json"
+    matrix = CapabilityMatrix(persist_path=path, persist_min_interval_s=1000.0)
+
+    calls = {"n": 0}
+    real = pathlib.Path.write_text
+
+    def flaky(self, data, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk full")                  # first write fails
+        return real(self, data, *a, **k)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", flaky)
+    matrix.record("m", TaskType.CLASSIFY, passed=True)  # attempt 1 fails
+    assert not path.exists()
+    assert matrix.last_persist_error is not None
+    # the NEXT record retries immediately despite the huge debounce interval,
+    # because the failed write never advanced the last-write clock
+    matrix.record("m", TaskType.CLASSIFY, passed=False)
+    assert path.exists()
+    assert matrix.last_persist_error is None            # recovered
+    assert CapabilityMatrix.load(path).samples("m", TaskType.CLASSIFY) == 2
+
+
 # -- per-tier pools: within-tier member selection ----------------------------------
 
 

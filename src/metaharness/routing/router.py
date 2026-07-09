@@ -71,10 +71,18 @@ class CapabilityMatrix:
         self.smoothing = smoothing
         self.persist_path = persist_path
         self.persist_min_interval_s = persist_min_interval_s
-        # populated when the most recent write failed; a later success clears it
+        # populated when the most recent write failed; a later success clears it.
+        # `last_persist_error` carries a timestamp for display; `_last_persist_error_msg`
+        # is the bare error string, compared for log-dedup (probe reviews 2026-07-09,
+        # kimi: parsing a timestamped string with endswith is fragile).
         self.last_persist_error: Optional[str] = None
+        self._last_persist_error_msg: Optional[str] = None
+        # a torn/corrupt file at load time is a separate signal from a write
+        # failure — it must survive the successful initial rewrite so health()
+        # still reports it (probe reviews 2026-07-09, GLM/M2.7).
+        self.last_load_error: Optional[str] = None
         self._dirty = False
-        self._last_write: Optional[float] = None  # monotonic clock of last write attempt
+        self._last_write: Optional[float] = None  # monotonic clock of last SUCCESSFUL write
 
     def record(self, model: str, task_type: TaskType, passed: bool) -> None:
         cell = self._stats.setdefault((model, task_type), [0, 0])
@@ -89,38 +97,67 @@ class CapabilityMatrix:
         ):
             self.save(self.persist_path)
 
-    def flush(self) -> None:
+    def flush(self, force: bool = False) -> None:
         """Force any pending observation to disk now. Best-effort like save();
-        callers use it where durability matters (initial wiring, shutdown)."""
-        if self.persist_path is not None and self._dirty:
+        callers use it where durability matters (shutdown). `force=True` writes
+        even when nothing is dirty — used at initial wiring so matrix.json exists
+        from that moment (probe reviews 2026-07-09, deepseek: the plain flush was a
+        no-op on a fresh/loaded matrix, so the claimed initial durable write never
+        happened)."""
+        if self.persist_path is not None and (self._dirty or force):
             self.save(self.persist_path)
 
     def save(self, path) -> None:
         import json
+        import os
+        import tempfile
         from pathlib import Path
 
-        self._last_write = time.monotonic()
         data: dict[str, dict[str, list[int]]] = {}
         for (model, task_type), cell in self._stats.items():
             data.setdefault(model, {})[task_type.value] = list(cell)
+        payload = json.dumps(data, indent=1, sort_keys=True)
+        target = Path(path)
+        # atomic write: a sibling temp file renamed over the target, so a crash
+        # mid-write never leaves a torn matrix.json that would crash the next
+        # load() (probe reviews 2026-07-09, GLM/kimi: write_text truncates in place).
+        tmp_path: Optional[Path] = None
         try:
-            Path(path).write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(target.parent), prefix=".matrix.", suffix=".tmp"
+            )
+            os.close(fd)
+            tmp_path = Path(tmp_name)
+            tmp_path.write_text(payload, encoding="utf-8")
+            os.replace(tmp_path, target)
         except OSError as exc:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             # never crash a run on a persistence failure; warn once per distinct
-            # error string so a broken disk doesn't spam the log per observation
+            # error string (compared on the bare msg, not a timestamped prefix)
             msg = str(exc)
-            if self.last_persist_error is None or not self.last_persist_error.endswith(msg):
-                _log.warning("capability matrix could not persist to %s: %s", path, exc)
+            if self._last_persist_error_msg != msg:
+                _log.warning("capability matrix could not persist to %s: %s", target, exc)
+            self._last_persist_error_msg = msg
             from metaharness.core.types import now
             self.last_persist_error = f"{now():.0f}: {msg}"
+            # a failed write leaves _dirty set and does NOT advance _last_write, so
+            # the next observation retries immediately instead of being suppressed
+            # for a whole debounce interval (probe reviews 2026-07-09, kimi).
             return
+        self._last_write = time.monotonic()
         self.last_persist_error = None
+        self._last_persist_error_msg = None
         self._dirty = False
 
     def health(self) -> dict[str, Optional[str]]:
-        """Persistence health for the dashboard/API: the last write error (with
-        its timestamp) or None when the most recent write succeeded."""
-        return {"last_persist_error": self.last_persist_error}
+        """Persistence health for the dashboard/API: the last write/load error
+        (with its timestamp) or None when the most recent write succeeded. A torn
+        load at boot is reported even after the successful initial rewrite."""
+        return {"last_persist_error": self.last_load_error or self.last_persist_error}
 
     @classmethod
     def load(cls, path, smoothing: float = 4.0) -> "CapabilityMatrix":
@@ -128,9 +165,21 @@ class CapabilityMatrix:
         from pathlib import Path
 
         matrix = cls(smoothing=smoothing)
-        for model, cells in json.loads(Path(path).read_text(encoding="utf-8")).items():
-            for task_type, (passed, total) in cells.items():
-                matrix._stats[(model, TaskType(task_type))] = [int(passed), int(total)]
+        try:
+            parsed = json.loads(Path(path).read_text(encoding="utf-8"))
+            for model, cells in parsed.items():
+                for task_type, (passed, total) in cells.items():
+                    matrix._stats[(model, TaskType(task_type))] = [int(passed), int(total)]
+        except (OSError, ValueError, TypeError) as exc:
+            # a corrupt/torn matrix.json must not crash enable_persistence at boot
+            # — start empty and surface the error via health(), never raise
+            # (probe reviews 2026-07-09, GLM: JSONDecodeError is a ValueError, not
+            # an OSError). Any partial stats gathered before the error are dropped.
+            matrix._stats.clear()
+            _log.warning("capability matrix could not load from %s: %s; starting empty",
+                         path, exc)
+            from metaharness.core.types import now
+            matrix.last_load_error = f"{now():.0f}: load failed: {exc}"
         return matrix
 
     def samples(self, model: str, task_type: TaskType) -> int:
