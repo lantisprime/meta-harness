@@ -113,6 +113,48 @@ async def test_workers_provenance_matrix_endpoints(client):
     assert (await client.get("/api/playbook")).status_code == 200
 
 
+async def test_routing_endpoint_exposes_pools_skills_and_tallies(tmp_path):
+    """GET /api/routing lists each tier's pool members in configured order, each
+    member's model-slice of the capability matrix, and routed-to counts once
+    traffic has landed."""
+    from metaharness.core.types import Task
+
+    state = HarnessState()
+    kp_a, kp_b = KeyPair.generate(), KeyPair.generate()
+    a = MockLLMWorker("mid-a", Tier.MID, model="model-a", keypair=kp_a, seed=1)
+    b = MockLLMWorker("mid-b", Tier.MID, model="model-b", keypair=kp_b, seed=2)
+    state.register_worker(a, kp_a, tiers=["mid"])
+    state.register_worker(b, kp_b, tiers=["mid"])
+    state.wire({Tier.MID: [a, b]}, journal_dir=tmp_path)
+
+    # give model-a evidence so it wins the slot, then route deterministic
+    # (unverifiable → no ε-exploration) traffic to it
+    for _ in range(6):
+        state.matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    for _ in range(3):
+        state.router.decide(Task(task_type=TaskType.CLASSIFY))
+
+    app = create_app(state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        routing = (await c.get("/api/routing")).json()
+
+    assert set(routing) == {"mid"}
+    mid = routing["mid"]
+    # members preserve configured order
+    assert [m["worker_id"] for m in mid["members"]] == ["mid-a", "mid-b"]
+    member_a = mid["members"][0]
+    assert member_a["model"] == "model-a"
+    assert member_a["display_name"] == "model-a"  # from the registry record
+    # skills = that member's model slice of the matrix
+    assert member_a["skills"]["classify"] == {"pass_rate": 1.0, "samples": 6}
+    # a benched member with no evidence has an empty slice, never missing
+    assert mid["members"][1]["skills"] == {}
+    # routed tallies present, landing on the evidence-backed member
+    assert mid["routed"]["mid-a"] == 3
+    assert "mid-b" not in mid["routed"]
+
+
 async def test_unknown_run_404(client):
     assert (await client.get("/api/runs/run_nope")).status_code == 404
 
@@ -205,11 +247,11 @@ async def test_tuning_start_approve_and_hot_swap(wired_state, tmp_path):
             assert (await c.post("/api/optimization/math/approval", json={"approved": True})).status_code == 409
             return
 
-        before = wired_state.router.runners[Tier.SMALL]
+        before = wired_state.router.pools[Tier.SMALL][0]
         resp = await c.post("/api/optimization/math/approval", json={"approved": True})
         assert resp.json()["applied_live"] is True
         assert ledger.promoted_params() is not None
-        assert wired_state.router.runners[Tier.SMALL] is not before
+        assert wired_state.router.pools[Tier.SMALL][0] is not before
         assert (await c.post("/api/optimization/math/approval", json={"approved": True})).status_code == 409
 
 
@@ -265,7 +307,7 @@ async def test_approval_preserves_user_wrappers_and_writes_active(wired_state, t
     from tests.test_optimization import evaluated_candidate
 
     # simulate `serve --critique`: the live runner is critique-wrapped
-    wired_state.router.runners[Tier.SMALL] = SelfCritique(wired_state.router.runners[Tier.SMALL])
+    wired_state.router.pools[Tier.SMALL][0] = SelfCritique(wired_state.router.pools[Tier.SMALL][0])
     wired_state.optimization_root = tmp_path / "optimization"
     ledger = CandidateLedger(tmp_path / "optimization" / "math")
     ledger.record(evaluated_candidate("c0001", 0.4, 100))
@@ -278,7 +320,7 @@ async def test_approval_preserves_user_wrappers_and_writes_active(wired_state, t
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         assert (await c.post("/api/optimization/math/approval", json={"approved": True})).json()["applied_live"]
 
-    chain, r = [], wired_state.router.runners[Tier.SMALL]
+    chain, r = [], wired_state.router.pools[Tier.SMALL][0]
     while r is not None:
         chain.append(type(r).__name__)
         r = getattr(r, "inner", None)
@@ -294,7 +336,7 @@ async def test_approval_preserves_user_wrappers_and_writes_active(wired_state, t
     ledger.save_pending("c0003", {"go": True, "overall_incumbent": 0.4, "overall_candidate": 0.95})
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         await c.post("/api/optimization/math/approval", json={"approved": True})
-    chain, r = [], wired_state.router.runners[Tier.SMALL]
+    chain, r = [], wired_state.router.pools[Tier.SMALL][0]
     while r is not None:
         chain.append(type(r).__name__)
         r = getattr(r, "inner", None)
@@ -353,7 +395,7 @@ async def test_coverage_extends_suite_with_validated_questions(wired_state, tmp_
                                 model="gen", output=generated, raw_text=json.dumps(generated))
 
     wired_state.optimization_root = tmp_path / "optimization"
-    wired_state.router.runners[Tier.SMALL] = Generator()  # planner_runner picks it up
+    wired_state.router.pools[Tier.SMALL][0] = Generator()  # planner_runner picks it up
     app = create_app(wired_state)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

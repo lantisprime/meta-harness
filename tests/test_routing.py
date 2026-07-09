@@ -7,7 +7,7 @@ import pytest
 from metaharness.core.budget import Budget
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.harness import MockLLMWorker
-from metaharness.routing import CapabilityMatrix, Router
+from metaharness.routing import DEFAULT_PRIORS, CapabilityMatrix, Router, RoutingDecision
 
 
 def make_router(threshold: float = 0.7, matrix: CapabilityMatrix | None = None) -> Router:
@@ -103,3 +103,161 @@ def test_matrix_as_dict_shape():
     d = matrix.as_dict()
     cell = d["mock-small"]["classify"]
     assert cell["samples"] == 2 and cell["pass_rate"] == 0.5
+
+
+# -- per-tier pools: within-tier member selection ----------------------------------
+
+
+class _StubRng:
+    """A random() that always returns a fixed value — makes ε-exploration
+    deterministic (0.0 forces it, 1.0 forbids it)."""
+
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def random(self) -> float:
+        return self.value
+
+
+def mid_pool_router(matrix: CapabilityMatrix | None = None, **kw) -> Router:
+    """One MID tier with two members, distinct model strings so the matrix can
+    hold separate evidence for each. Configured order: member-a then member-b."""
+    return Router(
+        {Tier.MID: [
+            MockLLMWorker("mid-a", Tier.MID, model="model-a"),
+            MockLLMWorker("mid-b", Tier.MID, model="model-b"),
+        ]},
+        matrix=matrix, **kw,
+    )
+
+
+def verifiable(**kw) -> Task:
+    return Task(task_type=TaskType.CLASSIFY, success_check={"equals": "x"}, **kw)
+
+
+def test_best_member_wins_the_slot_on_evidence():
+    """Two members share a tier; observed pass rate decides which one serves."""
+    matrix = CapabilityMatrix(smoothing=2.0)
+    for _ in range(20):
+        matrix.record("model-b", TaskType.CLASSIFY, passed=True)
+        matrix.record("model-a", TaskType.CLASSIFY, passed=False)
+    router = mid_pool_router(matrix=matrix)
+    decision = router.decide(Task(task_type=TaskType.CLASSIFY))
+    assert decision.tier == Tier.MID and decision.worker_id == "mid-b"
+    assert decision.explored is False
+
+
+def test_cold_start_picks_configured_first_member():
+    """No evidence -> both members tie on the prior -> earliest configured wins."""
+    router = mid_pool_router()
+    decision = router.decide(Task(task_type=TaskType.CLASSIFY))
+    assert decision.worker_id == "mid-a"
+
+
+def test_exploration_picks_least_sampled_non_best_on_verifiable_task():
+    """ε fires on a verifiable task: route to the benched, least-sampled member
+    so it earns evidence instead of the incumbent taking every task."""
+    matrix = CapabilityMatrix(smoothing=2.0)
+    for _ in range(30):  # mid-a is the well-sampled incumbent/best
+        matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    router = mid_pool_router(matrix=matrix, explore_rate=0.1, rng=_StubRng(0.0))
+    decision = router.decide(verifiable())
+    assert decision.worker_id == "mid-b" and decision.explored is True
+    assert "exploring mid-b" in decision.reason
+
+
+def test_exploration_never_fires_on_unverifiable_task():
+    """No checkable signal -> no evidence to earn -> never explore, even with
+    rng forcing it."""
+    matrix = CapabilityMatrix(smoothing=2.0)
+    for _ in range(30):
+        matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    router = mid_pool_router(matrix=matrix, explore_rate=0.1, rng=_StubRng(0.0))
+    decision = router.decide(Task(task_type=TaskType.CLASSIFY))  # no success_check
+    assert decision.worker_id == "mid-a" and decision.explored is False
+
+
+def test_exploration_never_fires_on_schema_only_task():
+    """An output_schema alone can produce FAIL or UNVERIFIED but never PASS
+    (deterministic verifier), so exploring there would only bank downside
+    evidence against the benched member — the gate must not fire."""
+    router = mid_pool_router(explore_rate=0.1, rng=_StubRng(0.0))
+    task = Task(task_type=TaskType.CLASSIFY,
+                output_schema={"type": "object"})  # no success_check
+    decision = router.decide(task)
+    assert decision.worker_id == "mid-a" and decision.explored is False
+
+
+def test_duplicate_member_object_never_breaks_exploration():
+    """The same runner OBJECT pooled twice leaves no 'other' member to explore;
+    decide() must fall back to the best pick instead of min() over nothing."""
+    w = MockLLMWorker("mid-a", Tier.MID, model="model-a")
+    router = Router({Tier.MID: [w, w]}, explore_rate=1.0, rng=_StubRng(0.0))
+    decision = router.decide(verifiable())
+    assert decision.worker_id == "mid-a" and decision.explored is False
+
+
+def test_explored_decision_reports_served_members_rate():
+    """The tier is chosen on its best member's rate, but the decision must
+    describe the member actually served — an explored decision carries the
+    benched member's own (lower-confidence) rate and samples."""
+    matrix = CapabilityMatrix(smoothing=2.0)
+    for _ in range(30):
+        matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    router = mid_pool_router(matrix=matrix, explore_rate=0.1, rng=_StubRng(0.0))
+    decision = router.decide(verifiable())
+    prior = DEFAULT_PRIORS[Tier.MID][TaskType.CLASSIFY]
+    assert decision.explored and decision.worker_id == "mid-b"
+    assert decision.expected_pass_rate == matrix.pass_rate("model-b", TaskType.CLASSIFY, prior=prior)
+    assert decision.expected_pass_rate != matrix.pass_rate("model-a", TaskType.CLASSIFY, prior=prior)
+    assert "samples=0" in decision.reason  # the SERVED member's samples, not the best's
+
+
+def test_unexplored_decision_reports_best_members_rate():
+    """Without exploration the served member IS the best one, so the reported
+    rate coincides with the tier ceiling used for tier selection."""
+    matrix = CapabilityMatrix(smoothing=2.0)
+    for _ in range(30):
+        matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    router = mid_pool_router(matrix=matrix, rng=_StubRng(1.0))
+    decision = router.decide(verifiable())
+    prior = DEFAULT_PRIORS[Tier.MID][TaskType.CLASSIFY]
+    assert decision.worker_id == "mid-a" and not decision.explored
+    assert decision.expected_pass_rate == matrix.pass_rate("model-a", TaskType.CLASSIFY, prior=prior)
+    assert decision.expected_pass_rate == router.expected_pass_rate(Tier.MID, TaskType.CLASSIFY)
+
+
+def test_runner_for_resolves_decided_member():
+    router = mid_pool_router()
+    decision = router.decide(Task(task_type=TaskType.CLASSIFY))
+    assert router.runner_for(decision).worker_id == decision.worker_id
+    # an unknown worker_id falls back to the tier pool's first member
+    decision.worker_id = "ghost"
+    assert router.runner_for(decision).worker_id == "mid-a"
+
+
+def test_runner_for_empty_tier_raises():
+    """A decision naming a tier no pool serves is a wiring error, not an
+    IndexError deep in the executor."""
+    router = mid_pool_router()
+    decision = RoutingDecision(tier=Tier.FRONTIER, worker_id="ghost", model="",
+                               expected_pass_rate=0.0, reason="")
+    with pytest.raises(ValueError, match="no pool serves tier frontier"):
+        router.runner_for(decision)
+
+
+def test_next_tier_skips_empty_pool():
+    router = Router({
+        Tier.SMALL: [MockLLMWorker("w-small", Tier.SMALL)],
+        Tier.MID: [],  # empty pool is dropped at construction
+        Tier.FRONTIER: [MockLLMWorker("w-front", Tier.FRONTIER)],
+    })
+    assert Tier.MID not in router.pools
+    assert router.next_tier(Tier.SMALL) == Tier.FRONTIER
+
+
+def test_route_evidence_counts_increment_on_decide():
+    router = mid_pool_router()
+    router.decide(Task(task_type=TaskType.CLASSIFY))
+    router.decide(Task(task_type=TaskType.CLASSIFY))
+    assert router.route_evidence() == {"mid": {"mid-a": 2}}

@@ -118,24 +118,29 @@ class HarnessState:
             display_name=runner.model, tiers=tiers, task_types=task_types or [],
         )
 
-    def wire(self, runners: dict[Tier, Runner], journal_dir=None, threshold: float = 0.7,
-             judge: bool = True) -> None:
-        """Build router → executor → engine from a set of runners.
+    def wire(self, runners: "dict[Tier, Runner | list[Runner]]", journal_dir=None,
+             threshold: float = 0.7, judge: bool = True) -> None:
+        """Build router → executor → engine from per-tier runner pools (a bare
+        Runner value is normalized to a one-member pool by the Router).
 
         judge=True (default) grades every UNVERIFIED step output with the most
         capable wired runner before dependents consume it (rubric-judge slot of
         the verifier hierarchy). The judge call runs in a fresh context with
         external-role framing; when the same model serves generator and judge
         tiers the decorrelation is contextual, not model-level."""
-        for runner in runners.values():
-            self.attach_tools(runner)
-        self.router = Router(runners, matrix=self.matrix, threshold=threshold)
+        explore_rate = float(self.config.settings.get("explore_rate", 0.1))
+        self.router = Router(runners, matrix=self.matrix, threshold=threshold,
+                             explore_rate=explore_rate)
+        for members in self.router.pools.values():
+            for runner in members:
+                self.attach_tools(runner)
         judge_fn = None
-        if judge and runners:
+        if judge and self.router.pools:
             from metaharness.evals.judge import make_judge
             for tier in (Tier.FRONTIER, Tier.MID, Tier.SMALL):
-                if tier in runners:
-                    judge_fn = make_judge(runners[tier])
+                members = self.router.pool(tier)
+                if members:
+                    judge_fn = make_judge(members[0])
                     break
         self.executor = TaskExecutor(
             self.router,
@@ -163,22 +168,35 @@ class HarnessState:
         if self.router is None:
             raise RuntimeError("harness not wired")
         for tier in (Tier.FRONTIER, Tier.MID, Tier.SMALL):
-            if tier in self.router.runners:
-                return self.router.runners[tier]
+            members = self.router.pool(tier)
+            if members:
+                return members[0]
         raise RuntimeError("no runners wired")
 
     def add_worker(self, runner: Runner, tier: Tier) -> None:
-        """Admit a new worker at runtime and route the tier's traffic to it.
+        """Admit a new worker at runtime and add it to the tier's routing pool.
 
         The harness generates and holds the worker's keypair (in-process workers
         share the harness's trust boundary; a remote worker would bring its own
-        public key instead). One runner per tier — adding to an occupied tier
-        replaces the routing slot; the old identity stays registered."""
+        public key instead). The runner joins the tier's pool (created if empty).
+        Re-adding a live worker_id rotates its identity — the old record is
+        deactivated first, and the registry counts the rotation in the audit
+        trail — and replaces the pool member in place, keeping its position."""
         if self.router is None:
             raise RuntimeError("harness not wired — call wire() first")
         keypair = getattr(runner, "keypair", None)
         if keypair is None:
             raise ValueError("runner needs a keypair to sign its results")
+        existing = self.registry.get(runner.worker_id)
+        if existing is not None and existing.active:
+            # begin_registration refuses live ids; retiring first turns the
+            # re-add into the registry's sanctioned key-rotation path
+            self.registry.deactivate(runner.worker_id)
         self.register_worker(runner, keypair, tiers=[tier.value])
         self.attach_tools(runner)
-        self.router.runners[tier] = runner
+        pool = self.router.pools.setdefault(tier, [])
+        for i, member in enumerate(pool):
+            if member.worker_id == runner.worker_id:
+                pool[i] = runner
+                return
+        pool.append(runner)

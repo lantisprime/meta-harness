@@ -232,6 +232,9 @@ tr:last-child td{border-bottom:0}
   letter-spacing:.05em;width:76px;color:var(--mut)}
 .tierrow .tm{font-weight:600;font-size:13.5px}
 .tierrow .td{color:var(--mut2);font-size:12px}
+.tierrow .poolmember{padding:4px 0}
+.tierrow .poolmember + .poolmember{border-top:1px solid var(--hair)}
+.tierrow .poolmember .badge{margin-left:6px}
 
 .planstep{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--hair)}
 .planstep:last-child{border-bottom:0}
@@ -752,17 +755,28 @@ function setStep(n){
 async function renderAgentsStep(){
   const body = document.getElementById('wiz-body');
   body.innerHTML = '<div class="card"><div class="empty">loading agents…</div></div>';
-  const workers = await get('/api/workers');
-  const agents = workers.filter(w => w.worker_id !== 'orchestrator' && w.active);
-  const byTier = {};
-  agents.forEach(w => (w.tiers || []).forEach(t => { byTier[t] = w; }));
+  const [workers, routing] = await Promise.all([get('/api/workers'), get('/api/routing')]);
+  let anyMember = false;
   const tiers = ['small','mid','frontier'].map(t => {
-    const w = byTier[t];
+    const pool = routing[t] || {};
+    const members = pool.members || [];
+    const routed = pool.routed || {};
+    if(members.length) anyMember = true;
+    // leader = the pool member the most traffic has actually landed on
+    let leader = null, leadN = 0;
+    members.forEach(m => { const n = routed[m.worker_id] || 0; if(n > leadN){ leadN = n; leader = m.worker_id; } });
+    const rows = members.length
+      ? members.map(m => {
+          const n = routed[m.worker_id] || 0;
+          return `<div class="poolmember"><div class="tm">${esc(m.display_name)}${
+            n ? badge('dim','routed ' + n + '×') : ''}${
+            leader === m.worker_id ? badge('act','routing here') : ''}</div>
+            <div class="td mono">${esc(m.worker_id)} · ${esc(m.model)}</div></div>`;
+        }).join('')
+      : '<div class="td">no agent — this tier can\\'t take work</div>';
     return `<div class="tierrow"><div class="tn">${t}</div>
-      <div style="flex:1">${w
-        ? `<div class="tm">${esc(w.display_name)}</div><div class="td mono">${esc(w.worker_id)} · key ${esc(w.public_key_b64.slice(0,12))}…</div>`
-        : '<div class="td">no agent — this tier can\\'t take work</div>'}</div>
-      ${w ? badge('ok','ready') : badge('dim','empty')}</div>`;
+      <div style="flex:1">${rows}</div>
+      ${members.length ? badge('ok','ready') : badge('dim','empty')}</div>`;
   }).join('');
   body.innerHTML = `
     <div class="guide"><div><b>Agents do the work; tiers set the cost ladder.</b>
@@ -773,7 +787,7 @@ async function renderAgentsStep(){
         <button class="btn ghost" onclick="openAgentWizard()">+ Add an agent</button>
         <button class="btn ghost" onclick="showView('settings')">Open Settings</button></div></div>
     <div class="wiz-nav"><span></span>
-      <button class="btn" ${Object.keys(byTier).length ? '' : 'disabled'} onclick="setStep(1)">Continue →</button></div>`;
+      <button class="btn" ${anyMember ? '' : 'disabled'} onclick="setStep(1)">Continue →</button></div>`;
 }
 
 function openAgentWizard(prefill){
@@ -1522,16 +1536,36 @@ document.getElementById('view-console').addEventListener('click', ev => {
   refreshConsole();
 });
 
-function renderWorkers(ws){
+/* Flatten /api/routing into per-worker and per-model lookups for the console. */
+function routingIndex(routing){
+  const byWorker = {}, byModel = {};
+  Object.entries(routing || {}).forEach(([tier, pool]) => {
+    const routed = (pool && pool.routed) || {};
+    ((pool && pool.members) || []).forEach(m => {
+      const n = routed[m.worker_id] || 0;
+      byWorker[m.worker_id] = {tier, routed: n};
+      const bm = byModel[m.model] || (byModel[m.model] = {tier, routed: 0});
+      bm.routed += n;
+    });
+  });
+  return {byWorker, byModel};
+}
+
+function renderWorkers(ws, routing){
   if(!ws.length) return '<div class="empty">no agents yet — add one in Settings</div>';
-  return paginate('workers', ws, rows => rows.map(w => `
+  const rIdx = routingIndex(routing);
+  return paginate('workers', ws, rows => rows.map(w => {
+    const rr = rIdx.byWorker[w.worker_id];
+    return `
     <div class="lrow">
       <div class="rr-main">
         <div class="rr-title" style="white-space:normal">${esc(w.display_name)}
-          ${(w.tiers||[]).map(t => badge('act', t + ' tier')).join(' ')}</div>
+          ${(w.tiers||[]).map(t => badge('act', t + ' tier')).join(' ')}${
+          rr && rr.routed ? ' ' + badge('dim', 'routed ' + rr.routed + '×') : ''}</div>
         <div class="rr-meta">${esc(w.worker_id)} · identity key ${esc(w.public_key_b64.slice(0,10))}…${
           w.key_rotations ? ` · key rotated ×${w.key_rotations}` : ''}</div></div>
-      ${badge(w.active ? 'ok' : 'dim', w.active ? 'ready' : 'retired')}</div>`).join(''));
+      ${badge(w.active ? 'ok' : 'dim', w.active ? 'ready' : 'retired')}</div>`;
+  }).join(''));
 }
 
 const actionPlain = a => String(a || '').replace(/[._]/g, ' ');
@@ -1551,16 +1585,20 @@ function renderProvenance(p){
 
 const taskPlain = t => String(t || '').replace(/[._-]/g, ' ');
 
-function renderMatrix(m){
+function renderMatrix(m, routing){
   const models = Object.keys(m);
   if(!models.length) return '<div class="empty">nothing observed yet — the harness learns who’s good at what as runs finish</div>';
+  const rIdx = routingIndex(routing);
   return paginate('matrix', models, ms => ms.map(model => {
     const rows = Object.entries(m[model]).map(([t, c]) =>
       `<tr><td class="small">${esc(taskPlain(t))}</td>
        <td><span class="bar-h" style="width:${Math.round(c.pass_rate*110)}px"></span>
        <span class="mono small">${(c.pass_rate*100).toFixed(0)}%</span></td>
        <td class="small faint">${c.samples === 1 ? 'from 1 try' : `from ${c.samples} tries`}</td></tr>`).join('');
-    return `<div class="small" style="margin:8px 0 4px"><b>${esc(model)}</b></div><table>${rows}</table>`;
+    const rm = rIdx.byModel[model];
+    const pool = rm ? `<span class="faint small" style="margin-left:8px">${esc(rm.tier)} pool${
+      rm.routed ? ' · routed ' + rm.routed + '×' : ''}</span>` : '';
+    return `<div class="small" style="margin:8px 0 4px"><b>${esc(model)}</b>${pool}</div><table>${rows}</table>`;
   }).join(''), {size: 3});
 }
 
@@ -1810,16 +1848,16 @@ function renderSpans(spans){
 
 async function refreshConsole(){
   try{
-    const [runs, workers, prov, matrix, playbook, failures, spans, tuning] = await Promise.all([
+    const [runs, workers, prov, matrix, playbook, failures, spans, tuning, routing] = await Promise.all([
       get('/api/runs'), get('/api/workers'), get('/api/provenance'),
       get('/api/matrix'), get('/api/playbook'), get('/api/failures'), get('/api/spans'),
-      get('/api/optimization'),
+      get('/api/optimization'), get('/api/routing'),
     ]);
     document.getElementById('tiles').innerHTML = renderTiles(runs, workers, prov, playbook);
     document.getElementById('runs').innerHTML = renderRuns(runs);
-    document.getElementById('workers').innerHTML = renderWorkers(workers);
+    document.getElementById('workers').innerHTML = renderWorkers(workers, routing);
     document.getElementById('provenance').innerHTML = renderProvenance(prov);
-    document.getElementById('matrix').innerHTML = renderMatrix(matrix);
+    document.getElementById('matrix').innerHTML = renderMatrix(matrix, routing);
     document.getElementById('playbook').innerHTML = renderPlaybook(playbook);
     document.getElementById('failures').innerHTML = renderFailures(failures);
     document.getElementById('tuning').innerHTML = renderTuning(tuning);

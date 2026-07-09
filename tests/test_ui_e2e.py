@@ -79,6 +79,19 @@ def test_run_wizard_loads_with_mock_tiers(page, server):
     assert page.locator("button", has_text="Continue →").is_enabled()
 
 
+def test_agents_step_lists_pool_members_from_routing(page, server):
+    """The Run wizard's agents step renders pool members from /api/routing:
+    each tier's default mock worker shows on its own line with a mono
+    'worker_id · model' identity line."""
+    base, _ = server
+    page.goto(base); page.click("#nav-wizard")
+    page.wait_for_selector(".tierrow .poolmember")
+    # mock fill gives one member per tier -> three pool-member lines
+    assert page.locator(".tierrow .poolmember").count() == 3
+    for tier in ("mock-small", "mock-mid", "mock-frontier"):
+        assert page.locator(f".tierrow .poolmember .mono:has-text('{tier}')").count() == 1
+
+
 def test_settings_provider_wizard_end_to_end(page, server):
     base, home = server
     page.goto(base); page.click("#nav-wizard")

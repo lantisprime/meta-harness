@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 import metaharness.config as config_mod
-from metaharness.core.types import TaskType, Tier
+from metaharness.core.types import Task, TaskType, Tier
 from metaharness.harness import MockLLMWorker
 from metaharness.identity import KeyPair
 from metaharness.web import HarnessState, create_app
@@ -66,10 +66,33 @@ async def test_add_persisted_mock_worker_and_retire(harness):
     assert resp.json()["config_removed"] is True
     record = state.registry.get("extra-mid")
     assert record is not None and record.active is False
-    assert Tier.MID not in state.router.runners
+    assert Tier.MID not in state.router.pools  # last member gone -> tier retired
     assert (await client.delete("/api/workers/extra-mid")).status_code == 200 or True
     assert (await client.delete("/api/workers/ghost")).status_code == 404
     assert (await client.delete("/api/workers/orchestrator")).status_code == 422
+
+
+async def test_two_workers_same_tier_pool_and_partial_retire(harness):
+    """A tier holds a pool: two workers coexist, retiring one keeps the tier
+    serving through the other, retiring the last drops the tier."""
+    state, client = harness
+    for wid in ("mid-a", "mid-b"):
+        resp = await client.post("/api/workers", json={
+            "worker_id": wid, "tier": "mid", "kind": "mock"})
+        assert resp.status_code == 201
+    pool_ids = [r.worker_id for r in state.router.pools[Tier.MID]]
+    assert pool_ids == ["mid-a", "mid-b"]  # both pooled, config order preserved
+
+    # retire the first: the tier still serves through the survivor
+    assert (await client.delete("/api/workers/mid-a")).status_code == 200
+    assert [r.worker_id for r in state.router.pools[Tier.MID]] == ["mid-b"]
+    decision = state.router.decide(
+        Task(task_type=TaskType.CLASSIFY, tier_hint=Tier.MID))
+    assert decision.tier == Tier.MID and decision.worker_id == "mid-b"
+
+    # retire the last: the tier key is gone
+    assert (await client.delete("/api/workers/mid-b")).status_code == 200
+    assert Tier.MID not in state.router.pools
 
 
 async def test_add_worker_persist_false_stays_ephemeral(harness):
@@ -187,15 +210,42 @@ async def test_reserved_worker_ids_rejected(harness):
 
 async def test_retire_then_readd_same_worker_id(harness):
     """Regression: 'worker X is already registered' after remove -> re-add.
-    Retirement deactivates the identity; the same id must be re-admittable."""
-    _, client = harness
+    Retirement deactivates the identity; the same id must be re-admittable.
+    Re-adding a LIVE id is an in-place replace with a key rotation, not a
+    conflict (each rotation stays visible in the audit trail)."""
+    state, client = harness
     body = {"worker_id": "planner-bot", "tier": "mid", "kind": "mock"}
     assert (await client.post("/api/workers", json=body)).status_code == 201
-    assert (await client.post("/api/workers", json=body)).status_code == 409  # active dup
+    resp = await client.post("/api/workers", json=body)  # live dup -> rotate in place
+    assert resp.status_code == 201
+    assert resp.json()["key_rotations"] == 1
+    assert [r.worker_id for r in state.router.pools[Tier.MID]] == ["planner-bot"]
     assert (await client.delete("/api/workers/planner-bot")).status_code == 200
     resp = await client.post("/api/workers", json=body)
     assert resp.status_code == 201
-    assert resp.json()["key_rotations"] == 1  # re-admission visible in audit
+    assert resp.json()["key_rotations"] == 2  # every re-admission audited
+
+
+async def test_readd_live_worker_replaces_pool_member_in_place(harness):
+    """FIX: the replace-in-place promise used to be unreachable — the registry
+    refused live ids before the pool swap ran. Re-adding now rotates the
+    identity and swaps the member at its existing pool position."""
+    state, _ = harness
+    from metaharness.harness import MockLLMWorker
+    from metaharness.identity import KeyPair
+
+    old = MockLLMWorker("pool-a", Tier.MID, keypair=KeyPair.generate())
+    other = MockLLMWorker("pool-b", Tier.MID, keypair=KeyPair.generate())
+    state.add_worker(old, Tier.MID)
+    state.add_worker(other, Tier.MID)
+
+    new = MockLLMWorker("pool-a", Tier.MID, keypair=KeyPair.generate())
+    state.add_worker(new, Tier.MID)  # must not raise RegistryError
+    pool = state.router.pools[Tier.MID]
+    assert [r.worker_id for r in pool] == ["pool-a", "pool-b"]  # position kept
+    assert pool[0] is new  # the new runner object serves, not the old one
+    assert state.registry.get("pool-a").key_rotations == 1
+    assert state.registry.get("pool-a").active
 
 
 async def test_workflow_validate_endpoint(harness):

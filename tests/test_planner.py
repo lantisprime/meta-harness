@@ -113,7 +113,7 @@ async def test_goal_endpoint_rejects_empty(client):
     assert (await client.post("/api/goals", json={"goal": "  "})).status_code == 422
 
 
-async def test_add_mock_worker_and_duplicate_conflict(client):
+async def test_add_mock_worker_and_duplicate_readd_rotates(client):
     resp = await client.post("/api/workers", json={
         "worker_id": "extra-mid", "tier": "mid", "kind": "mock"})
     assert resp.status_code == 201
@@ -121,9 +121,11 @@ async def test_add_mock_worker_and_duplicate_conflict(client):
     workers = (await client.get("/api/workers")).json()
     assert any(w["worker_id"] == "extra-mid" for w in workers)
 
+    # re-adding a live id replaces it in place with an audited key rotation
     dup = await client.post("/api/workers", json={
         "worker_id": "extra-mid", "tier": "mid", "kind": "mock"})
-    assert dup.status_code == 409
+    assert dup.status_code == 201
+    assert dup.json()["key_rotations"] == 1
 
 
 async def test_add_openai_worker_validates_endpoint(client):

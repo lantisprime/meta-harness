@@ -251,3 +251,34 @@ async def test_config_agent_wired_with_tools_end_to_end(tmp_path, monkeypatch):
     assert task.tools == ["grep"]
     outcome = await state.executor.execute(task)
     assert outcome.attempts  # ran through router -> signed mock -> verifier
+
+
+async def test_two_config_agents_same_tier_form_a_pool(tmp_path, monkeypatch):
+    """Two enabled agents on the same tier both join that tier's routing pool in
+    config order — the fix for the last-writer-wins eviction bug. Exercised
+    through the real serve path: _load_configured_runners -> wire."""
+    import metaharness.config as config_mod
+    from metaharness.config import AgentConfig, HarnessConfig
+    from metaharness.cli import _load_configured_runners
+    from metaharness.routing import RoutingDecision
+    from metaharness.web import HarnessState
+
+    monkeypatch.setattr(config_mod, "SALT_PATH", tmp_path / ".keysalt")
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", cfg_path)
+    cfg = HarnessConfig()
+    cfg.upsert_agent(AgentConfig(worker_id="mid-1", kind="mock", tier="mid"))
+    cfg.upsert_agent(AgentConfig(worker_id="mid-2", kind="mock", tier="mid"))
+    cfg.save(cfg_path)
+
+    state = HarnessState()
+    runners = _load_configured_runners(state)
+    assert [r.worker_id for r in runners[Tier.MID]] == ["mid-1", "mid-2"]
+
+    state.wire(runners, journal_dir=tmp_path)
+    assert [r.worker_id for r in state.router.pools[Tier.MID]] == ["mid-1", "mid-2"]
+    # both members are individually reachable through the router
+    for wid in ("mid-1", "mid-2"):
+        decision = RoutingDecision(tier=Tier.MID, worker_id=wid, model="",
+                                   expected_pass_rate=0.0, reason="")
+        assert state.router.runner_for(decision).worker_id == wid

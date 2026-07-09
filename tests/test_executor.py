@@ -63,6 +63,100 @@ async def test_matrix_learns_from_outcomes():
     assert matrix.samples("mock-mid", TaskType.CLASSIFY) >= 1
 
 
+async def test_pool_member_runs_and_matrix_records_under_its_model():
+    """With two members on a tier, the executor runs the member decide() picked
+    and the capability matrix learns under THAT member's model, not the pool's."""
+    matrix = CapabilityMatrix()
+    router = Router(
+        {Tier.MID: [
+            MockLLMWorker("mid-a", Tier.MID, model="model-a", seed=1,
+                          skills={TaskType.CLASSIFY: 1.0}),
+            MockLLMWorker("mid-b", Tier.MID, model="model-b", seed=2,
+                          skills={TaskType.CLASSIFY: 0.0}),
+        ]},
+        matrix=matrix, explore_rate=0.0,  # deterministic: no ε-exploration
+    )
+    executor = TaskExecutor(router)
+    outcome = await executor.execute(classify_task())
+    assert outcome.final_verdict == Verdict.PASS
+    assert outcome.attempts[0].result.model == "model-a"  # cold start -> first member
+    assert matrix.samples("model-a", TaskType.CLASSIFY) >= 1
+    assert matrix.samples("model-b", TaskType.CLASSIFY) == 0
+
+
+async def test_exploration_serves_benched_member_and_earns_evidence():
+    """End to end: forced ε-exploration routes a verifiable task to the benched
+    pool member, runner_for serves THAT member, and the matrix accrues evidence
+    under the benched member's model — the whole point of exploring."""
+    class ForceExplore:
+        def random(self) -> float:
+            return 0.0
+
+    matrix = CapabilityMatrix()
+    for _ in range(10):  # mid-a is the well-evidenced incumbent
+        matrix.record("model-a", TaskType.CLASSIFY, passed=True)
+    router = Router(
+        {Tier.MID: [
+            MockLLMWorker("mid-a", Tier.MID, model="model-a", seed=1,
+                          skills={TaskType.CLASSIFY: 1.0}),
+            MockLLMWorker("mid-b", Tier.MID, model="model-b", seed=2,
+                          skills={TaskType.CLASSIFY: 1.0}),
+        ]},
+        matrix=matrix, explore_rate=1.0, rng=ForceExplore(),
+    )
+    outcome = await TaskExecutor(router).execute(classify_task())
+    assert outcome.final_verdict == Verdict.PASS
+    assert outcome.attempts[0].result.model == "model-b"  # benched member ran
+    assert matrix.samples("model-b", TaskType.CLASSIFY) == 1  # evidence earned
+    assert matrix.samples("model-a", TaskType.CLASSIFY) == 10  # incumbent untouched
+
+
+async def test_explored_failure_retries_tier_instead_of_escalating():
+    """An ε-exploration flub is the benched member's failure, not the tier's:
+    the loop retries the SAME tier, decide() picks the best member on merit,
+    and no frontier call is paid for evidence we chose to buy cheap."""
+    class ExploreOnce:
+        def __init__(self) -> None:
+            self.values = [0.0]  # first decide explores; later ones never
+
+        def random(self) -> float:
+            return self.values.pop(0) if self.values else 1.0
+
+    matrix = CapabilityMatrix()
+    router = Router(
+        {Tier.MID: [
+            MockLLMWorker("mid-a", Tier.MID, model="model-a", seed=1,
+                          skills={TaskType.CLASSIFY: 1.0}),
+            MockLLMWorker("mid-b", Tier.MID, model="model-b", seed=2,
+                          skills={TaskType.CLASSIFY: 0.0}),
+         ],
+         Tier.FRONTIER: MockLLMWorker("w-front", Tier.FRONTIER, model="model-f",
+                                      seed=3, skills={TaskType.CLASSIFY: 1.0})},
+        matrix=matrix, explore_rate=0.5, rng=ExploreOnce(),
+    )
+    outcome = await TaskExecutor(router).execute(classify_task())
+    assert outcome.final_verdict == Verdict.PASS
+    assert outcome.escalations == 0  # explored FAIL never escalates the tier
+    assert [a.result.tier for a in outcome.attempts] == [Tier.MID, Tier.MID]
+    assert [a.result.model for a in outcome.attempts] == ["model-b", "model-a"]
+    assert matrix.samples("model-b", TaskType.CLASSIFY) == 1  # FAIL still banked
+    assert matrix.samples("model-f", TaskType.CLASSIFY) == 0  # frontier untouched
+
+
+async def test_route_counts_tally_routes_not_tasks():
+    """route_counts are 'times routed': an escalating task increments the count
+    of every tier it visited."""
+    router = Router({
+        Tier.SMALL: MockLLMWorker("w-small", Tier.SMALL, seed=1,
+                                  skills={TaskType.CLASSIFY: 0.0}),
+        Tier.MID: MockLLMWorker("w-mid", Tier.MID, seed=2,
+                                skills={TaskType.CLASSIFY: 1.0}),
+    })
+    outcome = await TaskExecutor(router).execute(classify_task())
+    assert outcome.final_verdict == Verdict.PASS and outcome.escalations >= 1
+    assert router.route_evidence() == {"small": {"w-small": 1}, "mid": {"w-mid": 1}}
+
+
 async def test_authenticity_unsigned_result_rejected():
     """A worker whose results aren't signed under a registered key never passes,
     even when its answers are correct."""

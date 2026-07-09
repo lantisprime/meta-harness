@@ -632,16 +632,16 @@ def test_serve_boot_replays_the_approved_suite(tmp_path, monkeypatch):
         "params": HarnessParams(tool_offload=True).model_dump(),
     }))
     base = StubWorker()
-    runners = {Tier.SMALL: base}
+    runners = {Tier.SMALL: [base]}  # cli wires per-tier pools now
     cli._apply_promoted(runners)
-    assert isinstance(runners[Tier.SMALL], ToolOffload)
-    assert runners[Tier.SMALL]._tuning_base is base
+    assert isinstance(runners[Tier.SMALL][0], ToolOffload)
+    assert runners[Tier.SMALL][0]._tuning_base is base
 
     # no active.json and no mixed promotion -> untouched
     (root / "active.json").unlink()
-    runners = {Tier.SMALL: base}
+    runners = {Tier.SMALL: [base]}
     cli._apply_promoted(runners)
-    assert runners[Tier.SMALL] is base
+    assert runners[Tier.SMALL][0] is base
 
 
 async def test_rule_proposer_suggests_a_prompt_directive_for_format_misses(tmp_path):

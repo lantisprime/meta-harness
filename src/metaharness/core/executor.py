@@ -102,7 +102,7 @@ class TaskExecutor:
                     break
 
                 variant = self._attempt_task(task, advice)
-                runner = self.router.runners[decision.tier]
+                runner = self.router.runner_for(decision)
                 result = await runner.run(variant)
                 result.task_id = task.id
 
@@ -193,10 +193,15 @@ class TaskExecutor:
                         "rejected. Take a materially different approach."
                     )
 
-                next_tier = self.router.next_tier(decision.tier)
-                if next_tier is not None:
-                    excluded_tiers.add(decision.tier)
-                    outcome.escalations += 1
+                # an ε-explored failure is the benched member's, not the tier's:
+                # the FAIL is already banked in the matrix, so retrying lets the
+                # next decide() pick the best member on merit — escalating would
+                # pay a higher tier for evidence we chose to buy cheap
+                if not decision.explored:
+                    next_tier = self.router.next_tier(decision.tier)
+                    if next_tier is not None:
+                        excluded_tiers.add(decision.tier)
+                        outcome.escalations += 1
                 if plateau.plateaued():
                     self._record("task.plateaued", {"task_id": task.id, "after_attempts": n})
                     break

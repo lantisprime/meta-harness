@@ -52,9 +52,11 @@ async def _discover(endpoints: list[str]) -> list[tuple[str, str, float]]:
 
 
 def _load_configured_runners(state) -> dict:
-    """Wire every enabled agent from ~/.metaharness/config.json. Configured
-    agents are explicit user intent, so they claim their tiers before
-    discovery/mocks fill the gaps. A bad entry fails the boot loudly."""
+    """Wire every enabled agent from ~/.metaharness/config.json into per-tier
+    pools. Configured agents are explicit user intent, so they claim their tiers
+    before discovery/mocks fill the gaps; multiple agents on a tier all join its
+    pool in config order (no last-writer-wins eviction). A bad entry fails the
+    boot loudly."""
     from metaharness.config import CONFIG_PATH, HarnessConfig
     from metaharness.core.types import Tier
     from metaharness.factory import build_agent_runner
@@ -62,7 +64,7 @@ def _load_configured_runners(state) -> dict:
 
     state.config = HarnessConfig.load(CONFIG_PATH)
     state.config_path = CONFIG_PATH
-    runners = {}
+    runners: dict = {}
     for agent in state.config.agents:
         if not agent.enabled:
             continue
@@ -70,7 +72,7 @@ def _load_configured_runners(state) -> dict:
         runner = build_agent_runner(agent, state.config, keypair=kp)
         state.register_worker(runner, kp, tiers=[agent.tier],
                               task_types=agent.task_types or None)
-        runners[Tier(agent.tier)] = runner
+        runners.setdefault(Tier(agent.tier), []).append(runner)
         print(f"  {agent.tier:9s} ← {runner.model}  [configured: {agent.worker_id}]")
     return runners
 
@@ -104,7 +106,7 @@ def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = Non
                 picks[tier] = match
         seen: set[str] = set()
         for tier, (base_url, model, size) in picks.items():
-            if tier in runners:  # configured agent already claimed this tier
+            if runners.get(tier):  # configured agent already claimed this tier
                 continue
             worker_id = f"local-{tier.value}"
             kp = KeyPair.generate()
@@ -113,19 +115,19 @@ def _build_local_state(endpoints: list[str], prefer: dict[str, str] | None = Non
                 keypair=kp, max_tokens=4000,
             )
             state.register_worker(runner, kp, tiers=[tier.value])
-            runners[tier] = runner
+            runners.setdefault(tier, []).append(runner)
             marker = "" if model not in seen else " (shared)"
             seen.add(model)
             print(f"  {tier.value:9s} ← {model}  [{size:g}B @ {base_url}]{marker}")
     for tier in Tier:  # mock-fill anything undiscovered
-        if tier not in runners:
+        if not runners.get(tier):
             kp = KeyPair.generate()
             runner = MockLLMWorker(f"mock-{tier.value}", tier, keypair=kp)
             state.register_worker(runner, kp, tiers=[tier.value])
-            runners[tier] = runner
+            runners.setdefault(tier, []).append(runner)
             print(f"  {tier.value:9s} ← mock (no local model discovered)")
     if critique:
-        runners = {t: SelfCritique(r) for t, r in runners.items()}
+        runners = {t: [SelfCritique(r) for r in members] for t, members in runners.items()}
         print("  self-critique enabled: unverified open-ended tasks get one draft→critique→revise round")
     _finish_wiring(state, runners)
     return state
@@ -141,7 +143,7 @@ def _apply_promoted(runners) -> None:
     from metaharness.core.types import Tier
     from metaharness.optimization import CandidateLedger, HarnessParams
 
-    if Tier.SMALL not in runners:
+    if not runners.get(Tier.SMALL):
         return
     root = JOURNAL_DIR.parent / "optimization"
     suite, params = "mixed", None
@@ -154,10 +156,10 @@ def _apply_promoted(runners) -> None:
         params = CandidateLedger(root / "mixed").promoted_params()
     if params is None:
         return
-    base = runners[Tier.SMALL]
+    base = runners[Tier.SMALL][0]  # tuning targets the small tier's primary member
     wrapped = params.build(base)
     wrapped._tuning_base = base  # web approvals replace exactly this layer
-    runners[Tier.SMALL] = wrapped
+    runners[Tier.SMALL][0] = wrapped
     defaults = HarnessParams().model_dump()
     knobs = {k: v for k, v in params.model_dump().items() if v != defaults[k]}
     print(f"  promoted harness config active on small tier ({suite} suite): "
@@ -187,12 +189,12 @@ def _build_mock_state():
     state = HarnessState()
     runners = _load_configured_runners(state)
     for tier in Tier:
-        if tier in runners:
+        if runners.get(tier):
             continue
         kp = KeyPair.generate()
         runner = MockLLMWorker(f"w-{tier.value}", tier, keypair=kp)
         state.register_worker(runner, kp, tiers=[tier.value])
-        runners[tier] = runner
+        runners.setdefault(tier, []).append(runner)
     _finish_wiring(state, runners)
     return state
 

@@ -263,7 +263,8 @@ def create_app(state: HarnessState) -> FastAPI:
             proposer = RuleProposer()
         else:
             raise HTTPException(422, f"unknown proposer {req.proposer!r}")
-        wired = state.router.runners.get(Tier.SMALL) or next(iter(state.router.runners.values()))
+        small = state.router.pool(Tier.SMALL)
+        wired = small[0] if small else next(iter(state.router.pools.values()))[0]
         target = _tuning_base(wired)
         ledger = CandidateLedger(Path(state.optimization_root) / req.suite)
         seed = ledger.promoted_params()  # tune from what's live, not from scratch
@@ -396,12 +397,13 @@ def create_app(state: HarnessState) -> FastAPI:
             encoding="utf-8",
         )
         applied = False
-        if state.router is not None and Tier.SMALL in state.router.runners:
+        if state.router is not None and state.router.pool(Tier.SMALL):
             params = HarnessParams.model_validate(pending["params"])
-            base = _tuning_base(state.router.runners[Tier.SMALL])
+            small = state.router.pools[Tier.SMALL]
+            base = _tuning_base(small[0])
             wrapped = params.build(base)
             wrapped._tuning_base = base
-            state.router.runners[Tier.SMALL] = wrapped
+            small[0] = wrapped
             applied = True
         return {"suite": suite, "approved": True,
                 "candidate": pending["candidate"], "applied_live": applied}
@@ -723,8 +725,10 @@ def create_app(state: HarnessState) -> FastAPI:
 
     @app.delete("/api/workers/{worker_id}")
     async def remove_worker(worker_id: str) -> dict[str, Any]:
-        """Retire a worker: deactivate its identity, free its routing slot,
-        and drop its durable definition. The provenance it signed stays."""
+        """Retire a worker: deactivate its identity, remove it from every tier
+        pool that holds it (a tier keeps serving while other members remain, and
+        its key drops only when the pool empties), and drop its durable
+        definition. The provenance it signed stays."""
         record = state.registry.get(worker_id)
         if record is None:
             raise HTTPException(404, f"unknown worker {worker_id}")
@@ -732,9 +736,14 @@ def create_app(state: HarnessState) -> FastAPI:
             raise HTTPException(422, "the orchestrator cannot retire itself")
         state.registry.deactivate(worker_id)
         if state.router is not None:
-            for tier, runner in list(state.router.runners.items()):
-                if runner.worker_id == worker_id:
-                    del state.router.runners[tier]
+            for tier, members in list(state.router.pools.items()):
+                if not any(m.worker_id == worker_id for m in members):
+                    continue
+                remaining = [m for m in members if m.worker_id != worker_id]
+                if remaining:
+                    state.router.pools[tier] = remaining
+                else:
+                    del state.router.pools[tier]
         removed = state.config.remove_agent(worker_id)
         if removed:
             state.save_config()
@@ -905,6 +914,33 @@ def create_app(state: HarnessState) -> FastAPI:
     @app.get("/api/matrix")
     async def matrix() -> dict[str, Any]:
         return state.matrix.as_dict()
+
+    @app.get("/api/routing")
+    async def routing() -> dict[str, Any]:
+        """Per-tier pool membership plus routed-to tallies, so the UI can show
+        who serves each tier and where traffic is actually landing."""
+        if state.router is None:
+            return {}
+        matrix = state.matrix.as_dict()
+        evidence = state.router.route_evidence()
+        out: dict[str, Any] = {}
+        for tier, members in state.router.pools.items():
+            out[tier.value] = {
+                "members": [
+                    {
+                        "worker_id": m.worker_id,
+                        "model": m.model,
+                        "display_name": (
+                            r.display_name if (r := state.registry.get(m.worker_id))
+                            else m.worker_id
+                        ),
+                        "skills": matrix.get(m.model, {}),
+                    }
+                    for m in members
+                ],
+                "routed": evidence.get(tier.value, {}),
+            }
+        return out
 
     @app.get("/api/playbook")
     async def playbook() -> list[dict[str, Any]]:

@@ -13,7 +13,8 @@ tier silently becomes an expensive downstream failure.
 """
 from __future__ import annotations
 
-from typing import Optional
+import random
+from typing import Optional, Union
 
 from pydantic import BaseModel
 
@@ -111,39 +112,135 @@ class RoutingDecision(BaseModel):
     model: str
     expected_pass_rate: float
     reason: str
+    explored: bool = False
 
 
 class Router:
-    """Cheapest-capable routing with evidence-informed escalation."""
+    """Cheapest-capable routing with evidence-informed escalation.
+
+    Each tier holds a POOL of runners (configured order preserved). Tier
+    selection/escalation is unchanged; within the chosen tier, decide() picks the
+    pool member with the best matrix pass rate for the task type. On verifiable
+    tasks, ε-exploration occasionally routes to a benched member so it earns the
+    evidence that would let it win the slot on merit."""
 
     def __init__(
         self,
-        runners: dict[Tier, Runner],
+        runners: dict[Tier, Union[Runner, list[Runner]]],
         matrix: Optional[CapabilityMatrix] = None,
         threshold: float = 0.7,
         priors: Optional[dict[Tier, dict[TaskType, float]]] = None,
+        explore_rate: float = 0.1,
+        rng: Optional[random.Random] = None,
     ) -> None:
-        if not runners:
+        # normalize each value to a list; drop empty pools so `tier in self.pools`
+        # always means "serves traffic" (next_tier/decide rely on that invariant)
+        self.pools: dict[Tier, list[Runner]] = {}
+        for tier, value in runners.items():
+            members = list(value) if isinstance(value, list) else [value]
+            members = [m for m in members if m is not None]
+            if members:
+                self.pools[tier] = members
+        if not self.pools:
             raise ValueError("router needs at least one runner")
-        self.runners = runners
         self.matrix = matrix or CapabilityMatrix()
         self.threshold = threshold
         self.priors = priors or DEFAULT_PRIORS
+        self.explore_rate = explore_rate
+        self.rng = rng or random.Random()
+        # in-memory routed-to evidence, keyed (tier, worker_id) — feeds the UI
+        self.route_counts: dict[tuple[Tier, str], int] = {}
+
+    def pool(self, tier: Tier) -> list[Runner]:
+        return self.pools.get(tier, [])
 
     def expected_pass_rate(self, tier: Tier, task_type: TaskType) -> float:
-        runner = self.runners.get(tier)
-        if runner is None:
+        """The tier's ceiling: the best pass rate any member can offer — that is
+        the member decide() would route to (absent exploration)."""
+        members = self.pools.get(tier, [])
+        if not members:
             return 0.0
         prior = self.priors.get(tier, {}).get(task_type, 0.5)
-        return self.matrix.pass_rate(runner.model, task_type, prior=prior)
+        return max(self.matrix.pass_rate(m.model, task_type, prior=prior) for m in members)
+
+    def pick_member(self, tier: Tier, task: Task) -> tuple[Runner, bool]:
+        """Choose which pool member serves this task. Best = argmax pass rate for
+        the task type (tie → earliest configured). With >1 member on a verifiable
+        task, ε of the time route instead to the least-sampled other member so it
+        earns evidence (returns explored=True)."""
+        members = self.pools[tier]
+        prior = self.priors.get(tier, {}).get(task.task_type, 0.5)
+        best = max(members, key=lambda m: self.matrix.pass_rate(m.model, task.task_type, prior=prior))
+        # success_check only: the deterministic verifier can PASS solely through
+        # a success_check branch — an output_schema alone yields FAIL or
+        # UNVERIFIED, so exploring there banks downside evidence and no upside
+        verifiable = bool(task.success_check)
+        if len(members) > 1 and verifiable and self.rng.random() < self.explore_rate:
+            others = [m for m in members if m is not best]
+            if not others:  # same runner object pooled twice: nothing to explore
+                return best, False
+            explore = min(others, key=lambda m: self.matrix.samples(m.model, task.task_type))
+            return explore, True
+        return best, False
+
+    def runner_for(self, decision: RoutingDecision) -> Runner:
+        """Resolve a decision back to the exact member it named; fall back to the
+        tier pool's first member if that worker_id is gone (e.g. retired mid-run).
+        A tier with no pool at all is a wiring error and raises."""
+        members = self.pools.get(decision.tier, [])
+        for member in members:
+            if member.worker_id == decision.worker_id:
+                return member
+        if not members:
+            raise ValueError(f"no pool serves tier {decision.tier.value}")
+        return members[0]
 
     def next_tier(self, current: Tier) -> Optional[Tier]:
-        """The next tier up that actually has a runner, or None at the top."""
+        """The next tier up whose pool actually serves, or None at the top."""
         idx = TIER_ORDER.index(current)
         for tier in TIER_ORDER[idx + 1:]:
-            if tier in self.runners:
+            if self.pool(tier):
                 return tier
         return None
+
+    def route_evidence(self) -> dict[str, dict[str, int]]:
+        """{tier: {worker_id: times routed}} — in-memory routing tallies."""
+        out: dict[str, dict[str, int]] = {}
+        for (tier, worker_id), count in self.route_counts.items():
+            out.setdefault(tier.value, {})[worker_id] = count
+        return out
+
+    def _build_decision(
+        self, task: Task, tier: Tier, span, cleared: bool
+    ) -> RoutingDecision:
+        # the tier was selected on its BEST member's rate; the decision reports
+        # the SERVED member's own rate/samples — under exploration they differ
+        member, explored = self.pick_member(tier, task)
+        prior = self.priors.get(tier, {}).get(task.task_type, 0.5)
+        rate = self.matrix.pass_rate(member.model, task.task_type, prior=prior)
+        samples = self.matrix.samples(member.model, task.task_type)
+        if cleared:
+            reason = f"cheapest tier clearing threshold {self.threshold} on its best member"
+        else:
+            reason = f"no tier cleared threshold {self.threshold}; using most capable available"
+        if explored:
+            reason += (f"; exploring {member.worker_id} "
+                       f"(expected {rate:.2f}, samples={samples}) to earn evidence")
+        else:
+            reason += f" (expected {rate:.2f}, samples={samples})"
+        span.set_attribute("router.tier", tier.value)
+        span.set_attribute("router.expected_pass_rate", rate)
+        span.set_attribute("router.explored", explored)
+        key = (tier, member.worker_id)
+        self.route_counts[key] = self.route_counts.get(key, 0) + 1
+        return RoutingDecision(
+            tier=tier,
+            worker_id=member.worker_id,
+            model=member.model,
+            expected_pass_rate=rate,
+            reason=reason,
+            explored=explored,
+        )
 
     def decide(
         self,
@@ -152,12 +249,13 @@ class Router:
         budget: Optional[Budget] = None,
     ) -> RoutingDecision:
         """Pick the cheapest available tier whose expected pass rate clears the
-        threshold; fall back to the most capable affordable tier otherwise."""
+        threshold; fall back to the most capable affordable tier otherwise. Then
+        pick which member of that tier serves the task."""
         exclude = exclude or set()
         floor_idx = TIER_ORDER.index(task.tier_hint) if task.tier_hint else 0
         candidates = [
             t for t in TIER_ORDER[floor_idx:]
-            if t in self.runners and t not in exclude
+            if t in self.pools and t not in exclude
         ]
         if budget is not None:
             affordable = [t for t in candidates if TIER_EST_COST[t] <= budget.remaining_cost()]
@@ -169,29 +267,8 @@ class Router:
             span.set_attribute("task.id", task.id)
             span.set_attribute("task.type", task.task_type.value)
             for tier in candidates:
-                rate = self.expected_pass_rate(tier, task.task_type)
-                if rate >= self.threshold:
-                    runner = self.runners[tier]
-                    span.set_attribute("router.tier", tier.value)
-                    span.set_attribute("router.expected_pass_rate", rate)
-                    return RoutingDecision(
-                        tier=tier,
-                        worker_id=runner.worker_id,
-                        model=runner.model,
-                        expected_pass_rate=rate,
-                        reason=f"cheapest tier clearing threshold {self.threshold} "
-                               f"(expected {rate:.2f}, samples={self.matrix.samples(runner.model, task.task_type)})",
-                    )
+                # tier selection keys on the tier's ceiling (best member's rate)
+                if self.expected_pass_rate(tier, task.task_type) >= self.threshold:
+                    return self._build_decision(task, tier, span, cleared=True)
             # nothing clears the bar — send the most capable candidate
-            tier = candidates[-1]
-            runner = self.runners[tier]
-            rate = self.expected_pass_rate(tier, task.task_type)
-            span.set_attribute("router.tier", tier.value)
-            span.set_attribute("router.expected_pass_rate", rate)
-            return RoutingDecision(
-                tier=tier,
-                worker_id=runner.worker_id,
-                model=runner.model,
-                expected_pass_rate=rate,
-                reason=f"no tier cleared threshold {self.threshold}; using most capable available",
-            )
+            return self._build_decision(task, candidates[-1], span, cleared=False)
