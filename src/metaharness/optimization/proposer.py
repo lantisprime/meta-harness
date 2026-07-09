@@ -22,6 +22,7 @@ from typing import Optional, Protocol
 
 from pydantic import BaseModel, ValidationError
 
+from metaharness.core.budget import Budget
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.enrichment import SchemaGuard
 from metaharness.harness.runner import Runner
@@ -139,8 +140,9 @@ PROPOSER_OBJECTIVE = (
 class LLMProposer:
     """Paper-faithful proposer: an LLM worker over the raw ledger."""
 
-    def __init__(self, runner: Runner) -> None:
+    def __init__(self, runner: Runner, budget: Optional[Budget] = None) -> None:
         self.runner = SchemaGuard(runner)  # malformed proposals get one named retry
+        self.budget = budget
 
     async def propose(self, ledger: CandidateLedger, lessons: Optional[list[str]] = None) -> Proposal:
         if not ledger.evaluated():
@@ -152,6 +154,12 @@ class LLMProposer:
             output_schema=PROPOSAL_SCHEMA,
         )
         result = await self.runner.run(task)
+        # the proposer's own LLM tokens count against the run budget; an exhausted
+        # budget raises BudgetExceeded, which the loop catches to stop cleanly
+        if self.budget is not None:
+            self.budget.charge(
+                cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out
+            )
         if result.error:
             raise ProposalError(f"proposer worker failed: {result.error}")
         try:

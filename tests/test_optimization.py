@@ -242,6 +242,37 @@ async def test_llm_proposer_requires_an_evaluated_seed(tmp_path):
         await LLMProposer(StubWorker()).propose(CandidateLedger(tmp_path))
 
 
+async def test_llm_proposer_charges_budget(tmp_path):
+    """The proposer's own LLM tokens must count against the run budget — an
+    uncharged proposer lets the meta-loop overrun its ceiling silently."""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+    budget = Budget(max_tokens=1000, max_cost_usd=1.0)
+    stub = StubWorker(output={"hypothesis": "offload", "parent": "c0001",
+                              "delta": {"tool_offload": True}})
+    await LLMProposer(stub, budget=budget).propose(ledger)
+    assert budget.spent_tokens == 40           # StubWorker: 30 in + 10 out
+    assert budget.spent_cost_usd == pytest.approx(0.001)
+
+
+async def test_optimizer_stops_when_proposer_exhausts_budget(tmp_path):
+    """Codex plan-review P1: a proposer LLM call that exhausts the budget must
+    stop the search cleanly (report.stopped == 'budget'), not crash the run."""
+    task = Task(task_type=TaskType.CLASSIFY, objective="c", success_check={"equals": "ok"})
+    ledger = CandidateLedger(tmp_path)
+    tiny = Budget(max_tokens=10)  # the first propose (40 tokens) blows the cap
+    proposer = LLMProposer(
+        StubWorker(output={"hypothesis": "h", "parent": "c0001",
+                           "delta": {"tool_offload": True}}),
+        budget=tiny,
+    )
+    optimizer = HarnessOptimizer(
+        lambda: StubWorker(output="ok"), proposer, [task], [task], ledger, k=1,
+    )
+    report = await optimizer.optimize(rounds=3)
+    assert report.stopped == "budget"
+    assert [c.id for c in ledger.candidates()] == ["c0001"]  # seed only; history intact
+
+
 # -- suites --------------------------------------------------------------------------
 
 

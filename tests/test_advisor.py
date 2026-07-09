@@ -14,15 +14,18 @@ from metaharness.web.advisor import ACTION_VOCAB, AdvisorError, advise, fence
 
 
 class ScriptedAdvisor(Runner):
-    def __init__(self, output):
+    def __init__(self, output, tokens_in=0, tokens_out=0, cost_usd=0.0):
         self.worker_id, self.tier, self.model = "advisor", Tier.FRONTIER, "scripted"
         self.output = output
+        self.tokens_in, self.tokens_out, self.cost_usd = tokens_in, tokens_out, cost_usd
         self.seen: list[Task] = []
 
     async def run(self, task: Task) -> WorkerResult:
         self.seen.append(task)
         return WorkerResult(task_id=task.id, worker_id="advisor", tier=self.tier,
-                            model=self.model, output=self.output, raw_text=str(self.output))
+                            model=self.model, output=self.output, raw_text=str(self.output),
+                            tokens_in=self.tokens_in, tokens_out=self.tokens_out,
+                            cost_usd=self.cost_usd)
 
 
 async def test_advise_filters_to_closed_action_vocabulary():
@@ -64,6 +67,29 @@ async def test_advise_is_loud_on_worker_failure():
         await advise(Broken(), "q", {})
 
 
+async def test_advise_charges_budget():
+    from metaharness.core.budget import Budget
+
+    stub = ScriptedAdvisor({"read": "ok", "next_actions": []},
+                           tokens_in=30, tokens_out=10, cost_usd=0.002)
+    budget = Budget(max_tokens=1000, max_cost_usd=1.0)
+    advice = await advise(stub, "q", {}, budget=budget)
+    assert advice["advisory"] is True
+    assert budget.spent_tokens == 40
+    assert budget.spent_cost_usd == pytest.approx(0.002)
+
+
+async def test_advise_stays_advisory_when_budget_exhausted():
+    from metaharness.core.budget import Budget
+
+    stub = ScriptedAdvisor({"read": "ok", "next_actions": []}, tokens_in=30, tokens_out=10)
+    budget = Budget(max_tokens=5)  # the 40-token charge blows the cap
+    advice = await advise(stub, "q", {}, budget=budget)  # returns, never raises
+    assert advice["advisory"] is True
+    assert advice["next_actions"] == []
+    assert "budget" in advice["read"].lower()
+
+
 def test_fence_wraps_strings_and_objects():
     assert "plain text" in fence("plain text")
     assert '"k": "v"' in fence({"k": "v"})
@@ -84,14 +110,19 @@ async def test_advise_endpoint_goal_and_tuning(wired_state, tmp_path):
     from metaharness.optimization import CandidateLedger, HarnessParams
     from tests.test_optimization import evaluated_candidate
 
+    from metaharness.core.budget import Budget
+
     ledger = CandidateLedger(tmp_path / "optimization" / "math")
     ledger.record(evaluated_candidate("c0001", 0.4, 100, params=HarnessParams()))
 
+    wired_state.budget = Budget(max_tokens=1_000_000, max_cost_usd=1000.0)
     app = create_app(wired_state)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         goal = (await c.post("/api/advise", json={"page": "goal", "subject": "fix the disk thing"})).json()
         assert goal["advisory"] is True and isinstance(goal["next_actions"], list)
+        # the advisory read's tokens are charged against the run budget
+        assert wired_state.budget.spent_tokens > 0
 
         tuning = (await c.post("/api/advise", json={"page": "tuning", "subject": "c0001", "suite": "math"})).json()
         assert tuning["advisory"] is True

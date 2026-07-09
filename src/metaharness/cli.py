@@ -237,6 +237,10 @@ def _run_optimize(args) -> None:
             return MockLLMWorker("opt-target", Tier.SMALL, keypair=KeyPair.generate(), seed=7)
         print("  target    ← mock small worker (offline demo; --local for a real model)")
 
+    budget = None
+    if args.max_tokens or args.max_cost:
+        budget = Budget(max_tokens=args.max_tokens, max_cost_usd=args.max_cost)
+
     if args.proposer == "llm":
         if not found:
             raise SystemExit("--proposer llm needs --local: a discovered model must do the proposing")
@@ -244,15 +248,11 @@ def _run_optimize(args) -> None:
         proposer = LLMProposer(OpenAICompatWorker(
             "opt-proposer", base_url=p_url, model=p_model, tier=Tier.FRONTIER,
             keypair=KeyPair.generate(), max_tokens=2000,
-        ))
+        ), budget=budget)
         print(f"  proposer  ← {p_model}  [{p_size:g}B]")
     else:
         proposer = RuleProposer()
         print("  proposer  ← deterministic rules (--proposer llm for the paper-shaped agentic proposer)")
-
-    budget = None
-    if args.max_tokens or args.max_cost:
-        budget = Budget(max_tokens=args.max_tokens, max_cost_usd=args.max_cost)
 
     optimizer = HarnessOptimizer(
         base_factory, proposer, search, holdout, ledger, k=args.k, budget=budget,

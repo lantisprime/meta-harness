@@ -188,6 +188,12 @@ class HarnessOptimizer:
                 report.stopped = "no-proposal"
                 report.notes.append(f"proposer stopped: {exc}")
                 break
+            except BudgetExceeded as exc:
+                # the proposer's own LLM call exhausted the budget — stop cleanly,
+                # mirroring the eval-side budget stop rather than crashing the run
+                report.stopped = "budget"
+                report.notes.append(f"proposer budget exhausted: {exc}")
+                break
 
             report.rounds_run += 1
             cid = self.ledger.next_id()

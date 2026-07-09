@@ -258,7 +258,7 @@ def create_app(state: HarnessState) -> FastAPI:
         if req.proposer == "llm":
             # the frontier agent does the counterfactual diagnosis over raw
             # traces — the paper-shaped proposer, incl. prompt-directive ideas
-            proposer = LLMProposer(state.planner_runner())
+            proposer = LLMProposer(state.planner_runner(), budget=state.budget)
         elif req.proposer == "rule":
             proposer = RuleProposer()
         else:
@@ -270,7 +270,7 @@ def create_app(state: HarnessState) -> FastAPI:
         seed = ledger.promoted_params()  # tune from what's live, not from scratch
         optimizer = HarnessOptimizer(
             lambda: target, proposer, search, holdout, ledger,
-            k=req.k, seed_params=seed, auto_promote=False,
+            k=req.k, seed_params=seed, auto_promote=False, budget=state.budget,
         )
         _tuning_running.add(req.suite)
 
@@ -446,7 +446,7 @@ def create_app(state: HarnessState) -> FastAPI:
         else:
             raise HTTPException(422, f"unknown advise page {req.page!r}")
         try:
-            return await advise(runner, question, context)
+            return await advise(runner, question, context, budget=state.budget)
         except AdvisorError as exc:
             raise HTTPException(502, str(exc))
 

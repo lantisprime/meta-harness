@@ -14,8 +14,9 @@ intelligence never controls the lifecycle):
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
+from metaharness.core.budget import Budget, BudgetExceeded
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.enrichment import SchemaGuard
 from metaharness.harness.runner import Runner
@@ -67,7 +68,9 @@ OBJECTIVE = (
 )
 
 
-async def advise(runner: Runner, question: str, context: Any) -> dict[str, Any]:
+async def advise(
+    runner: Runner, question: str, context: Any, budget: Optional[Budget] = None
+) -> dict[str, Any]:
     """One advisory read over fenced context, through the harness's own
     runner + SchemaGuard. Returns {read, next_actions, advisory}."""
     task = Task(
@@ -77,6 +80,16 @@ async def advise(runner: Runner, question: str, context: Any) -> dict[str, Any]:
         output_schema=ADVICE_SCHEMA,
     )
     result = await SchemaGuard(runner).run(task)
+    # the advisory read's LLM tokens count against the run budget; when it is
+    # exhausted, stay advisory (never crash the panel) but say so loudly
+    if budget is not None:
+        try:
+            budget.charge(
+                cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out
+            )
+        except BudgetExceeded as exc:
+            return {"read": f"Advisory unavailable — run token budget exhausted: {exc}",
+                    "next_actions": [], "advisory": True, "model": runner.model}
     if result.error:
         raise AdvisorError(f"advisor worker failed: {result.error}")
     output = result.output if isinstance(result.output, dict) else {}
