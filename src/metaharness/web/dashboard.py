@@ -163,6 +163,8 @@ tr:last-child td{border-bottom:0}
   border:1px solid #8b5cf630;transition:transform .15s ease,box-shadow .15s ease}
 .why svg{width:15px;height:15px;display:block}
 .why:hover,.why.on{transform:scale(1.12);box-shadow:0 2px 10px #8b5cf640}
+.card h2 .card-advise{float:right;width:24px;height:24px;margin-left:8px}
+.card h2 .card-advise svg{width:14px;height:14px}
 @media (prefers-reduced-motion: reduce){.why,.why:hover{transition:none;transform:none}}
 .ai-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:999px;
   font-size:11.5px;font-weight:600;white-space:nowrap;
@@ -1586,10 +1588,11 @@ function renderProvenance(p){
 const taskPlain = t => String(t || '').replace(/[._-]/g, ' ');
 
 function renderMatrix(m, routing){
+  const panel = CARD_ADVICE.routing ? renderCardAdvice('routing', routingFacts(routing)) : '';
   const models = Object.keys(m);
-  if(!models.length) return '<div class="empty">nothing observed yet — the harness learns who’s good at what as runs finish</div>';
+  if(!models.length) return panel + '<div class="empty">nothing observed yet — the harness learns who’s good at what as runs finish</div>';
   const rIdx = routingIndex(routing);
-  return paginate('matrix', models, ms => ms.map(model => {
+  return panel + paginate('matrix', models, ms => ms.map(model => {
     const rows = Object.entries(m[model]).map(([t, c]) =>
       `<tr><td class="small">${esc(taskPlain(t))}</td>
        <td><span class="bar-h" style="width:${Math.round(c.pass_rate*110)}px"></span>
@@ -1603,8 +1606,9 @@ function renderMatrix(m, routing){
 }
 
 function renderPlaybook(bullets){
-  if(!bullets.length) return '<div class="empty">no lessons yet — the harness writes them as failure patterns emerge</div>';
-  return paginate('playbook', bullets, bs =>
+  const panel = CARD_ADVICE.playbook ? renderCardAdvice('playbook', playbookFacts(bullets)) : '';
+  if(!bullets.length) return panel + '<div class="empty">no lessons yet — the harness writes them as failure patterns emerge</div>';
+  return panel + paginate('playbook', bullets, bs =>
     '<table><tr><th>lesson</th><th>applies to</th><th>track record</th></tr>' + bs.map(b => {
       const score = (b.helpful + 1) / (b.helpful + b.harmful + 2);
       return `<tr${b.active?'':' class="faint"'}><td class="small">${esc(b.text)}
@@ -1635,10 +1639,11 @@ const MAST_PLAIN = {
 const mastPlain = m => MAST_PLAIN[m] || taskPlain(m);
 
 function renderFailures(f){
+  const panel = CARD_ADVICE.failures ? renderCardAdvice('failures', failuresFacts(f)) : '';
   const rows = Object.keys(f).flatMap(t =>
     Object.entries(f[t]).map(([mode, n]) => ({t, mode, n})));
-  if(!rows.length) return '<div class="empty">no failures yet — when one happens it lands here, labelled</div>';
-  return paginate('failures', rows, rs =>
+  if(!rows.length) return panel + '<div class="empty">no failures yet — when one happens it lands here, labelled</div>';
+  return panel + paginate('failures', rows, rs =>
     '<table><tr><th>while doing</th><th>what went wrong</th><th>times</th></tr>' +
     rs.map(({t, mode, n}) =>
       `<tr><td class="small">${esc(taskPlain(t))}</td>
@@ -1654,6 +1659,16 @@ const FINDING_BADGE = {
   info: ['dim', 'note'],
 };
 const TUNE = { suite: 'mixed', proposer: 'rule' };
+const PROPOSERS = ['rule', 'llm', 'code'];
+/* The client-known suites start_tune/add_coverage may legally target — the tuning
+   dropdown offers these, and card-level advice buttons validate against them.
+   Review K-C1: the list is the four always-startable built-in generators UNIONED
+   with every suite /api/optimization reports from disk (refreshConsole keeps it
+   fresh on the 3s loop), so a suite created on disk becomes advisable without a
+   frontend release. */
+const TUNE_DEFAULT_SUITES = ['mixed', 'classify', 'extract', 'math'];
+let TUNE_SUITES = TUNE_DEFAULT_SUITES;
+const validSuite = s => TUNE_SUITES.includes(s);
 
 /* One plain-language sentence wrapping up a suite's last search — shared by
    the tuning card and the Home landing. */
@@ -1677,7 +1692,7 @@ function renderTuning(suites){
   const controls = `<div class="chainline">
     <select id="tune-suite" style="border:1px solid var(--line2);border-radius:999px;
       padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
-      ${['mixed','classify','extract','math'].map(n =>
+      ${TUNE_SUITES.map(n =>
         `<option value="${n}" ${TUNE.suite === n ? 'selected' : ''}>${n} suite</option>`).join('')}</select>
     <select id="tune-proposer" style="border:1px solid var(--line2);border-radius:999px;
       padding:5px 10px;font-family:inherit;font-size:12.5px;background:var(--card);color:var(--ink)">
@@ -1774,36 +1789,113 @@ function renderAdvicePanel(key, c){
     ${body}</div></div></div>`;
 }
 
-document.getElementById('tuning').addEventListener('click', async ev => {
-  const w = ev.target.closest('button[data-advise]');
-  if(w){
-    const key = w.dataset.suite + '/' + w.dataset.advise;
-    if(ADVICE[key]){ delete ADVICE[key]; refreshConsole(); return; }
-    ADVICE[key] = {loading: true};
-    refreshConsole();
-    try{
-      const r = await post('/api/advise', {page: 'tuning', subject: w.dataset.advise, suite: w.dataset.suite});
-      ADVICE[key] = r.ok ? await r.json() : {error: 'the advisor is unavailable right now — the facts above still stand'};
-    }catch(e){ ADVICE[key] = {error: 'the advisor is unavailable right now — the facts above still stand'}; }
-    refreshConsole(); return;
-  }
-  const act = ev.target.closest('button[data-advise-act]');
-  if(act){
-    const action = act.dataset.adviseAct;
+/* Card-level advisor panels (routing / failures / playbook): same explicit-click,
+   render-from-cache mechanism as the tuning rows, but one panel per card keyed by
+   page. Verified facts come from data already on the 3s loop; the read + actions
+   from the cached /api/advise response. */
+const CARD_ADVICE = {};
+/* page -> the console body div whose render function re-prepends the panel */
+const CARD_ADVICE_TARGET = { routing: 'matrix', failures: 'failures', playbook: 'playbook' };
+
+/* review G-FU2: data-params is markup and can be malformed — a broken attribute
+   must degrade to empty params, never kill the click handler with a throw. */
+const btnParams = el => { try{ return JSON.parse(el.dataset.params || '{}') || {}; }catch(e){ return {}; } };
+
+/* Next-action buttons, shared by every advisor panel. Each button carries its
+   params as JSON; suite-targeting actions with an absent/invalid suite are dropped
+   here (render guard — defense in depth alongside the handler guard). When the
+   facts have drifted since the advice was fetched (review F-C), mutating actions
+   are dropped too — navigation actions may stay. */
+function adviceActions(next_actions, dropMutating){
+  const btns = (next_actions || []).filter(x => x.action !== 'none').map(x => {
+    const params = x.params || {};
+    if((x.action === 'start_tune' || x.action === 'add_coverage')
+       && (dropMutating || !validSuite(params.suite))) return '';
+    return `<button class="btn small" data-advise-act="${esc(x.action)}" data-params="${esc(JSON.stringify(params))}">${esc(x.label)}</button>`;
+  }).filter(Boolean).join('');
+  return `<div class="nba">${btns}</div>`;
+}
+
+function renderCardAdvice(page, factsHtml){
+  const a = CARD_ADVICE[page];
+  if(!a) return '';
+  // review F-C: the advice is only as fresh as the facts it was computed from.
+  // The first render (the loading tick, right after the sparkle click) pins a
+  // fingerprint of the facts block; if a later refresh renders different facts,
+  // say so and stop offering mutating actions computed from the old state.
+  if(a.factsFp === undefined) a.factsFp = factsHtml;
+  const stale = a.factsFp !== factsHtml;
+  const staleNote = stale && !a.loading && !a.error
+    ? '<div class="small dim" style="margin-top:8px">the facts changed since this advice — close and re-ask ✦</div>' : '';
+  const body = a.loading ? '<div class="empty">thinking…</div>'
+    : a.error ? `<div class="empty">${esc(a.error)}</div>`
+    : `<p>${esc(a.read)}</p>` + adviceActions(a.next_actions, stale) + staleNote;
+  return `<div class="advisor" style="margin:2px 0 14px">${factsHtml}<div class="takes">
+    <div class="h">Advisor’s read <span class="ai-chip"><svg style="width:11px;height:11px"><use href="#sparkle"/></svg>AI companion — advisory, not verified</span></div>
+    ${body}</div></div>`;
+}
+
+/* Per-card verified-facts blocks (deterministic, instant). */
+function routingFacts(routing){
+  const items = Object.entries(routing || {}).map(([tier, pool]) => {
+    const members = (pool && pool.members) || [];
+    const routed = (pool && pool.routed) || {};
+    const total = Object.values(routed).reduce((a, b) => a + b, 0);
+    // best starts at 0 (review F-A; same convention as the wizard's leadN): a
+    // zero-traffic pool elects NO leader — never claim "routing here" without evidence
+    let leader = null, best = 0;
+    members.forEach(m => { const n = routed[m.worker_id] || 0; if(n > best){ best = n; leader = m; } });
+    const lead = leader ? `${esc(leader.model)} routing here` : 'nobody routing here yet';
+    return `<li><b>${esc(tier)}</b>: ${lead} · ${members.length} member${members.length === 1 ? '' : 's'} · routed ${total}×</li>`;
+  }).join('');
+  return `<div class="facts"><div class="h">Routing state <span class="badge dim">verified facts</span></div>`
+    + `<ul>${items || '<li>no pools configured yet</li>'}</ul></div>`;
+}
+function failuresFacts(f){
+  const rows = Object.keys(f || {}).flatMap(t =>
+    Object.entries(f[t]).map(([mode, n]) => ({t, mode, n})));
+  rows.sort((a, b) => b.n - a.n || (a.t + a.mode).localeCompare(b.t + b.mode));
+  const top = rows.slice(0, 3).map(({t, mode, n}) =>
+    `<li>${esc(taskPlain(t))} — ${esc(mastPlain(mode))} · ${n}×</li>`).join('');
+  return `<div class="facts"><div class="h">Top failures <span class="badge dim">verified facts</span></div>`
+    + `<ul>${top || '<li>no failures recorded yet</li>'}</ul></div>`;
+}
+function playbookFacts(bullets){
+  const bs = bullets || [];
+  const active = bs.filter(b => b.active);
+  const scored = active.map(b => ({b, s: (b.helpful + 1) / (b.helpful + b.harmful + 2)}))
+    .sort((x, y) => y.s - x.s);
+  const best = scored[0], worst = scored[scored.length - 1];
+  const line = (label, e) => e ? `<li>${label}: ${esc(e.b.text)} <span class="mono">${(e.s * 100).toFixed(0)}%</span></li>` : '';
+  return `<div class="facts"><div class="h">Playbook state <span class="badge dim">verified facts</span></div><ul>`
+    + `<li>${bs.length} lesson${bs.length === 1 ? '' : 's'} · ${active.length} active</li>`
+    + line('best', best) + (worst && worst !== best ? line('worst', worst) : '')
+    + `</ul></div>`;
+}
+
+/* Shared action executor — used by the tuning listener AND the card listeners.
+   start_tune/add_coverage resolve suite = valid params.suite, else the (trusted,
+   already-known) fallbackSuite; card panels pass no fallback, so a bad suite is
+   refused with a toast rather than firing the API. */
+async function runAdviseAction(action, params, fallbackSuite){
+  params = params || {};
+  if(action === 'start_tune' || action === 'add_coverage'){
+    let suite;
+    if(validSuite(params.suite)) suite = params.suite;
+    else if(fallbackSuite) suite = fallbackSuite;
+    else { toast("the advisor didn’t name a valid suite — pick one in Harness tuning"); return; }
     if(action === 'start_tune'){
-      const r = await post('/api/optimization/runs', {suite: TUNE.suite});
-      toast(r.ok ? `Tuning started on the ${TUNE.suite} suite` : 'Could not start — a search may already be running');
+      // review K-A1/A2: carry the advisor's tuning knobs through (validated
+      // client-side: TuneRequest has no bounds) and honor the user's proposer
+      // dropdown instead of silently letting the server default to 'rule'
+      const body = {suite, proposer: PROPOSERS.includes(params.proposer) ? params.proposer : TUNE.proposer};
+      const sane = (v, max) => Number.isInteger(v) && v > 0 && v <= max;
+      if(sane(params.rounds, 12)) body.rounds = params.rounds;
+      if(sane(params.k, 5)) body.k = params.k;
+      const r = await post('/api/optimization/runs', body);
+      toast(r.ok ? `Tuning started on the ${suite} suite` : 'Could not start — a search may already be running');
       refreshConsole();
-    } else if(action === 'approve_promotion'){
-      const banner = document.querySelector('#tuning button[data-tune-approve]');
-      if(banner){ banner.scrollIntoView({behavior: 'smooth', block: 'center'}); toast('The decision buttons are in the Promote banner'); }
-      else toast('Nothing is awaiting approval right now');
-    } else if(action === 'open_settings'){
-      showView('settings');
-    } else if(action === 'prefill_goal'){
-      showView('wizard');
-    } else if(action === 'add_coverage'){
-      const suite = act.dataset.suite || TUNE.suite;
+    } else {
       toast('Asking the frontier agent for harder questions…');
       const r = await post(`/api/optimization/${encodeURIComponent(suite)}/coverage`, {n: 6});
       if(r.ok){
@@ -1812,9 +1904,94 @@ document.getElementById('tuning').addEventListener('click', async ev => {
       } else {
         toast('Question generation failed — try again in a moment');
       }
-    } else {
-      toast('That suggestion needs a human — see the Help tab for how');
     }
+  } else if(action === 'approve_promotion'){
+    const banner = document.querySelector('#tuning button[data-tune-approve]');
+    if(banner){ banner.scrollIntoView({behavior: 'smooth', block: 'center'}); toast('The decision buttons are in the Promote banner'); }
+    else toast('Nothing is awaiting approval right now');
+  } else if(action === 'open_settings'){
+    showView('settings');
+  } else if(action === 'prefill_goal'){
+    showView('wizard');
+  } else {
+    toast('That suggestion needs a human — see the Help tab for how');
+  }
+}
+
+/* One click handler per advisory card: the header sparkle toggles the panel
+   (POST /api/advise, cache, re-render), body buttons run shared actions with no
+   fallback suite. Header buttons are injected once by initCardAdvisors so they
+   survive the 3s innerHTML refresh (the panel itself re-prepends from cache). */
+function initCardAdvisors(){
+  Object.entries(CARD_ADVICE_TARGET).forEach(([page, bodyId]) => {
+    const card = document.getElementById(bodyId).closest('.card');
+    const btn = document.createElement('button');
+    btn.className = 'why card-advise';
+    btn.dataset.advisePage = page;
+    btn.title = 'AI insight — read the harness on this card';
+    btn.innerHTML = '<svg><use href="#sparkle"/></svg>';
+    card.querySelector('h2').appendChild(btn);
+    card.addEventListener('click', async ev => {
+      const spark = ev.target.closest('button[data-advise-page]');
+      if(spark){
+        if(CARD_ADVICE[page]){ delete CARD_ADVICE[page]; btn.classList.remove('on'); refreshConsole(); return; }
+        // review F-B: the loading marker doubles as a request token — the response
+        // commits only if this exact request is still the cache entry, so closing
+        // (or re-opening) while the POST is in flight can never zombie-reopen the panel
+        const req = {loading: true};
+        CARD_ADVICE[page] = req;
+        btn.classList.add('on');
+        refreshConsole();
+        let res;
+        try{
+          const r = await post('/api/advise', {page});
+          res = r.ok ? await r.json()
+            : {error: 'the advisor is unavailable right now — the facts above still stand'};
+        }catch(e){
+          res = {error: 'the advisor is unavailable right now — the facts above still stand'};
+        }
+        if(CARD_ADVICE[page] !== req) return;   // closed while pending — discard
+        res.factsFp = req.factsFp;              // fingerprint captured at fetch time (F-C)
+        CARD_ADVICE[page] = res;
+        refreshConsole();
+        return;
+      }
+      const act = ev.target.closest('button[data-advise-act]');
+      if(act){
+        await runAdviseAction(act.dataset.adviseAct, btnParams(act), null);
+      }
+    });
+  });
+}
+
+document.getElementById('tuning').addEventListener('click', async ev => {
+  const w = ev.target.closest('button[data-advise]');
+  if(w){
+    const key = w.dataset.suite + '/' + w.dataset.advise;
+    if(ADVICE[key]){ delete ADVICE[key]; refreshConsole(); return; }
+    // review K-D1: same request-token guard as the card advisors (F-B) — the
+    // response commits only while this exact request is still the cached entry,
+    // so a close while the POST is in flight can never zombie-reopen the panel
+    const req = {loading: true};
+    ADVICE[key] = req;
+    refreshConsole();
+    let res;
+    try{
+      const r = await post('/api/advise', {page: 'tuning', subject: w.dataset.advise, suite: w.dataset.suite});
+      res = r.ok ? await r.json() : {error: 'the advisor is unavailable right now — the facts above still stand'};
+    }catch(e){ res = {error: 'the advisor is unavailable right now — the facts above still stand'}; }
+    if(ADVICE[key] !== req) return;   // closed while pending — discard
+    ADVICE[key] = res;
+    refreshConsole(); return;
+  }
+  const act = ev.target.closest('button[data-advise-act]');
+  if(act){
+    const action = act.dataset.adviseAct;
+    // the tuning card keeps its existing fallback: start_tune -> TUNE.suite,
+    // add_coverage -> the row's suite, else TUNE.suite
+    const fallbackSuite = action === 'add_coverage'
+      ? (act.dataset.suite || TUNE.suite) : TUNE.suite;
+    await runAdviseAction(action, btnParams(act), fallbackSuite);
     return;
   }
   const a = ev.target.closest('button[data-tune-approve]');
@@ -1857,6 +2034,9 @@ async function refreshConsole(){
       get('/api/matrix'), get('/api/playbook'), get('/api/failures'), get('/api/spans'),
       get('/api/optimization'), get('/api/routing'),
     ]);
+    // review K-C1: refresh the legal-suite list BEFORE any render uses it, so
+    // the advice render guards and the tuning dropdown see this tick's suites
+    TUNE_SUITES = [...new Set([...TUNE_DEFAULT_SUITES, ...tuning.map(s => s.suite)])];
     document.getElementById('tiles').innerHTML = renderTiles(runs, workers, prov, playbook);
     document.getElementById('runs').innerHTML = renderRuns(runs);
     document.getElementById('workers').innerHTML = renderWorkers(workers, routing);
@@ -1905,6 +2085,7 @@ function initCardArranging(){
   });
 }
 initCardArranging();
+initCardAdvisors();
 
 /* ================= SETTINGS: wizard-driven configuration ================= */
 const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null };

@@ -90,7 +90,10 @@ promotion yourself — web-started searches park gate-passing winners for **your
 approval**, which then rewires the live small-tier runner immediately. Promoted params
 also apply at every `serve` boot. The ✦ sparkle marks the AI companion throughout the
 UI: advisory explanations and suggested next actions over fenced, untrusted-marked
-context — it never executes anything itself.
+context — it never executes anything itself. Beyond the Goal-step prompt assistant and
+the tuning-candidate explanations, the sparkle also opens card-level reads on the
+routing, failures, and playbook console cards — each pairing a verified-facts summary
+with the companion's read and safe, suite-validated next actions.
 
 ## Persistence
 

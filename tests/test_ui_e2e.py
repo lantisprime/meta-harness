@@ -836,6 +836,330 @@ def test_goal_step_has_prompt_assistant(page, server):
     page.wait_for_selector("#goal-advice .advisor, #goal-advice .empty")
 
 
+def test_failures_card_advisor_panel_and_actions(page, server):
+    """Card-level advisor (codex F4): the ✦ header button on 'Why runs fail'
+    opens a panel whose advisory chip + read survive a live refresh tick; its
+    action buttons carry params — a valid-suite start_tune fires POST
+    /api/optimization/runs for THAT suite, a missing/invalid-suite action
+    renders no mutating button, and open_settings reaches the Settings view."""
+    base, _ = server
+    # deterministic advice: one valid-suite start_tune, one invalid-suite
+    # add_coverage (must be dropped), one navigation action
+    fake = {
+        "read": "The extract cluster is the top failure — a tuning experiment could shrink it.",
+        "next_actions": [
+            {"action": "start_tune", "label": "Tune the mixed suite",
+             "params": {"suite": "mixed"}},
+            {"action": "add_coverage", "label": "Broaden a ghost suite",
+             "params": {"suite": "ghost-suite"}},
+            {"action": "open_settings", "label": "Open Settings"},
+            {"action": "none", "label": "nothing to do"},
+        ],
+        "advisory": True, "model": "mock",
+    }
+    page.route("**/api/advise", lambda route: route.fulfill(json=fake))
+    started = {}
+    page.route("**/api/optimization/runs",
+               lambda route: (started.update(json=route.request.post_data_json),
+                              route.fulfill(json={"ok": True}))[-1])
+
+    page.goto(base); page.click("#nav-console")
+    card = "div.card:has(#failures)"
+    page.wait_for_selector(f"{card} h2:has-text('Why runs fail')")
+
+    # header sparkle opens the panel: advisory chip + the exact read text
+    page.click(f"{card} button[data-advise-page='failures']")
+    page.wait_for_selector("#failures .advisor")
+    assert page.locator("#failures .ai-chip").count() == 1
+    assert "advisory, not verified" in page.locator(
+        "#failures .ai-chip").inner_text().lower()
+    assert "extract cluster is the top failure" in page.locator(
+        "#failures .advisor .takes p").inner_text()
+
+    # render guard: invalid-suite add_coverage dropped, 'none' dropped —
+    # only start_tune + open_settings remain as mutating/nav buttons
+    acts = page.locator("#failures .advisor button[data-advise-act]")
+    assert acts.count() == 2
+    labels = acts.all_inner_texts()
+    assert "Tune the mixed suite" in labels
+    assert "Open Settings" in labels
+    assert not any("ghost" in t for t in labels)
+
+    # survives one live refresh tick (re-appended from cache, no re-fetch)
+    page.wait_for_timeout(3300)
+    assert page.locator("#failures .ai-chip").count() == 1
+    assert "extract cluster is the top failure" in page.locator(
+        "#failures .advisor .takes p").inner_text()
+
+    # start_tune carries its params.suite through to the API
+    page.click("#failures .advisor button:has-text('Tune the mixed suite')")
+    page.wait_for_selector(".toast.on:has-text('Tuning started on the mixed suite')")
+    assert started["json"]["suite"] == "mixed"
+
+    # open_settings navigation action reaches the Settings view
+    page.wait_for_selector("#failures .advisor button:has-text('Open Settings')")
+    page.click("#failures .advisor button:has-text('Open Settings')")
+    page.wait_for_selector("#nav-settings.on")
+    assert page.locator("#view-settings").is_visible()
+
+    page.unroute("**/api/advise")
+    page.unroute("**/api/optimization/runs")
+
+
+def test_routing_facts_zero_traffic_pool_elects_no_leader(page, server):
+    """Regression (review F-A): routingFacts seeded its leader scan with
+    best = -1, so a freshly-wired pool with zero routed traffic falsely crowned
+    members[0] as 'routing here'. best now starts at 0 (the wizard's leadN
+    convention at renderAgentsStep) — an all-zero pool claims no leader."""
+    base, _ = server
+    page.goto(base); page.click("#nav-console")
+    page.wait_for_selector("#tiles .tile")
+    zero = page.evaluate("""() => routingFacts({
+      small: {members: [{worker_id: 'w1', model: 'm1'}], routed: {}}})""")
+    assert "routing here" not in zero.replace("nobody routing here yet", "")
+    assert "nobody routing here yet" in zero
+    # sanity: real traffic still elects the right leader
+    routed = page.evaluate("""() => routingFacts({
+      small: {members: [{worker_id: 'w1', model: 'm1'},
+                        {worker_id: 'w2', model: 'm2'}], routed: {w2: 3}}})""")
+    assert "m2 routing here" in routed
+
+
+def test_card_advice_closed_while_pending_stays_closed(page, server):
+    """Regression (review F-B): closing a card panel while its /api/advise POST
+    was still in flight let the late response rewrite CARD_ADVICE and zombie-
+    reopen the panel with the sparkle's .on state desynced. The response now
+    commits only if its own request token is still the cached entry."""
+    base, _ = server
+    pending = []
+    page.route("**/api/advise", lambda route: pending.append(route))
+    page.goto(base); page.click("#nav-console")
+    card = "div.card:has(#failures)"
+    page.wait_for_selector(f"{card} h2:has-text('Why runs fail')")
+    spark = f"{card} button[data-advise-page='failures']"
+
+    page.click(spark)                          # open -> loading panel
+    page.wait_for_selector("#failures .advisor")
+    page.click(spark)                          # close while the POST is pending
+    page.wait_for_selector("#failures .advisor", state="detached")
+    assert pending, "the advise request should have been captured"
+    pending[0].fulfill(json={"read": "zombie advice", "next_actions": [],
+                             "advisory": True, "model": "mock"})
+    page.wait_for_timeout(3500)                # a full live-refresh tick
+    assert page.locator("#failures .advisor").count() == 0
+    assert "zombie advice" not in page.locator("#failures").inner_text()
+    assert page.locator(f"{spark}.on").count() == 0   # sparkle state in sync
+    page.unroute("**/api/advise")
+
+
+def test_card_advice_facts_drift_disables_mutating_actions(page, server):
+    """Regression (review F-C): cached advice outlives the facts it was
+    computed from. When the card's data changes on the live loop, the panel
+    keeps the read but shows a 'facts changed' note and drops mutating
+    (suite-targeting) buttons; navigation actions stay."""
+    base, _ = server
+    fake = {
+        "read": "drift probe read",
+        "next_actions": [
+            {"action": "start_tune", "label": "Tune the mixed suite",
+             "params": {"suite": "mixed"}},
+            {"action": "open_settings", "label": "Open Settings"},
+        ],
+        "advisory": True, "model": "mock",
+    }
+    page.route("**/api/advise", lambda route: route.fulfill(json=fake))
+    page.route("**/api/failures",
+               lambda route: route.fulfill(json={"transform": {"tool_error": 3}}))
+    page.goto(base); page.click("#nav-console")
+    card = "div.card:has(#failures)"
+    page.wait_for_selector(f"{card} h2:has-text('Why runs fail')")
+    page.wait_for_selector("#failures td:has-text('3×')")   # data A on screen
+
+    page.click(f"{card} button[data-advise-page='failures']")
+    page.wait_for_selector("#failures .advisor .takes p:has-text('drift probe read')")
+    assert page.locator(
+        "#failures .advisor button:has-text('Tune the mixed suite')").count() == 1
+
+    # the failure counts change on the next live tick -> facts fingerprint drifts
+    page.route("**/api/failures",
+               lambda route: route.fulfill(json={"transform": {"tool_error": 9}}))
+    page.wait_for_selector(
+        "#failures .advisor:has-text('facts changed since this advice')",
+        timeout=8_000)
+    assert "drift probe read" in page.locator(
+        "#failures .advisor .takes p").inner_text()       # read stays visible
+    assert page.locator(
+        "#failures .advisor button:has-text('Tune the mixed suite')").count() == 0
+    assert page.locator(
+        "#failures .advisor button:has-text('Open Settings')").count() == 1
+    page.unroute("**/api/advise")
+    page.unroute("**/api/failures")
+
+
+def test_tuning_advice_start_tune_ignores_advisory_params_suite(page, server):
+    """Regression (review F-D): behavior-preservation pin for the tuning card.
+    renderAdvicePanel deliberately embeds NO data-params, so a tuning-row
+    start_tune posts {suite: TUNE.suite} even when the advisory action carries
+    a (valid) params.suite. If data-params is ever added to renderAdvicePanel,
+    the handler would honor 'math' here and this test fails."""
+    base, _ = server
+    page.goto(base); page.click("#nav-console")
+    page.wait_for_selector("h2:has-text('Harness tuning')")
+    started = {}
+    page.route("**/api/optimization/runs",
+               lambda route: (started.update(json=route.request.post_data_json),
+                              route.fulfill(json={"ok": True}))[-1])
+    # inject a tuning-row advice panel whose action names a valid other suite,
+    # and click it — all in one synchronous evaluate so the 3s refresh can't race
+    page.evaluate("""() => {
+      ADVICE['math/c1'] = {read: 'r', next_actions: [
+        {action: 'start_tune', label: 'Tune it', params: {suite: 'math'}}]};
+      const el = document.getElementById('tuning');
+      el.innerHTML = renderAdvicePanel('math/c1', {});
+      el.querySelector('button[data-advise-act]').click();
+    }""")
+    page.wait_for_selector(".toast.on:has-text('Tuning started on the mixed suite')")
+    assert started["json"]["suite"] == "mixed"   # TUNE.suite, not the advisory's math
+    # review K-A2 extension: with no advisory proposer, the user's dropdown
+    # (TUNE.proposer, default 'rule') rides along instead of a silent omission
+    assert started["json"]["proposer"] == "rule"
+    page.unroute("**/api/optimization/runs")
+
+
+def test_tuning_row_advice_closed_while_pending_stays_closed(page, server):
+    """Regression (review K-D1): the tuning-row sparkle listener kept the
+    pre-F-B unconditional ADVICE[key] assignment, so closing a row panel while
+    its /api/advise POST was pending let the late response repopulate the cache
+    and zombie-reopen the panel on the next refresh. Same token guard as F-B.
+    Tuning rows only render with real candidates, so the row's sparkle button
+    is injected; the assertions target the ADVICE cache the panels render from."""
+    base, _ = server
+    pending = []
+    page.route("**/api/advise", lambda route: pending.append(route))
+    page.goto(base); page.click("#nav-console")
+    page.wait_for_selector("h2:has-text('Harness tuning')")
+    inject = """() => {
+      const el = document.getElementById('tuning');
+      el.innerHTML = '<button class="why" data-advise="c9" data-suite="mixed"></button>';
+      el.querySelector('button[data-advise]').click();
+    }"""
+    page.evaluate(inject)                 # open: caches the loading marker
+    assert page.evaluate("() => !!ADVICE['mixed/c9']")
+    for _ in range(50):                   # the intercepted POST is now pending
+        if pending:
+            break
+        page.wait_for_timeout(100)
+    assert pending, "the advise request should have been captured"
+    page.evaluate(inject)                 # close while the POST is in flight
+    assert page.evaluate("() => ADVICE['mixed/c9'] === undefined")
+    pending[0].fulfill(json={"read": "zombie row advice", "next_actions": [],
+                             "advisory": True, "model": "mock"})
+    page.wait_for_timeout(800)            # let the late response resolve
+    assert page.evaluate("() => ADVICE['mixed/c9'] === undefined"), \
+        "late advise response must not repopulate a closed tuning-row panel"
+    page.unroute("**/api/advise")
+
+
+def test_advisor_start_tune_carries_validated_tuning_knobs(page, server):
+    """Regression (review K-A1/A2): advisor-triggered start_tune posted only
+    {suite}, silently dropping the advisor's params AND the user's proposer
+    dropdown (the manual button already sent TUNE.proposer). It now posts
+    proposer (valid params.proposer, else TUNE.proposer) plus rounds/k when
+    they are sane positive ints (rounds<=12, k<=5) — junk values are omitted
+    so TuneRequest's server defaults apply."""
+    base, _ = server
+    page.goto(base); page.click("#nav-console")
+    page.wait_for_selector("h2:has-text('Harness tuning')")
+    posts = []
+    page.route("**/api/optimization/runs",
+               lambda route: (posts.append(route.request.post_data_json),
+                              route.fulfill(json={"ok": True}))[-1])
+    # full advisory params ride through
+    page.evaluate("() => runAdviseAction('start_tune', "
+                  "{suite: 'mixed', proposer: 'llm', rounds: 4, k: 2}, null)")
+    assert posts[0] == {"suite": "mixed", "proposer": "llm", "rounds": 4, "k": 2}
+    # junk knobs dropped; bogus proposer falls back to the user's dropdown pick
+    page.evaluate("() => { TUNE.proposer = 'code'; }")
+    page.evaluate("() => runAdviseAction('start_tune', "
+                  "{suite: 'mixed', proposer: 'bogus', rounds: -3, k: 99}, null)")
+    assert posts[1] == {"suite": "mixed", "proposer": "code"}
+    page.unroute("**/api/optimization/runs")
+
+
+def test_dynamic_suite_from_optimization_payload_is_advisable(page, server):
+    """Regression (review K-C1): the client suite list was a static four-name
+    constant, so a suite living on disk (advisable by the backend, whose
+    context.suites comes from real dirs) was dropped by the render guard and
+    missing from the tuning dropdown. The list now unions the built-in
+    defaults with every suite /api/optimization reports on the live loop."""
+    base, _ = server
+    fifth = {"suite": "code", "running": False, "active": False,
+             "candidates": [], "frontier": [], "promoted": None,
+             "pending": None, "report": None, "findings": []}
+    page.route("**/api/optimization", lambda route: route.fulfill(json=[fifth]))
+    fake = {"read": "the code suite needs a tune",
+            "next_actions": [{"action": "start_tune", "label": "Tune the code suite",
+                              "params": {"suite": "code"}}],
+            "advisory": True, "model": "mock"}
+    page.route("**/api/advise", lambda route: route.fulfill(json=fake))
+    started = {}
+    page.route("**/api/optimization/runs",
+               lambda route: (started.update(json=route.request.post_data_json),
+                              route.fulfill(json={"ok": True}))[-1])
+
+    page.goto(base); page.click("#nav-console")
+    page.wait_for_selector("#tune-suite")
+    options = page.locator("#tune-suite option").all_inner_texts()
+    assert any("code" in o for o in options)    # disk suite joins the dropdown
+    assert any("mixed" in o for o in options)   # built-ins stay startable (union)
+
+    # a card-level advisory action naming the disk suite survives the render
+    # guard and posts for THAT suite
+    card = "div.card:has(#failures)"
+    page.click(f"{card} button[data-advise-page='failures']")
+    page.wait_for_selector(
+        "#failures .advisor button:has-text('Tune the code suite')")
+    page.click("#failures .advisor button:has-text('Tune the code suite')")
+    page.wait_for_selector(".toast.on:has-text('Tuning started on the code suite')")
+    assert started["json"]["suite"] == "code"
+    for u in ("**/api/optimization", "**/api/advise", "**/api/optimization/runs"):
+        page.unroute(u)
+
+
+def test_bad_data_params_degrades_to_empty_not_a_throw(page, server):
+    """Regression (review G-FU2): JSON.parse(act.dataset.params) was unguarded
+    in BOTH advise-action listeners, so a malformed data-params attribute threw
+    inside the click handler — dead button plus console error. btnParams() now
+    degrades to {} and the action still runs; the navigation assertions are the
+    load-bearing check (an unfixed throw means Settings is never reached)."""
+    base, _ = server
+    errors = []
+    handler = lambda e: errors.append(str(e))  # noqa: E731
+    page.on("pageerror", handler)
+    try:
+        page.goto(base); page.click("#nav-console")
+        page.wait_for_selector("h2:has-text('Harness tuning')")
+        # tuning listener: broken JSON in data-params on a navigation action
+        page.evaluate("""() => {
+          const el = document.getElementById('tuning');
+          el.innerHTML = '<button data-advise-act="open_settings" data-params="{broken json">go</button>';
+          el.querySelector('button[data-advise-act]').click();
+        }""")
+        page.wait_for_selector("#nav-settings.on")
+        # card-advisor listener: same probe inside the failures card
+        page.click("#nav-console")
+        page.wait_for_selector("h2:has-text('Why runs fail')")
+        page.evaluate("""() => {
+          const el = document.getElementById('failures');
+          el.innerHTML = '<button data-advise-act="open_settings" data-params="not json at all">go</button>';
+          el.querySelector('button[data-advise-act]').click();
+        }""")
+        page.wait_for_selector("#nav-settings.on")
+    finally:
+        page.remove_listener("pageerror", handler)
+    assert errors == [], f"bad data-params must never throw: {errors}"
+
+
 def test_console_cards_can_be_rearranged(page, server):
     """Cards move with the hover ‹ › controls and the order persists in
     localStorage for the next visit."""
