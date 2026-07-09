@@ -415,6 +415,51 @@ async def test_coverage_extends_suite_with_validated_questions(wired_state, tmp_
     assert any(t.success_check == {"equals": 399} for t in search + holdout)
 
 
+async def test_coverage_hardens_check_values_and_survives_div_by_zero(wired_state, tmp_path):
+    """Check-value hardening on the coverage endpoint, end to end: a negative
+    tol, a mixed primary key ({equals}+{one_of}), an over-large tol (float()
+    OverflowError), and a div-by-zero recompute are each dropped — the last two
+    WITHOUT 500ing the endpoint — while the one clean {equals, tol} item is
+    added with its arithmetic answer recomputed and its valid tol preserved."""
+    import json
+
+    from metaharness.core.types import Task, WorkerResult
+    from metaharness.harness.runner import Runner
+
+    generated = {"tasks": [
+        {"task_type": "arithmetic", "objective": "Compute 2+2. Answer with the number only.",
+         "inputs": {"expression": "2+2"}, "success_check": {"equals": 4, "tol": -1}},        # negative tol -> dropped
+        {"task_type": "arithmetic", "objective": "Compute 3+3. Answer with the number only.",
+         "inputs": {"expression": "3+3"}, "success_check": {"equals": 6, "one_of": [6, 7]}},  # mixed keys -> dropped
+        {"task_type": "arithmetic", "objective": "Compute 1/0. Answer with the number only.",
+         "inputs": {"expression": "1/0"}, "success_check": {"equals": 1}},                    # recompute raises -> dropped
+        {"task_type": "arithmetic", "objective": "Compute 5+5. Answer with the number only.",
+         "inputs": {"expression": "5+5"}, "success_check": {"equals": 10, "tol": 10 ** 400}},  # OverflowError tol -> dropped, not 500
+        {"task_type": "arithmetic", "objective": "Compute 6*7. Answer with the number only.",
+         "inputs": {"expression": "6*7"}, "success_check": {"equals": 0, "tol": 0.5}},        # clean -> added (equals=42)
+    ]}
+
+    class Generator(Runner):
+        worker_id, tier, model = "gen", Tier.SMALL, "gen"
+        keypair = None
+        async def run(self, task: Task) -> WorkerResult:
+            return WorkerResult(task_id=task.id, worker_id="gen", tier=self.tier,
+                                model="gen", output=generated, raw_text=json.dumps(generated))
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    wired_state.router.pools[Tier.SMALL][0] = Generator()  # planner_runner picks it up
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/math/coverage", json={"n": 4})
+        assert resp.status_code == 200, resp.text   # div-by-zero recompute did NOT 500 the endpoint
+        assert resp.json() == {"suite": "math", "added": 1, "total_extras": 1}
+
+    extras_file = json.loads((tmp_path / "optimization" / "math" / "extra_tasks.json").read_text())
+    assert len(extras_file) == 1
+    assert extras_file[0]["success_check"] == {"equals": 42, "tol": 0.5}  # recomputed, valid tol kept
+
+
 def _claude_proposal_stub(path, delta: dict, parent: str = "c0001") -> str:
     """A fake `claude` CLI that prints a Proposal JSON (wrapped in chatter) in
     claude's --output-format json envelope — no real coding CLI needed."""

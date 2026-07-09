@@ -16,8 +16,9 @@ difficulty — but arithmetic answers are always recomputed exactly.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.sandbox import eval_arithmetic
@@ -95,6 +96,33 @@ _BUILDERS = {
 }
 
 SUITE_NAMES = ["mixed", *sorted(_BUILDERS)]
+
+
+def check_value_ok(check: dict[str, Any]) -> bool:
+    """The key shape is right; would the VALUES crash or degrade a consumer?
+    verify_output does an uncaught `float(check["tol"])` (verifiers.py:72) and
+    indexes `one_of`/`contains` directly — a harvested or generated check must
+    not smuggle in a value that turns a later tuning run into a crash."""
+    if "tol" in check:
+        try:
+            tol = float(check["tol"])
+        except (TypeError, ValueError, OverflowError):  # OverflowError: float() on an over-large int (e.g. a 400-digit tol)
+            return False
+        # panel F1: math.isclose raises on a negative tol (crashing tuning), and
+        # an inf tol makes ANY numeric output PASS (silent ground-truth
+        # corruption). `tol >= 0` also rejects NaN, since NaN >= 0 is False.
+        if not math.isfinite(tol) or tol < 0:
+            return False
+    if "one_of" in check:
+        allowed = check["one_of"]
+        if not isinstance(allowed, list) or not allowed:
+            return False
+        if not all(isinstance(v, (str, int, float)) for v in allowed):
+            return False
+    if "contains" in check:
+        if not isinstance(check["contains"], str) or not check["contains"]:
+            return False
+    return True
 
 
 def extras_path(suite_dir: Path | str) -> Path:

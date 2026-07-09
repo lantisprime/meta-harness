@@ -18,6 +18,7 @@ from metaharness.evals.verifiers import verify_output
 import metaharness.optimization.harvest as harvest_mod
 from metaharness.optimization.harvest import HarvestReport, harvest_journals
 from metaharness.optimization.suites import (
+    check_value_ok,
     extras_path,
     load_extras,
     save_extras,
@@ -424,6 +425,31 @@ def test_pathological_tol_values_rejected(tmp_path):
     assert report.added == 1
     (task,) = load_extras(tmp_path / "opt" / "mixed")
     assert task.success_check == {"equals": "1", "tol": 0.5}
+
+
+def test_check_value_ok_branches_directly():
+    """check_value_ok is now public and shared by harvest + the coverage
+    endpoint; pin every value-hardening branch directly, including the
+    contains branch that no path-level test reaches."""
+    # happy paths
+    assert check_value_ok({"equals": 5})
+    assert check_value_ok({"equals": 5, "tol": 0})
+    assert check_value_ok({"equals": 5, "tol": 0.5})
+    assert check_value_ok({"one_of": ["a", 1, 2.0]})
+    assert check_value_ok({"contains": "x"})
+    # tol branch
+    assert not check_value_ok({"equals": 5, "tol": "not-a-float"})
+    assert not check_value_ok({"equals": 5, "tol": -1})
+    assert not check_value_ok({"equals": 5, "tol": float("inf")})
+    assert not check_value_ok({"equals": 5, "tol": float("nan")})
+    assert not check_value_ok({"equals": 5, "tol": 10 ** 400})   # OverflowError, not ValueError
+    # one_of branch
+    assert not check_value_ok({"one_of": []})
+    assert not check_value_ok({"one_of": "positive"})
+    assert not check_value_ok({"one_of": [None]})
+    # contains branch (previously unreached)
+    assert not check_value_ok({"contains": ""})
+    assert not check_value_ok({"contains": 5})
 
 
 def test_arithmetic_division_by_zero_skipped_not_fatal(tmp_path):

@@ -338,8 +338,9 @@ def create_app(state: HarnessState) -> FastAPI:
 
         from metaharness.core.types import Task, TaskType
         from metaharness.harness.enrichment import SchemaGuard
-        from metaharness.harness.sandbox import SandboxError, eval_arithmetic
+        from metaharness.harness.sandbox import eval_arithmetic
         from metaharness.optimization.suites import (
+            check_value_ok,
             load_extras,
             save_extras,
             search_and_holdout,
@@ -387,13 +388,18 @@ def create_app(state: HarnessState) -> FastAPI:
             except Exception:
                 continue
             check = candidate.success_check or {}
-            if candidate.task_type not in allowed_types or "equals" not in check:
+            # subset gate: at least {equals}, at most {equals, tol}, and value-hardened.
+            # (Accepting any check merely *containing* equals let a mixed primary key like
+            # {"equals":x,"one_of":[...]} slip through and get silently equals-scored.)
+            if (candidate.task_type not in allowed_types
+                    or not ({"equals"} <= set(check) <= {"equals", "tol"})
+                    or not check_value_ok(check)):
                 continue
             if candidate.task_type == TaskType.ARITHMETIC:
                 expr = candidate.inputs.get("expression")
                 try:
                     check["equals"] = eval_arithmetic(str(expr))  # never trust the generator's math
-                except SandboxError:
+                except Exception:  # a div-by-zero / evaluator crash drops the task, never 500s
                     continue
             key = (candidate.objective, _json.dumps(candidate.inputs, sort_keys=True, default=str))
             if key in seen:
