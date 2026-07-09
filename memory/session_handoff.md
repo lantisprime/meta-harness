@@ -1,39 +1,51 @@
-# Session Handoff — meta-harness (2026-07-09, session 7)
+# Session Handoff — meta-harness (2026-07-09, session 8)
 
-## State: Per-task model selection (next-step #1) SHIPPED on main.
-Commit 36e0417. 331/331 tests (was 310). Working tree clean. Server :8321
-still runs the PRE-pools build — restart it to get pools live.
+## State: 3 roadmap items SHIPPED on main + model-bench harness built. Tree clean.
+383 tests (was 331). Server :8321 restarted onto the pools build (verified via
+/api/routing: techlead-bot + pi-coder-bot both pooled on mid). Commits 911ba71→5186b2e.
 
-## What shipped
-Router holds per-tier POOLS (dict[Tier, list[Runner]]); tier escalation
-unchanged; decide() picks the member with best matrix pass rate for the
-task_type (tie: config order). ε-exploration (settings.explore_rate, 0.1)
-on success_check tasks only routes the least-sampled other member so benched
-models earn evidence; an explored FAIL retries the tier instead of escalating.
-add_worker appends (re-add = in-place identity rotation, POST /api/workers
-on live dup now 201+rotation, was 409); retire removes one member, tier keeps
-serving. GET /api/routing = members + skills + routed tallies; dashboard tier
-rows / Agents card / "Who's good at what" show pools + routed n×. Boot check
-against real config: techlead-bot(codex-cli) AND pi-coder-bot(pi-cli) both
-pooled on mid — the "pi holds the slot" eviction is gone.
+## What shipped (next-steps #1, #2, #4 + server restart)
+1. **Code-space search** (paper arXiv 2603.28052): CodeProposer runs a coding CLI
+   rooted at the ledger so it greps raw traces itself. HarnessParams.code_ref/code_hash
+   with root-bound build(base, *, ledger_root); code_gate.py (path containment, ast,
+   subprocess import probe that CALLS build(stub), AST-folded decontamination, hard-link
+   refusal); loop canonicalizes staged→candidates/<cid>/harness.py BEFORE eval, hashes
+   canonical bytes, build() re-verifies hash on every load. CLI --proposer code, web
+   proposer="code", dashboard code badge. Commits ecff506, 6f4e384, d36c71e, bb06d99.
+2. **Budget charging**: LLMProposer/CodeProposer/advise() charge WorkerResult usage;
+   loop catches BudgetExceeded→stopped="budget"; SchemaGuard accumulates retry usage;
+   HarnessState defaults a cap-less Budget (was silently None→no-op); serve --max-cost-usd
+   /--max-tokens; CodingAgentWorker estimates tokens (~4 chars/tok). Commits ae4019e, 0576fb1.
+3. **GLM F3 fixed**: CapabilityMatrix atomic save (tempfile+os.replace), guarded load
+   (corrupt→empty+last_load_error, no boot crash), _last_write advances only on success,
+   non-blocking shutdown flush via asyncio.to_thread. Commits 1db8ab0, 655c92b.
 
 ## Process (worked well — reuse)
-Orchestrated: 3 sonnet scouts → Fable plan → 2 opus build stages →
-3-reviewer adversarial panel (opus/codex/GLM-5.2, 6 findings, zero overlap,
-all fixed+regression-tested) → MiniMax-M3 independent behavioral verify via
-pi in tmux. Durable: global episode 20260709-012621-tiered-multi-agent-
-orchestration-playboo-1322; agent-roster-verified-capabilities.md in
-auto-memory.
+codex plan review (2 P1 fixed pre-build) → 3 opus build stages (frozen-diff handoffs) →
+4-seat panel (codex+opus+GLM-5.2+kimi-k2.7-code) on full diff: 9 distinct findings, 2
+convergences, ALL fixed w/ regression tests → verify: MiniMax-M3 endpoint flaked (timeouts
++ prompt-shield per-action gate = unworkable), so orchestrator wrote its own independent
+probes /tmp/m3-verify/probe.py → 8/8 PASS. Durable: [[model-bench-harness]],
+[[agent-roster-verified-capabilities]] (11-model×3-tier matrix), openrouter-pricing KB.
 
-## Known issue (deliberately deferred)
-GLM F3: CapabilityMatrix.record does synchronous write_text on the event
-loop per observation, unwrapped — disk error crashes the run. Pre-existing.
+## Also built: ~/.model-bench/ (git repo, weekly cron Mon 09:00)
+Reusable instrumentation sweep (bin/sweep.sh) + review panel (bin/panel.sh). Model profile
+matrix: deepseek-v4-flash fastest all tiers; GLM-5.2/kimi deep-review seats; qwen3.7-plus
+clean; M3 behavioral-verify only (slow, flaky); gemma-4-31b best US/EU; fast tier
+hallucinates asyncio races. Re-run when >30 days stale.
+
+## Known issues (deferred)
+- Budget.max_wall_s configured but never enforced (pre-existing; 4 models spotted it).
+- Decontamination is best-effort (string+AST-literal); chr()/runtime obfuscation out of
+  scope, mitigated by held-out inspection (documented in code + architecture.md §3.9).
+- No coding-CLI adapter surfaces real token usage → CodeProposer charges estimates.
 
 ## Next steps (priority order)
-1. Code-space search (coding-agent proposer over the ledger).
-2. Charge LLMProposer/advisor tokens to Budget.
-3. Advisor placements (mockup artifact 28edffa2, not built).
-4. Fix GLM F3 (async/batched matrix persistence).
-5. Suites from real run journals; carried: Issues #1/#2, gemma-vs-qwen.
+1. Advisor placements (was #3; mockup artifact 28edffa2 — fetch from artifact gallery,
+   not in-repo). Only goal+tuning wired; /api/routing, /api/failures, /api/playbook unadvised.
+2. Suites from real run journals (was #5): 24 journals in ~/.metaharness/journals/;
+   extract (context, output, verdict) → Task into suites' extra_tasks.json format.
+3. Charge real coding-CLI token usage once an adapter exposes it (replace estimate).
+4. Enforce Budget.max_wall_s. Carried: Issues #1/#2, gemma-vs-qwen eval.
 
 Reset context now.
