@@ -1,44 +1,39 @@
-# Session Handoff — meta-harness (2026-07-09, session 6 final)
+# Session Handoff — meta-harness (2026-07-09, session 7)
 
-## State: Meta-Harness optimizer + full web surface + live-testing fixes on main.
-310/310 tests. Latest commits: 9f6a64b (LLM proposer + prompt directives),
-901b313 (add_coverage suite extension), 7ff4d91 (report records target model),
-plus dda205e/5f9ddc2/... (live-testing fixes). Server :8321 runs latest build
-(--local; MiniMax-M3 small, codex/pi mid [pi holds the slot], deepseek frontier).
+## State: Per-task model selection (next-step #1) SHIPPED on main.
+Commit 36e0417. 331/331 tests (was 310). Working tree clean. Server :8321
+still runs the PRE-pools build — restart it to get pools live.
 
-## Live user-testing found 3 real bugs (all fixed + regression-tested)
-1. strip_think (local.py): MiniMax <think> blocks failed EVERY correct answer
-   (classify pass^3 0.00). The AI advisor itself diagnosed this from raw traces.
-2. ToolOffload prose parsing (enrichment.py): real models answer "The
-   expression is: 17*23+9", not {"program":...} — offload always failed.
-3. Just-started searches invisible for minutes (suite dir didn't exist yet).
-Tainted ledgers archived in ~/.metaharness/optimization-archive-20260709/.
+## What shipped
+Router holds per-tier POOLS (dict[Tier, list[Runner]]); tier escalation
+unchanged; decide() picks the member with best matrix pass rate for the
+task_type (tie: config order). ε-exploration (settings.explore_rate, 0.1)
+on success_check tasks only routes the least-sampled other member so benched
+models earn evidence; an explored FAIL retries the tier instead of escalating.
+add_worker appends (re-add = in-place identity rotation, POST /api/workers
+on live dup now 201+rotation, was 409); retire removes one member, tier keeps
+serving. GET /api/routing = members + skills + routed tallies; dashboard tier
+rows / Agents card / "Who's good at what" show pools + routed n×. Boot check
+against real config: techlead-bot(codex-cli) AND pi-coder-bot(pi-cli) both
+pooled on mid — the "pi holds the slot" eviction is gone.
 
-## Shipped since last handoff
-- Freshness stamps + per-suite plain-language summary (also on Home).
-- Arrangeable console cards (hover ‹ ›, localStorage).
-- Advisor actions execute (open_settings/prefill_goal navigate; add_coverage
-  works: frontier agent generates harder questions, validated hard — math
-  recomputed via sandbox, wrong-domain/unscoreable dropped — persisted in
-  <suite>/extra_tasks.json, merged into all future searches web+CLI).
-- Proposer picker on Tune button: rule | llm (frontier agent over raw traces).
-- RuleProposer proposes additive prompt directives on near-miss format fails.
-- Report records target_model (swapping tier models made ledgers misleading).
+## Process (worked well — reuse)
+Orchestrated: 3 sonnet scouts → Fable plan → 2 opus build stages →
+3-reviewer adversarial panel (opus/codex/GLM-5.2, 6 findings, zero overlap,
+all fixed+regression-tested) → MiniMax-M3 independent behavioral verify via
+pi in tmux. Durable: global episode 20260709-012621-tiered-multi-agent-
+orchestration-playboo-1322; agent-roster-verified-capabilities.md in
+auto-memory.
+
+## Known issue (deliberately deferred)
+GLM F3: CapabilityMatrix.record does synchronous write_text on the event
+loop per observation, unwrapped — disk error crashes the run. Pre-existing.
 
 ## Next steps (priority order)
-1. **Per-task model selection** (user-requested; start here): router holds
-   per-tier POOLS instead of one runner; decide() picks the pool member with
-   the best capability-matrix pass rate for the task's type (fallback:
-   configured order); ε-exploration on verifiable tasks so benched models
-   earn evidence; add_worker appends, retire removes; UI shows pool +
-   routed-to evidence in tier rows and "Who's good at what". Escalation
-   walks tiers as today, then picks within the tier.
-2. Code-space search (coding-agent proposer over the ledger).
-3. Charge LLMProposer/advisor tokens to Budget.
-4. Advisor placements: run-ledger failure explainer, matrix advisor, Settings
-   prompt drafter (designed in mockup artifact 28edffa2, not built).
+1. Code-space search (coding-agent proposer over the ledger).
+2. Charge LLMProposer/advisor tokens to Budget.
+3. Advisor placements (mockup artifact 28edffa2, not built).
+4. Fix GLM F3 (async/batched matrix persistence).
 5. Suites from real run journals; carried: Issues #1/#2, gemma-vs-qwen.
 
-Codex mechanism: ~/Developer/projects/episodic-memory/scripts/second-opinion.mjs
-(--storage episodic --dispatch, background, >2min). 9 review rounds this session.
-Episodic: em-search "live testing think blocks". Reset context now.
+Reset context now.
