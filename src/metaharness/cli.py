@@ -317,7 +317,33 @@ def _run_optimize(args) -> None:
         print(f"Promoted: {root / 'promoted.json'}")
 
 
-def main() -> None:
+def _run_harvest(args) -> None:
+    """Turn real run journals into optimization-suite extras (per Rule 16 this
+    writes shared state a later tuning run consumes, so it takes `--dry-run`).
+    Exit 0 = the harvest ran (an empty harvest is a reported outcome, not an
+    error); exit 1 = it could not run — e.g. a corrupt pre-existing
+    extra_tasks.json (which errors out, never gets silently overwritten) or a
+    failed write — reported as an {"error": ...} JSON object on stdout."""
+    import json
+
+    from metaharness.optimization.harvest import harvest_journals
+
+    root = Path(args.root) if args.root else Path.home() / ".metaharness" / "optimization"
+    try:
+        report = harvest_journals(
+            Path(args.journals) if args.journals else JOURNAL_DIR,
+            args.suite,
+            root,
+            dry_run=args.dry_run,
+            max_task_chars=args.max_task_chars,
+        )
+    except Exception as exc:  # noqa: BLE001 — the report is the contract, JSON either way
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+        raise SystemExit(1)
+    print(json.dumps(report.model_dump(), indent=2))
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="metaharness")
     sub = parser.add_subparsers(dest="command", required=True)
     serve = sub.add_parser("serve", help="serve the WebUI over a wired harness")
@@ -358,10 +384,31 @@ def main() -> None:
                      help="candidate ledger directory (default ~/.metaharness/optimization/<suite>)")
     opt.add_argument("--max-tokens", type=int, default=None, help="hard token ceiling for the whole search")
     opt.add_argument("--max-cost", type=float, default=None, help="hard cost ceiling in USD for the whole search")
-    args = parser.parse_args()
+
+    harvest = sub.add_parser(
+        "harvest",
+        help="extract suite tasks from real run journals into <suite>/extra_tasks.json",
+    )
+    harvest.add_argument("--suite", choices=SUITE_NAMES, default="mixed",
+                         help="target suite to grow (default: mixed)")
+    harvest.add_argument("--journals", default=None,
+                         help=f"journal directory to scan (default {JOURNAL_DIR})")
+    harvest.add_argument("--root", default=None,
+                         help="optimization root; suite dir = <root>/<suite> "
+                              "(default ~/.metaharness/optimization)")
+    harvest.add_argument("--dry-run", action="store_true",
+                         help="report what would be harvested without writing extra_tasks.json")
+    harvest.add_argument("--max-task-chars", type=int, default=16000,
+                         help="skip a resolved task whose JSON exceeds this many chars (default 16000)")
+
+    args = parser.parse_args(argv)
 
     if args.command == "optimize":
         _run_optimize(args)
+        return
+
+    if args.command == "harvest":
+        _run_harvest(args)
         return
 
     if args.command == "serve":
