@@ -1,6 +1,6 @@
 # Session Handoff — meta-harness (2026-07-10, session 17)
 
-## State: issue #14 PUBLISHED AS DRAFT PR #15; workflow-only, runtime verification pending
+## State: issue #14 PUBLISHED AS DRAFT PR #15; CI green, Node.js 20 warning removed
 - Filed [GitHub issue #14](https://github.com/lantisprime/meta-harness/issues/14) for the
   Node.js 20 Actions runtime deprecation warning.
 - Product commit `0dd336a` is pushed on tracked branch `agent/node24-actions`, based on
@@ -10,14 +10,14 @@
   `actions/checkout@v6` and `actions/setup-python@v6`. The runner, Python 3.14 pin,
   dependency installation, and pytest command are unchanged.
 - Validation: workflow YAML parses, both action-major references are asserted, and
-  `git diff --check` is clean. `actionlint` is not installed locally; PR CI is the decisive
-  runtime validation and is pending on the final branch head.
+  `git diff --check` is clean. PR CI run #51 passed with both v6 actions, and GitHub's
+  check-annotations API returned an empty list: the Node.js 20 warning is gone.
 - Preserve the pre-existing `.gitignore` edit and untracked `.agents/`, `.claude/`,
   `.review-store/`, and `uv.lock`; they are unrelated to issue #14.
 
 ## Next steps
-1. Confirm PR #15 CI passes without the Node.js 20 deprecation annotation; merge only when
-   explicitly approved, then confirm final `main` CI.
+1. Mark PR #15 ready and merge only when explicitly approved, then confirm final `main` CI
+   also has no Node.js 20 deprecation annotation.
 2. Continue workplan item 2: real-worker Software Engineer template regression run.
 
 ---
