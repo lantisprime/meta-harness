@@ -1,11 +1,11 @@
 # Session Handoff — meta-harness (2026-07-10, session 17)
 
-## State: issue #14 PUBLISHED AS DRAFT PR #15; CI green, Node.js 20 warning removed
+## State: issue #14 SHIPPED via PR #15; CI green, warning removed, issue closed
 - Filed [GitHub issue #14](https://github.com/lantisprime/meta-harness/issues/14) for the
   Node.js 20 Actions runtime deprecation warning.
-- Product commit `0dd336a` is pushed on tracked branch `agent/node24-actions`, based on
-  synchronized `main` / `origin/main` at `e57ca02`, and published as draft
-  [PR #15](https://github.com/lantisprime/meta-harness/pull/15).
+- [PR #15](https://github.com/lantisprime/meta-harness/pull/15) was marked ready and
+  squash-merged as `5fafb16` after annotation-free pull-request CI run #52 passed.
+- The PR's `Closes #14` linkage closed GitHub issue #14 as completed.
 - `.github/workflows/ci.yml` now uses the official Node 24-native majors:
   `actions/checkout@v6` and `actions/setup-python@v6`. The runner, Python 3.14 pin,
   dependency installation, and pytest command are unchanged.
@@ -16,9 +16,9 @@
   `.review-store/`, and `uv.lock`; they are unrelated to issue #14.
 
 ## Next steps
-1. Mark PR #15 ready and merge only when explicitly approved, then confirm final `main` CI
-   also has no Node.js 20 deprecation annotation.
-2. Continue workplan item 2: real-worker Software Engineer template regression run.
+1. Confirm final `main` CI also passes with an empty check-annotations list.
+2. Start workplan item 2: restore Playwright E2E and run the real-worker Software Engineer
+   template regression, filing concrete issues for any failures before editing product code.
 
 ---
 
