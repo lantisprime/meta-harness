@@ -1,3 +1,41 @@
+# Session Handoff — meta-harness (2026-07-11, session 18)
+
+## State: workplan item 2 regression complete; browser suite green; issues #16–#18 filed
+- Restored the existing Playwright/Chromium environment without changing project files and
+  ran the full browser suite: **38 passed**.
+- Ran a bounded, real-worker Software Engineering template regression as
+  `run_f1ed076f6ddc`. All six phases executed, the final run state was `completed`, and the
+  package contains the workflow, complete journal, six phase outputs, manifest, and both
+  workspace files. The ZIP integrity check passed; the generated calculator tests pass
+  **5/5**.
+- Exercised issue #11's timeout policy with real workers: attempts were MID timeout → same
+  MID timeout → FRONTIER pass. Exactly one timeout-retry provenance event and one escalation
+  were recorded; timeout failures did not become negative capability-matrix samples.
+- The live audit exposed three reproducible product defects, filed before any product edit:
+  - [#16](https://github.com/lantisprime/meta-harness/issues/16): resume loses unresolved
+    HITL state and duplicates the approval request.
+  - [#17](https://github.com/lantisprime/meta-harness/issues/17): Software Engineering
+    approval gates pause before the spec/plan/review artifact exists.
+  - [#18](https://github.com/lantisprime/meta-harness/issues/18): subscription workers read
+    the global scratch workspace instead of the active run workspace.
+- The run journal confirms #16 with four `hitl.requested` events for three configured gates.
+  The package manifest confirms #18: implementation artifacts came from the run workspace,
+  while subscription-backed phases recorded `subscription-scratch`; verify and review then
+  reasoned coherently about the wrong filesystem.
+- No product code was changed. Preserve the pre-existing `.gitignore` edit and untracked
+  `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`.
+- Canonical episodic workplan: `20260710-230207-meta-harness-workplan-real-worker-se-reg-f7f1`.
+
+## Next steps
+1. Fix #16 first: it is a narrow durability invariant and makes every pending approval
+   unreliable after restart.
+2. Fix #17 next: model post-artifact approval semantics explicitly and keep rejection
+   fail-closed for downstream phases.
+3. Fix #18 after the gate semantics: give read-only subscription phases run-scoped workspace
+   visibility without write access, then repeat the full real-worker regression.
+
+---
+
 # Session Handoff — meta-harness (2026-07-10, session 17)
 
 ## State: issue #14 SHIPPED via PR #15; CI green, warning removed, issue closed
