@@ -113,10 +113,13 @@ class WorkerResult(BaseModel):
     cost_usd: float = 0.0
     latency_s: float = 0.0
     error: Optional[str] = None
-    # unsigned derived metadata (issue #2): set by BaseRunner.run when `error`
-    # came from a WorkerTimeout. Deliberately excluded from
-    # runner.result_signing_bytes() — adding a signed key would invalidate
-    # every signature already recorded in past journals.
+    # Legacy v1 signatures covered only the worker's textual result. New v2
+    # signatures also attest the execution-relevant metadata below. Keeping an
+    # explicit version lets old journal signatures remain verifiable without
+    # allowing their unsigned workspace_root to select code for execution.
+    signature_version: int = 1
+    # Derived metadata (issue #2): set by BaseRunner.run when `error` came from
+    # a WorkerTimeout. It is covered by v2 signatures.
     timed_out: bool = False
     # the directory this worker's file side-effects land in (builtin tool jail
     # root or coding-CLI cwd), recorded by the runner that KNOWS it — evidence
@@ -133,6 +136,7 @@ class VerificationResult(BaseModel):
     detail: str = ""
     failure_mode: Optional[MASTMode] = None
     scorer: str = ""             # which scorer produced this (execution/schema/judge)
+    latency_s: float = 0.0        # verifier wall time; execution checks charge this to Budget
 
 
 class Attempt(BaseModel):

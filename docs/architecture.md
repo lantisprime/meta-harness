@@ -86,7 +86,7 @@ graph TB
 
 - **Planner / Supervisor** turns an objective into a plan of tasks, each carrying an explicit delegation contract (objective, output format, boundaries) and an effort-scaling hint. Plan-then-execute: the plan is fixed from trusted input before any worker output is read back in.
 - **Model Router** (see 3.4) picks the cheapest tier likely to succeed and escalates on a verifiable failure signal.
-- **Verifier Registry** resolves the strongest available check for a task: execution/tests > deterministic scorer > rubric judge (decorrelated from the generator) > human. A verifier is *never* the same context that produced the output.
+- **Verifier Registry** resolves the strongest available check for a task: execution/tests > deterministic scorer > rubric judge (decorrelated from the generator) > human. For `code_edit`, a v2 worker signature attests the workspace root; a fixed argv allowlist discovers pytest or npm tests and runs them in a network-denied OS sandbox with bounded time/output. Missing checks, missing test runtimes, legacy signatures, or unavailable isolation fall back to the evidence-fed judge. A verifier is *never* the same context that produced the output.
 - **Learning Subsystem** (see 3.5) writes lessons into an evolving playbook and, on a slower cadence, tunes prompts/routing rules from clustered failures.
 
 ### 3.3 Trust Plane — Worker Authenticity & Provenance

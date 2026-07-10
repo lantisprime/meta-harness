@@ -203,6 +203,9 @@ class WorkflowEngine:
                             "failure_mode": (att.verification.failure_mode.value
                                              if att.verification.failure_mode else None),
                             "latency_s": round(att.result.latency_s, 2),
+                            "verification_latency_s": round(
+                                att.verification.latency_s, 2
+                            ),
                             "timed_out": att.result.timed_out,
                         },
                     )

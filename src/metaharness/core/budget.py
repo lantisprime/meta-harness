@@ -50,7 +50,7 @@ class Budget:
             raise BudgetExceeded(
                 f"tokens {self.spent_tokens} > cap {self.max_tokens}"
             )
-        # wall-clock here is the SUM of every charged WorkerResult.latency_s, not
+        # wall-clock here is the SUM of charged worker + verifier latency, not
         # elapsed session time — deterministic and already inclusive of
         # SchemaGuard retry latency (enrichment.py folds retries into the final
         # result before it is charged). Orchestration overhead between calls is
