@@ -1,3 +1,36 @@
+# Session Handoff — meta-harness (2026-07-10, session 16)
+
+## State: issue #11 PUBLISHED AS DRAFT PR #13; fully verified, issue open until merge
+- Product commit `81e5efb` is pushed on tracked branch `agent/timeout-aware-retry`, based on
+  synchronized `main` / `origin/main` at `892c129`, and published as draft
+  [PR #13](https://github.com/lantisprime/meta-harness/pull/13).
+- The PR body contains `Closes #11`; GitHub issue #11 remains open until the PR is merged.
+- Timeout FAILs now receive one retry on the exact same tier before that tier can be
+  excluded and escalation can occur. The retry is explicitly pinned to the prior tier, so a
+  changed affordability filter cannot silently route the grace attempt elsewhere.
+- Timeout FAILs are operationally neutral and do not enter the capability matrix as negative
+  model-skill evidence. A later PASS still records normal positive evidence; ordinary
+  non-timeout verified FAILs retain immediate escalation behavior.
+- The executor records `task.timeout_retry` provenance with the attempt, tier, and model.
+- Final gates: **531 non-E2E tests passed**, focused executor tests **27 passed**,
+  compileall and `git diff --check` clean. Browser E2E was unavailable because Playwright is
+  not installed in the active venv; no UI code changed. Existing FastAPI lifespan
+  deprecation warnings remain unchanged.
+
+## Files in the issue #11 diff
+- `src/metaharness/core/executor.py`: timeout-neutral matrix learning, one-shot exact-tier
+  retry, repeat-timeout escalation, and provenance.
+- `tests/test_executor.py`: timeout→PASS, timeout→timeout→escalate, exact-tier behavior after
+  a budget charge, provenance, and unchanged ordinary FAIL escalation.
+- `docs/architecture.md`: documents the timeout-aware cascade contract.
+- Handoff updated here. Preserve the pre-existing `.gitignore` edit and untracked
+  `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`; they are not issue #11 work.
+
+## Next steps
+1. Let PR #13 checks/review complete, then mark it ready and merge when approved.
+
+---
+
 # Session Handoff — meta-harness (2026-07-10, session 15)
 
 ## State: issue #1 SHIPPED via PR #12; CI green, issue closed, main synchronized

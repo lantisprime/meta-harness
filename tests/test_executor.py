@@ -21,7 +21,7 @@ from metaharness.harness import (
     result_signing_bytes,
     sign_result,
 )
-from metaharness.harness.runner import Runner
+from metaharness.harness.runner import Runner, WorkerTimeout
 from metaharness.identity import KeyPair, ProvenanceLog, WorkerRegistry, registration_payload
 from metaharness.routing import CapabilityMatrix, Router
 
@@ -61,9 +61,136 @@ async def test_escalates_on_verified_failure():
     executor = TaskExecutor(router)
     outcome = await executor.execute(classify_task())
     assert outcome.final_verdict == Verdict.PASS
-    assert outcome.escalations >= 1
+    assert outcome.escalations == 1
     tiers = [a.result.tier for a in outcome.attempts]
-    assert tiers[0] == Tier.SMALL and tiers[-1] == Tier.FRONTIER
+    assert tiers == [Tier.SMALL, Tier.FRONTIER]
+
+
+async def test_timeout_retries_same_tier_and_records_only_later_pass():
+    """Issue #11: a timeout is operationally neutral. Retry the same tier once,
+    do not poison its capability cell with the timeout, and bank a later PASS."""
+    calls = 0
+
+    def timeout_then_pass(task: Task):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise WorkerTimeout("small: timed out after 1s", timeout_s=1.0)
+        return "positive"
+
+    matrix = CapabilityMatrix()
+    small = ScriptedWorker(
+        "small", timeout_then_pass, tier=Tier.SMALL, model="small-model"
+    )
+    frontier = ScriptedWorker(
+        "frontier", lambda task: "positive",
+        tier=Tier.FRONTIER, model="frontier-model",
+    )
+    provenance = ProvenanceLog()
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: small, Tier.FRONTIER: frontier}, matrix=matrix,
+               explore_rate=0.0),
+        provenance=provenance,
+        orchestrator_keypair=KeyPair.generate(),
+    ).execute(classify_task(max_attempts=3))
+
+    assert outcome.final_verdict == Verdict.PASS
+    assert [a.result.tier for a in outcome.attempts] == [Tier.SMALL, Tier.SMALL]
+    assert outcome.attempts[0].verification.failure_mode == MASTMode.TIMEOUT
+    assert outcome.escalations == 0
+    assert matrix.samples("small-model", TaskType.CLASSIFY) == 1  # PASS only
+    assert matrix.samples("frontier-model", TaskType.CLASSIFY) == 0
+    assert [e.action for e in provenance.entries()].count("task.timeout_retry") == 1
+
+
+async def test_second_same_tier_timeout_escalates_without_negative_evidence():
+    """Issue #11: one retry is a grace period, not an infinite loop. A second
+    timeout escalates, while neither timeout becomes model-skill evidence."""
+    def always_times_out(task: Task):
+        raise WorkerTimeout("small: timed out after 1s", timeout_s=1.0)
+
+    matrix = CapabilityMatrix()
+    small = ScriptedWorker(
+        "small", always_times_out, tier=Tier.SMALL, model="small-model"
+    )
+    frontier = ScriptedWorker(
+        "frontier", lambda task: "positive",
+        tier=Tier.FRONTIER, model="frontier-model",
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: small, Tier.FRONTIER: frontier}, matrix=matrix,
+               explore_rate=0.0)
+    ).execute(classify_task(max_attempts=3))
+
+    assert outcome.final_verdict == Verdict.PASS
+    assert [a.result.tier for a in outcome.attempts] == [
+        Tier.SMALL, Tier.SMALL, Tier.FRONTIER,
+    ]
+    assert outcome.escalations == 1
+    assert all(
+        a.verification.failure_mode == MASTMode.TIMEOUT
+        for a in outcome.attempts[:2]
+    )
+    assert matrix.samples("small-model", TaskType.CLASSIFY) == 0
+    assert matrix.samples("frontier-model", TaskType.CLASSIFY) == 1
+
+
+async def test_timeout_retry_stays_on_exact_tier_after_budget_charge():
+    """Issue #11 review: leaving MID unexcluded is not enough. Once the first
+    attempt is charged, normal affordability filtering would reroute to SMALL;
+    the timeout grace attempt must still run on the exact MID tier."""
+    class CostlyMid(Runner):
+        worker_id, tier, model = "mid", Tier.MID, "mid-model"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, task: Task) -> WorkerResult:
+            self.calls += 1
+            if self.calls == 1:
+                return WorkerResult(
+                    task_id=task.id, worker_id=self.worker_id,
+                    tier=self.tier, model=self.model,
+                    error="WorkerTimeout: mid timed out after 1s",
+                    timed_out=True, cost_usd=0.02,
+                )
+            return WorkerResult(
+                task_id=task.id, worker_id=self.worker_id,
+                tier=self.tier, model=self.model,
+                output="positive", raw_text="positive",
+            )
+
+    matrix = CapabilityMatrix()
+    mid = CostlyMid()
+    router = Router(
+        {
+            Tier.SMALL: ScriptedWorker(
+                "small", lambda task: "positive",
+                tier=Tier.SMALL, model="small-model",
+            ),
+            Tier.MID: mid,
+        },
+        matrix=matrix,
+        explore_rate=0.0,
+    )
+    # CODE_EDIT starts at MID under the cold-start priors. After the first
+    # $0.02 charge only SMALL clears the normal affordability filter.
+    task = Task(
+        task_type=TaskType.CODE_EDIT,
+        objective="make the change",
+        success_check={"equals": "positive"},
+        max_attempts=2,
+    )
+    outcome = await TaskExecutor(
+        router, budget=Budget(max_cost_usd=0.021)
+    ).execute(task)
+
+    assert outcome.final_verdict == Verdict.PASS
+    assert [a.result.tier for a in outcome.attempts] == [Tier.MID, Tier.MID]
+    assert mid.calls == 2
+    assert router.route_evidence() == {"mid": {"mid": 2}}
+    assert matrix.samples("mid-model", TaskType.CODE_EDIT) == 1  # PASS only
+    assert matrix.samples("small-model", TaskType.CODE_EDIT) == 0
 
 
 async def test_matrix_learns_from_outcomes():

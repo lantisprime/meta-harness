@@ -100,7 +100,11 @@ Framed strictly as integrity/authenticity — the same guarantees you get from s
 ### 3.4 Model Router / Cascade
 
 - **Pre-route** on task type + a cheap complexity estimate to a starting tier (small / mid / frontier).
-- **Cascade**: run the chosen tier, verify with the strongest available scorer, and **escalate only on a verifiable failure** (failed test, invalid schema, low self-consistency agreement) — never on raw self-reported confidence.
+- **Cascade**: run the chosen tier, verify with the strongest available scorer, and
+  **escalate only on a verifiable failure** (failed test, invalid schema, low
+  self-consistency agreement) — never on raw self-reported confidence. A timeout is
+  treated as an operational signal: retry the same tier once before escalating, and
+  do not record timeout FAILs as negative capability evidence.
 - **Capability matrix** (produced by the eval subsystem) sets the default tier per task type and encodes where a cheaper model is known-safe.
 - **Enrichment stack** for the small tier, in ROI order: tool-offload (arithmetic/date/string work goes to code execution), self-consistency voting, dynamic exemplar retrieval, constrained/flat-schema output, and prompt compilation with a frontier teacher.
 
