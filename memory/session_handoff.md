@@ -1,8 +1,10 @@
 # Session Handoff — meta-harness (2026-07-10, session 16)
 
-## State: issue #11 IMPLEMENTED LOCALLY, fully verified, not committed/pushed/closed
-- Work is isolated on `agent/timeout-aware-retry`, based on synchronized `main` /
-  `origin/main` at `892c129`. No issue #11 changes have been published.
+## State: issue #11 COMMITTED AND PUSHED, fully verified; no PR yet, issue remains open
+- Commit `81e5efb` is pushed on tracked branch `agent/timeout-aware-retry`, based on
+  synchronized `main` / `origin/main` at `892c129`.
+- Per the user's commit-and-push scope, no pull request was opened and GitHub issue #11
+  remains open.
 - Timeout FAILs now receive one retry on the exact same tier before that tier can be
   excluded and escalation can occur. The retry is explicitly pinned to the prior tier, so a
   changed affordability filter cannot silently route the grace attempt elsewhere.
@@ -25,8 +27,7 @@
   `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`; they are not issue #11 work.
 
 ## Next steps
-1. Review and stage only the issue #11 files, then commit/push and open a PR linked to #11 if
-   publication is approved.
+1. Open a draft PR linked to #11 if publication beyond the pushed branch is approved.
 
 ---
 
