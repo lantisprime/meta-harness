@@ -1,6 +1,10 @@
 # Session Handoff — meta-harness (2026-07-12, session 13)
 
-## State: FIVE issues shipped, pushed, closed. main == origin/main @ c2b8d20. Clean close-out.
+## State: FIVE issues shipped, pushed, closed. main == origin/main. Clean close-out.
+Post-handoff addendum (same session): the authoritative playbook was revised to **v10**
+(episode `20260710-025825-...-acf7`, supersedes v9) adding the SEAT-LIVENESS RULE to
+section 10; tag search verified single-hit; canonical retrieval measured 25,626 bytes —
+well under the 50KB cap.
 - `fc038c4` — issue #9 (last session's working-tree carryover): committed, pushed, #9 closed.
 - Filed #10 (source-side check gating, the #9 scout follow-up) — then BUILT and closed it same session.
 - `c2b8d20` — batch commit for #4, #5, #6, #7, #10 (all auto-closed on push). 25 files,
