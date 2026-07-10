@@ -1,8 +1,8 @@
 # Session Handoff — meta-harness (2026-07-10, session 15)
 
 ## State: issue #1 SHIPPED via PR #12; CI green, issue closed, main synchronized
-- `main == origin/main == 4ca087f`; [PR #12](https://github.com/lantisprime/meta-harness/pull/12)
-  was marked ready and squash-merged after GitHub Actions CI run #42 passed.
+- [PR #12](https://github.com/lantisprime/meta-harness/pull/12) was marked ready and
+  squash-merged as `4ca087f` after GitHub Actions CI run #42 passed.
 - The PR's `Closes #1` linkage closed GitHub issue #1 as completed.
 - Product diff: execution-based verification for `code_edit` attempts, plus the trust,
   budget, retry-feedback, journal, docs, and regression-test surfaces it requires.
