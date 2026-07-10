@@ -25,7 +25,7 @@ from metaharness.routing import Router
 
 
 def attempt(verdict: Verdict, *, output="x", error=None, mode=None, detail="",
-            timed_out=False) -> Attempt:
+            timed_out=False, scorer="") -> Attempt:
     return Attempt(
         n=1,
         result=WorkerResult(
@@ -34,7 +34,7 @@ def attempt(verdict: Verdict, *, output="x", error=None, mode=None, detail="",
         ),
         verification=VerificationResult(
             verdict=verdict, score=0.0 if verdict == Verdict.FAIL else 1.0,
-            failure_mode=mode, detail=detail,
+            failure_mode=mode, detail=detail, scorer=scorer,
         ),
     )
 
@@ -129,6 +129,22 @@ def test_reflector_timeout_gives_retry_actionable_advice():
     reflection = grounded_reflector(Task(), attempt(Verdict.FAIL, mode=MASTMode.TIMEOUT))
     assert "ran out of time" in reflection and "direct path" in reflection
     assert "timeout" not in reflection.lower()  # no un-actionable config advice
+
+
+def test_execution_failure_feedback_beats_text_success_check():
+    """Issue #1: test evidence must not be hidden by an incidental equals check."""
+    task = Task(task_type=TaskType.CODE_EDIT,
+                success_check={"equals": "narrated success"})
+    reflection = grounded_reflector(task, attempt(
+        Verdict.FAIL,
+        mode=MASTMode.DISOBEY_TASK_SPEC,
+        scorer="execution",
+        detail="pytest failed: test_widget expected 2, got 1",
+    ))
+
+    assert "test_widget" in reflection
+    assert "fix the failing behavior" in reflection.lower()
+    assert "narrated success" not in reflection
 
 
 # -- MAST ---------------------------------------------------------------------------

@@ -46,6 +46,14 @@ def grounded_reflector(task: Task, attempt: Attempt) -> Optional[str]:
         )
     if mode == MASTMode.BUDGET_EXCEEDED:
         return None  # no next attempt is coming; advice would be noise
+    if verification.scorer == "execution":
+        # Issue #1: a workspace test is stronger than any text success_check.
+        # Preserve its concrete diagnostic instead of falling into the equals /
+        # contains branches below and telling the retry to fix narration.
+        return (
+            "A previous code change failed its workspace test suite: "
+            f"{verification.detail}. Fix the failing behavior, then rerun the tests."
+        )
 
     check = task.success_check or {}
     if "contains" in check:

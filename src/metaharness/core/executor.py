@@ -12,7 +12,8 @@ plateau detection across attempts, and step-repetition dedup.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+import time
+from typing import Awaitable, Callable, Optional
 
 from metaharness.core.budget import Budget, BudgetExceeded, PlateauDetector, action_signature
 from metaharness.core.types import (
@@ -23,8 +24,10 @@ from metaharness.core.types import (
     TaskType,
     VerificationResult,
     Verdict,
+    WorkerResult,
     now,
 )
+from metaharness.evals.execution import verify_code_edit_execution
 from metaharness.evals.verifiers import authenticity_failure, verify_output
 from metaharness.harness.runner import verify_result
 from metaharness.identity.keys import KeyPair
@@ -38,6 +41,9 @@ Reflector = Callable[[Task, Attempt], Optional[str]]
 # a judge grades an UNVERIFIED output against its contract (rubric-judge slot
 # of the verifier hierarchy); async because it calls a worker
 Judge = Callable[..., "object"]
+ExecutionVerifier = Callable[
+    [Task, WorkerResult], Awaitable[Optional[VerificationResult]]
+]
 
 
 class TaskExecutor:
@@ -52,6 +58,7 @@ class TaskExecutor:
         playbook_hints: Optional[Callable[[Task], list[str]]] = None,
         observer: Optional[Callable[[TaskOutcome], None]] = None,
         judge: Optional[Judge] = None,
+        execution_verifier: Optional[ExecutionVerifier] = verify_code_edit_execution,
     ) -> None:
         self.router = router
         self.registry = registry
@@ -62,6 +69,7 @@ class TaskExecutor:
         self.playbook_hints = playbook_hints
         self.observer = observer
         self.judge = judge
+        self.execution_verifier = execution_verifier
         if provenance is not None and orchestrator_keypair is None:
             raise ValueError("provenance logging needs the orchestrator keypair")
 
@@ -112,7 +120,10 @@ class TaskExecutor:
                 # known when the budget check below decides whether to mask it.
                 # The rubric-judge slot stays AFTER the charge — an over-budget
                 # attempt must stop before paying for an extra LLM judge call.
-                if self.registry is not None and not verify_result(result, self.registry):
+                signature_verified = (
+                    self.registry is not None and verify_result(result, self.registry)
+                )
+                if self.registry is not None and not signature_verified:
                     verification = authenticity_failure(
                         f"result from {result.worker_id!r} has no valid signature "
                         "under its registered key"
@@ -121,6 +132,22 @@ class TaskExecutor:
                 else:
                     verification = verify_output(task, result)
                     worker_malfunctioned = bool(result.error)
+                # Issue #1: the workspace selector itself must be covered by a
+                # verified v2 signature. Legacy v1 roots remain readable for
+                # history but never select code for execution.
+                workspace_attested = (
+                    signature_verified and result.signature_version >= 2
+                )
+                if (
+                    task.task_type == TaskType.CODE_EDIT
+                    and result.workspace_root
+                    and not workspace_attested
+                ):
+                    self._record("execution.skipped", {
+                        "task_id": task.id,
+                        "attempt": n,
+                        "reason": "workspace_root is not covered by a verified v2 signature",
+                    })
 
                 try:
                     if self.budget is not None:
@@ -144,6 +171,45 @@ class TaskExecutor:
                     self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
                     break
 
+                # Execution/tests are stronger evidence than output narration
+                # or a text success_check, but stay AFTER the worker budget gate:
+                # an already-over-budget attempt must not launch another process.
+                if (
+                    workspace_attested
+                    and self.execution_verifier is not None
+                    and not result.error
+                    and verification.scorer != "schema"
+                ):
+                    execution_started = time.monotonic()
+                    try:
+                        execution = await self.execution_verifier(variant, result)
+                    except Exception as exc:  # verifier infrastructure is not model failure
+                        execution = None
+                        self._record("execution.error", {
+                            "task_id": task.id,
+                            "attempt": n,
+                            "error": f"{type(exc).__name__}: {exc}"[:300],
+                        })
+                    execution_latency_s = time.monotonic() - execution_started
+                    if execution is not None:
+                        execution.latency_s = execution_latency_s
+                        verification = execution
+                    try:
+                        if self.budget is not None:
+                            self.budget.charge(wall_s=execution_latency_s)
+                    except BudgetExceeded as exc:
+                        verification = VerificationResult(
+                            verdict=Verdict.FAIL, score=0.0, detail=str(exc),
+                            failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
+                        )
+                        outcome.attempts.append(
+                            Attempt(n=n, result=result, verification=verification)
+                        )
+                        self._record("task.budget_exceeded", {
+                            "task_id": task.id, "detail": str(exc),
+                        })
+                        break
+
                 if (verification.verdict == Verdict.UNVERIFIED
                         and self.judge is not None
                         and task.task_type != TaskType.PLANNING):
@@ -152,7 +218,18 @@ class TaskExecutor:
                     # own contract — a FAIL enters the normal retry loop
                     # BEFORE any dependent step consumes the output
                     try:
-                        verification = await self.judge(variant, result)
+                        judge_result = result
+                        if result.workspace_root and not (
+                            signature_verified and result.signature_version >= 2
+                        ):
+                            # Evidence collection reads files. Apply the same
+                            # attestation rule as execution so a legacy signed
+                            # result cannot redirect the judge into arbitrary
+                            # host paths.
+                            judge_result = result.model_copy(
+                                update={"workspace_root": ""}
+                            )
+                        verification = await self.judge(variant, judge_result)
                     except BudgetExceeded as exc:
                         # the judge call's own worker spend is charged against
                         # the same budget (make_judge) — a budget stop here
@@ -193,10 +270,12 @@ class TaskExecutor:
                         "model": result.model, "verdict": verification.verdict.value,
                         "detail": verification.detail[:200],
                         "worker_signature": result.signature_b64,
+                        "worker_signature_version": result.signature_version,
                         # issue #2: parity with the step.attempt journal payload
                         "failure_mode": (verification.failure_mode.value
                                          if verification.failure_mode else None),
                         "latency_s": round(result.latency_s, 2),
+                        "verification_latency_s": round(verification.latency_s, 2),
                         "timed_out": result.timed_out,
                     },
                 )

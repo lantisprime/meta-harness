@@ -2,8 +2,25 @@
 budget ceilings, plateau stop, capability matrix learning, provenance trail."""
 from __future__ import annotations
 
-from metaharness.core import Budget, Task, TaskExecutor, TaskType, Tier, Verdict, WorkerResult
-from metaharness.harness import MockLLMWorker, ScriptedWorker
+import asyncio
+
+from metaharness.core import (
+    Budget,
+    MASTMode,
+    Task,
+    TaskExecutor,
+    TaskType,
+    Tier,
+    VerificationResult,
+    Verdict,
+    WorkerResult,
+)
+from metaharness.harness import (
+    MockLLMWorker,
+    ScriptedWorker,
+    result_signing_bytes,
+    sign_result,
+)
 from metaharness.harness.runner import Runner
 from metaharness.identity import KeyPair, ProvenanceLog, WorkerRegistry, registration_payload
 from metaharness.routing import CapabilityMatrix, Router
@@ -224,6 +241,196 @@ async def test_signed_registered_worker_passes_authenticity():
     executor = TaskExecutor(Router({Tier.SMALL: runner}), registry=registry)
     outcome = await executor.execute(classify_task())
     assert outcome.final_verdict == Verdict.PASS
+
+
+class _WorkspaceRunner(Runner):
+    worker_id, tier, model = "workspace-w", Tier.SMALL, "workspace-model"
+
+    def __init__(self, keypair: KeyPair, root: str, *, legacy: bool = False) -> None:
+        self.keypair = keypair
+        self.root = root
+        self.legacy = legacy
+
+    async def run(self, task: Task) -> WorkerResult:
+        result = WorkerResult(
+            task_id=task.id,
+            worker_id=self.worker_id,
+            tier=self.tier,
+            model=self.model,
+            output="narrated success",
+            raw_text="narrated success",
+            workspace_root=self.root,
+        )
+        if self.legacy:
+            result.signature_b64 = self.keypair.sign(
+                result_signing_bytes(result, version=1)
+            )
+            return result
+        return sign_result(result, self.keypair)
+
+
+async def test_attested_code_workspace_execution_overrides_text_scorer(tmp_path):
+    """Issue #1 hierarchy: a real test verdict beats narration/success_check."""
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path))
+    calls = []
+
+    async def execution(task, result):
+        calls.append(result.workspace_root)
+        return VerificationResult(
+            verdict=Verdict.PASS, score=1.0, scorer="execution",
+            detail="pytest passed",
+        )
+
+    task = Task(
+        task_type=TaskType.CODE_EDIT,
+        objective="fix it",
+        success_check={"equals": "different text"},
+        max_attempts=1,
+    )
+    matrix = CapabilityMatrix()
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}, matrix=matrix),
+        registry=registry,
+        execution_verifier=execution,
+    ).execute(task)
+
+    assert outcome.final_verdict is Verdict.PASS
+    assert outcome.attempts[0].verification.scorer == "execution"
+    assert calls == [str(tmp_path)]
+    assert matrix.samples("workspace-model", TaskType.CODE_EDIT) == 1
+
+
+async def test_execution_failure_overrides_passing_text_check(tmp_path):
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path))
+
+    async def execution(task, result):
+        return VerificationResult(
+            verdict=Verdict.FAIL, score=0.0, scorer="execution",
+            detail="pytest failed", failure_mode=MASTMode.DISOBEY_TASK_SPEC,
+        )
+
+    task = Task(
+        task_type=TaskType.CODE_EDIT,
+        objective="fix it",
+        success_check={"equals": "narrated success"},
+        max_attempts=1,
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        registry=registry,
+        execution_verifier=execution,
+    ).execute(task)
+
+    assert outcome.final_verdict is Verdict.FAIL
+    assert outcome.attempts[0].verification.detail == "pytest failed"
+
+
+async def test_legacy_workspace_is_not_executed_and_judge_sees_no_root(tmp_path):
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path), legacy=True)
+    execution_calls = []
+    judge_roots = []
+
+    async def execution(task, result):
+        execution_calls.append(result.workspace_root)
+        return VerificationResult(verdict=Verdict.PASS, scorer="execution")
+
+    async def judge(task, result):
+        judge_roots.append(result.workspace_root)
+        return VerificationResult(
+            verdict=Verdict.PASS, score=1.0, scorer="judge", detail="looks good",
+        )
+
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        registry=registry,
+        execution_verifier=execution,
+        judge=judge,
+    ).execute(Task(task_type=TaskType.CODE_EDIT, objective="fix it", max_attempts=1))
+
+    assert outcome.final_verdict is Verdict.PASS
+    assert outcome.attempts[0].verification.scorer == "judge"
+    assert execution_calls == []
+    assert judge_roots == [""]
+
+
+async def test_attested_workspace_without_check_falls_back_to_judge(tmp_path):
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path))  # empty: no pytest/package marker
+    judge_roots = []
+
+    async def judge(task, result):
+        judge_roots.append(result.workspace_root)
+        return VerificationResult(
+            verdict=Verdict.PASS, score=1.0, scorer="judge", detail="files look good",
+        )
+
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        registry=registry,
+        judge=judge,
+    ).execute(Task(task_type=TaskType.CODE_EDIT, objective="fix it", max_attempts=1))
+
+    assert outcome.final_verdict is Verdict.PASS
+    assert outcome.attempts[0].verification.scorer == "judge"
+    assert judge_roots == [str(tmp_path)]
+
+
+async def test_over_budget_worker_never_launches_execution_check(tmp_path):
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path))
+    calls = []
+
+    async def execution(task, result):
+        calls.append(result)
+        return VerificationResult(verdict=Verdict.PASS, scorer="execution")
+
+    # The direct test runner reports zero worker latency/tokens, so start the
+    # shared budget already over cap to prove the pre-execution check blocks it.
+    budget = Budget(max_tokens=0, spent_tokens=1)
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        registry=registry,
+        budget=budget,
+        execution_verifier=execution,
+    ).execute(Task(task_type=TaskType.CODE_EDIT, objective="fix it", max_attempts=1))
+
+    assert outcome.attempts[0].verification.scorer == "budget"
+    assert calls == []
+
+
+async def test_execution_check_wall_time_is_charged_to_budget(tmp_path):
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    register(registry, "workspace-w", kp)
+    runner = _WorkspaceRunner(kp, str(tmp_path))
+
+    async def execution(task, result):
+        await asyncio.sleep(0.02)
+        return VerificationResult(verdict=Verdict.PASS, scorer="execution")
+
+    budget = Budget(max_wall_s=0.001)
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        registry=registry,
+        budget=budget,
+        execution_verifier=execution,
+    ).execute(Task(task_type=TaskType.CODE_EDIT, objective="fix it", max_attempts=1))
+
+    assert budget.spent_wall_s >= 0.02
+    assert outcome.attempts[0].verification.scorer == "budget"
 
 
 async def test_budget_hard_stop():

@@ -98,14 +98,37 @@ async def test_worker_result_carries_cost_tokens_and_signature():
     assert result.tokens_in > 0 and result.tokens_out > 0 and result.cost_usd > 0
     assert result.latency_s >= 0
     assert result.signature_b64
+    assert result.signature_version == 2
 
     registry = WorkerRegistry()
     challenge = registry.begin_registration("w1")
     payload = registration_payload("w1", kp.public_b64(), challenge.nonce)
     registry.complete_registration("w1", kp.public_b64(), kp.sign(payload))
     assert verify_result(result, registry)
+    result.workspace_root = "/tmp/tampered-root"
+    assert not verify_result(result, registry)
+    result.workspace_root = ""
     result.output = "b"  # altered after signing
     assert not verify_result(result, registry)
+
+
+def test_legacy_v1_worker_signature_remains_verifiable():
+    """Issue #1 compatibility: historical signatures stay readable, but their
+    workspace_root remains visibly unattested (signature_version=1)."""
+    from metaharness.core.types import WorkerResult
+    from metaharness.harness import result_signing_bytes
+
+    kp = KeyPair.generate()
+    result = WorkerResult(task_id="t", worker_id="legacy", tier=Tier.SMALL,
+                          model="m", output="done", workspace_root="/old/root")
+    result.signature_b64 = kp.sign(result_signing_bytes(result, version=1))
+    registry = WorkerRegistry()
+    challenge = registry.begin_registration("legacy")
+    payload = registration_payload("legacy", kp.public_b64(), challenge.nonce)
+    registry.complete_registration("legacy", kp.public_b64(), kp.sign(payload))
+
+    assert result.signature_version == 1
+    assert verify_result(result, registry)
 
 
 async def test_scripted_worker_and_error_capture():

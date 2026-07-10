@@ -31,29 +31,44 @@ class WorkerTimeout(RuntimeError):
         self.timeout_s = timeout_s
 
 
-def result_signing_bytes(result: WorkerResult) -> bytes:
-    """The exact bytes a worker signs to vouch for a result. Covers the fields
-    that matter (who, what task, what output) — not latency/cost bookkeeping.
-    `timed_out` is deliberately excluded (issue #2): it is unsigned derived
-    metadata, and adding a key here would invalidate every signature already
-    recorded in past journals."""
-    return canonical_bytes(
-        {
-            "kind": "worker_result",
-            "task_id": result.task_id,
-            "worker_id": result.worker_id,
-            "model": result.model,
-            "output": result.output,
-            "raw_text": result.raw_text,
-            "error": result.error,
-        }
-    )
+CURRENT_RESULT_SIGNATURE_VERSION = 2
+
+
+def result_signing_bytes(result: WorkerResult, *, version: Optional[int] = None) -> bytes:
+    """The exact bytes a worker signs to vouch for a result.
+
+    Version 1 is the historical payload and remains readable so old journals do
+    not become unverifiable. Version 2 additionally attests ``workspace_root``
+    and ``timed_out``: both now affect control flow (automatic test execution and
+    timeout classification), so treating them as mutable bookkeeping would let a
+    valid signature bless attacker-selected behavior.
+    """
+    version = result.signature_version if version is None else version
+    payload = {
+        "kind": "worker_result",
+        "task_id": result.task_id,
+        "worker_id": result.worker_id,
+        "model": result.model,
+        "output": result.output,
+        "raw_text": result.raw_text,
+        "error": result.error,
+    }
+    if version == 2:
+        payload.update({
+            "signature_version": 2,
+            "timed_out": result.timed_out,
+            "workspace_root": result.workspace_root,
+        })
+    elif version != 1:
+        raise ValueError(f"unsupported worker-result signature version {version}")
+    return canonical_bytes(payload)
 
 
 def sign_result(result: WorkerResult, keypair: KeyPair) -> WorkerResult:
     """(Re)sign a result in place. Enrichment wrappers that legitimately rewrite
     a worker's output inside the same harness boundary re-sign with the worker's
     own key so the signature keeps matching what is actually returned."""
+    result.signature_version = CURRENT_RESULT_SIGNATURE_VERSION
     result.signature_b64 = keypair.sign(result_signing_bytes(result))
     return result
 
@@ -63,9 +78,11 @@ def verify_result(result: WorkerResult, registry: WorkerRegistry) -> bool:
     registered for its worker_id."""
     if not result.signature_b64:
         return False
-    return registry.verify_message(
-        result.worker_id, result_signing_bytes(result), result.signature_b64
-    )
+    try:
+        payload = result_signing_bytes(result)
+    except ValueError:
+        return False
+    return registry.verify_message(result.worker_id, payload, result.signature_b64)
 
 
 class Runner(ABC):

@@ -1,3 +1,53 @@
+# Session Handoff — meta-harness (2026-07-10, session 15)
+
+## State: issue #1 PUBLISHED AS DRAFT PR #12; branch pushed, main/issue unchanged until merge
+- `main == origin/main == cc81b32`; implementation commit `5115291` is pushed on
+  `agent/execution-verification-code-edit` and published as draft PR
+  [#12](https://github.com/lantisprime/meta-harness/pull/12).
+- The PR body contains `Closes #1`; GitHub issue #1 therefore remains open until the PR is
+  merged. The draft has not been marked ready or merged.
+- Product diff: execution-based verification for `code_edit` attempts, plus the trust,
+  budget, retry-feedback, journal, docs, and regression-test surfaces it requires.
+- Final gates: **490 non-E2E passed**, **38 Playwright passed**, focused verifier/executor/
+  trust/correction tests **92 passed**. `git diff --check` and compileall clean.
+- Real macOS Seatbelt smoke test passed outside the managed outer sandbox: pytest ran while
+  inherited secret env, network access, and writes outside the attested workspace were denied.
+
+## What is implemented (#1)
+- New `evals/execution.py`: deterministic discovery prefers pytest (real config/tests + an
+  installed pytest runtime), then `package.json#scripts.test`; fixed argv, never worker
+  narration as a command. Missing markers/runtime/isolation returns no signal and falls back
+  to the evidence-fed rubric judge.
+- OS isolation: macOS Seatbelt and Linux bubblewrap; no network; writes only to the attested
+  workspace + credential-free scratch; scrubbed environment and deterministic PATH; 120s
+  wall timeout; 64 KiB/stream memory cap; process-group cleanup including pipe-holding
+  background descendants. Seatbelt backend was exercised for real; bubblewrap policy is unit-
+  pinned but cannot be live-smoked on this Darwin host.
+- Executor hierarchy: authenticity/schema → worker budget gate → execution check → existing
+  deterministic/judge behavior. Execution PASS/FAIL is `scorer=execution`, feeds the
+  capability matrix, drives retry/escalation, and takes precedence over narration/text checks.
+  Execution wall time is separately charged to `Budget`; an over-budget worker never launches
+  the suite. Test failure detail now reaches grounded reflection instead of being hidden by an
+  incidental `equals` check.
+- Trust boundary: worker-result signature **v2** covers `workspace_root` + `timed_out`.
+  Historical v1 signatures remain verifiable, but their unsigned roots cannot select code for
+  execution or evidence reads. Provenance records the signature version; attempt journals
+  record verifier latency.
+
+## Files in the issue #1 diff
+- New: `src/metaharness/evals/execution.py`, `tests/test_execution.py`.
+- Changed: core types/executor/budget, runner signing, verifier exports, grounded reflection,
+  workflow attempt journaling, executor/harness/correction tests, README, architecture docs.
+- Handoff updated here. Preserve the pre-existing `.gitignore` edit and untracked
+  `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`; they are not issue #1 product work.
+
+## Next steps
+1. Let PR #12 checks/review complete, then mark it ready and merge when approved; merging closes
+   GitHub #1 through the PR linkage.
+2. #11 timeout-aware same-tier retry/escalation remains the next product issue after #1 lands.
+
+---
+
 # Session Handoff — meta-harness (2026-07-10, session 14)
 
 ## State: issue #2 SHIPPED, pushed, closed. main == origin/main (fe69865). Clean close-out.
