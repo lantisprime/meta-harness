@@ -154,6 +154,7 @@ def _derive_checks(plan: dict[str, Any]) -> dict[str, Any]:
     - arithmetic with an `expression` input → the sandbox computes the expected
       value; ground truth comes from the harness, not from any model
     """
+    from metaharness.evals.verifiers import scoreable_number
     from metaharness.harness.sandbox import SandboxError, eval_arithmetic
 
     for step in plan.get("steps", []):
@@ -174,9 +175,16 @@ def _derive_checks(plan: dict[str, Any]) -> dict[str, Any]:
             expression = (step.get("inputs") or {}).get("expression")
             if isinstance(expression, str):
                 try:
-                    step["success_check"] = {"equals": eval_arithmetic(expression)}
+                    value = eval_arithmetic(expression)
                 except SandboxError:
                     pass
+                else:
+                    # "1e999" folds to inf at ast-parse and "1e300*1e300" overflows
+                    # to inf within the pow-exponent cap (Issue #10) — an
+                    # unscoreable recomputed value is left undecided, same as the
+                    # SandboxError skip above, never planted as a hazardous check.
+                    if scoreable_number(value):
+                        step["success_check"] = {"equals": value}
         elif task_type in ("extract", "transform", "general"):
             # a literal expected answer stated in the objective is checkable
             match = _EXACT_QUOTED_RE.search(objective) or _EXACT_COLON_RE.search(objective)
@@ -184,6 +192,21 @@ def _derive_checks(plan: dict[str, Any]) -> dict[str, Any]:
                 literal = match.group(1).strip().rstrip(".,;")
                 if literal:
                     step["success_check"] = {"equals": literal}
+    return plan
+
+
+def _drop_hazardous_checks(plan: dict[str, Any]) -> dict[str, Any]:
+    """Issue #10 intake-boundary gate: an LLM-authored success_check can name a
+    value-level hazard (non-finite/overflowing equals, tol, or one_of member)
+    just as easily as the auto-derived arithmetic branch above — drop the check
+    rather than ship it unscoreable. Same silent-drop semantics as an
+    underivable check: the step simply runs without one, never a crash, never a
+    hazardous check reaching the engine."""
+    from metaharness.evals.verifiers import check_value_problems
+
+    for step in plan.get("steps", []):
+        if isinstance(step, dict) and check_value_problems(step.get("success_check")):
+            step["success_check"] = None
     return plan
 
 
@@ -245,7 +268,7 @@ async def plan_workflow(
         if plan is None and reason is None:
             reason = "planner output had no parseable {\"steps\": [...]} JSON"
         if plan is not None:
-            plan = _derive_checks(_normalize_plan(plan))
+            plan = _drop_hazardous_checks(_derive_checks(_normalize_plan(plan)))
             if tools is not None:
                 plan = _assign_tools(plan, tools)
             plan.setdefault("name", _slug(goal))

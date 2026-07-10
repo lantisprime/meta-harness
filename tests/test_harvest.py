@@ -520,10 +520,14 @@ def test_recomputed_bigint_and_huge_tol_rejected_not_fatal(tmp_path):
 
 
 def test_concurrent_extras_writer_survives_save(tmp_path, monkeypatch):
-    """Panel F3 (codex P1 + opus P3 + kimi P2): harvest read extras before the
-    scan and wrote [stale + new] after it, erasing anything a concurrent writer
-    (the coverage endpoint, app.py:405) added in between. The save-time fresh
-    re-read + re-dedupe must keep the concurrent task."""
+    """Issue #7 (corrected per codex plan-review P2): harvest's own `load_extras`
+    call is now only the scan-start seed read (harvest.py:109) — the save-time
+    fresh re-read moved into `suites.append_extras`, under its file lock. This
+    injects the concurrent writer at the ORIGINAL seam (the scan-start seed
+    call): the concurrent save lands between harvest's seed read and its final
+    `append_extras` call, which is exactly the real race shape post-conversion.
+    `append_extras`'s own locked fresh read must pick up the concurrent task
+    and merge it — proving the lock wraps the read, not just the write."""
     journals = tmp_path / "journals"
     root = tmp_path / "opt"
     _journal(journals, "run_c",
@@ -542,14 +546,15 @@ def test_concurrent_extras_writer_survives_save(tmp_path, monkeypatch):
     def racy_load(suite_dir):
         calls["n"] += 1
         result = real_load(suite_dir)
-        if calls["n"] == 1:  # the other writer lands right after our stale read
+        if calls["n"] == 1:  # the other writer lands right after our seed read
             save_extras(suite_dir, [concurrent])
         return result
 
     monkeypatch.setattr(harvest_mod, "load_extras", racy_load)
     report = harvest_journals(journals, "mixed", root)
     assert report.added == 1
-    assert calls["n"] == 2  # initial read + save-time fresh re-read
+    assert calls["n"] == 1  # harvest's own call site — append_extras's fresh
+    # re-read goes through suites.load_extras directly, not harvest_mod.load_extras
 
     objectives = {t.objective for t in load_extras(root / "mixed")}
     assert "Concurrent coverage-endpoint task." in objectives  # not erased

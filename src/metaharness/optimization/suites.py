@@ -15,9 +15,13 @@ difficulty — but arithmetic answers are always recomputed exactly.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from metaharness.core.types import Task, TaskType
 from metaharness.evals.verifiers import scoreable_number, scoreable_tol
@@ -130,6 +134,13 @@ def extras_path(suite_dir: Path | str) -> Path:
     return Path(suite_dir) / "extra_tasks.json"
 
 
+def dedupe_key(objective: str, inputs: dict[str, Any]) -> tuple[str, str]:
+    """Content-based identity — task_ids/run_ids are single-use, so dedupe must
+    be on (objective, inputs). Canonical key shared by every extras writer
+    (harvest, the coverage endpoint) so they agree on what counts as a dupe."""
+    return (objective, json.dumps(inputs, sort_keys=True, default=str))
+
+
 def load_extras(suite_dir: Path | str) -> list[Task]:
     path = extras_path(suite_dir)
     if not path.is_file():
@@ -138,11 +149,69 @@ def load_extras(suite_dir: Path | str) -> list[Task]:
 
 
 def save_extras(suite_dir: Path | str, tasks: list[Task]) -> None:
-    Path(suite_dir).mkdir(parents=True, exist_ok=True)
-    extras_path(suite_dir).write_text(
-        json.dumps([t.model_dump() for t in tasks], indent=1, default=str),
-        encoding="utf-8",
-    )
+    """Atomic write: same-dir temp file + os.replace. `os.replace` is only an
+    atomic rename within one filesystem, so the temp file MUST live in
+    `suite_dir` — a reader (`load_extras`, `search_and_holdout`) can then never
+    observe a torn/partial JSON body."""
+    suite_dir = Path(suite_dir)
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps([t.model_dump() for t in tasks], indent=1, default=str)
+    fd, tmp_name = tempfile.mkstemp(dir=suite_dir, prefix=".extra_tasks.", suffix=".tmp")
+    try:
+        # mkstemp creates 0600 and os.replace keeps the temp file's mode — restore
+        # the 0644 the old write_text gave the file, or it silently turns
+        # owner-only on the first save through this path.
+        os.fchmod(fd, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        os.replace(tmp_name, extras_path(suite_dir))
+    except BaseException:
+        with suppress(OSError):  # cleanup must never mask the original error
+            os.unlink(tmp_name)
+        raise
+
+
+@contextmanager
+def _extras_lock(suite_dir: Path | str) -> Iterator[None]:
+    """Cross-process advisory lock over one suite's extras. `fcntl.flock` is
+    POSIX-only (acceptable: CI is ubuntu-only, no Windows target) and BLOCKING
+    with no timeout — hold times are a load→merge→save of a small JSON file,
+    milliseconds at most. Acquisition/OSError propagates uncaught: a lock
+    failure must be loud, never a silent last-writer-wins degradation."""
+    suite_dir = Path(suite_dir)
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(suite_dir / "extra_tasks.json.lock", os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def append_extras(suite_dir: Path | str, candidates: list[Task]) -> tuple[list[Task], int]:
+    """THE single mutation choke point for extra_tasks.json — every writer
+    (harvest, the coverage endpoint) must call this instead of `save_extras`
+    directly, so a cross-process race can never clobber a concurrent writer's
+    additions. Holds `_extras_lock` across the fresh read AND the save: the
+    lock must wrap the read, not just the write, or a second writer could read
+    stale content between another writer's unlock and its own lock.
+    Dedupes only against the extras file and within the batch — callers are
+    expected to have already filtered candidates against the builtin
+    search/holdout tasks (both current writers do)."""
+    with _extras_lock(suite_dir):
+        fresh = load_extras(suite_dir)
+        seen = {dedupe_key(t.objective, t.inputs) for t in fresh}
+        survivors: list[Task] = []
+        for task in candidates:
+            key = dedupe_key(task.objective, task.inputs)
+            if key in seen:  # also dedupes WITHIN the batch — first wins
+                continue
+            seen.add(key)
+            survivors.append(task)
+        if survivors:
+            save_extras(suite_dir, [*fresh, *survivors])
+        return survivors, len(fresh) + len(survivors)
 
 
 def search_and_holdout(

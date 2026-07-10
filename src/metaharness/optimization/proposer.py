@@ -22,7 +22,7 @@ from typing import Optional, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from metaharness.core.budget import Budget
+from metaharness.core.budget import Budget, BudgetExceeded
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.enrichment import SchemaGuard
 from metaharness.harness.runner import Runner
@@ -154,18 +154,31 @@ class LLMProposer:
             output_schema=PROPOSAL_SCHEMA,
         )
         result = await self.runner.run(task)
-        # the proposer's own LLM tokens count against the run budget; an exhausted
-        # budget raises BudgetExceeded, which the loop catches to stop cleanly
+        # charge always, fail truthfully (issue #5): the proposer's own LLM
+        # tokens count against the run budget even on a failed attempt, but a
+        # genuine worker failure must win over a budget-exhausted verdict —
+        # capture BudgetExceeded and re-raise it only after result.error AND
+        # the parse check are ruled out (issue-#5 panel round 2, codex P2:
+        # re-raising before the parse masked garbage output as a budget stop).
+        # (Loop's catches at loop.py:227-232/288-298 keep working.)
+        budget_exceeded: Optional[BudgetExceeded] = None
         if self.budget is not None:
-            self.budget.charge(
-                cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out
-            )
+            try:
+                self.budget.charge(
+                    cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out,
+                    wall_s=result.latency_s,
+                )
+            except BudgetExceeded as exc:
+                budget_exceeded = exc
         if result.error:
             raise ProposalError(f"proposer worker failed: {result.error}")
         try:
-            return Proposal.model_validate(result.output)
+            proposal = Proposal.model_validate(result.output)
         except ValidationError as exc:
             raise ProposalError(f"proposer output did not parse: {exc}") from exc
+        if budget_exceeded is not None:
+            raise budget_exceeded
+        return proposal
 
 
 # -- deterministic proposer ---------------------------------------------------------

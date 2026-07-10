@@ -50,7 +50,7 @@ class CoverageRequest(BaseModel):
 
 
 class AdviseRequest(BaseModel):
-    page: str                 # 'tuning' | 'goal'
+    page: str                 # 'goal' | 'tuning' | 'routing' | 'failures' | 'playbook'
     subject: str = ""         # candidate id, or the user's raw goal text
     suite: str = ""
 
@@ -340,9 +340,9 @@ def create_app(state: HarnessState) -> FastAPI:
         from metaharness.harness.enrichment import SchemaGuard
         from metaharness.harness.sandbox import eval_arithmetic
         from metaharness.optimization.suites import (
+            append_extras,
             check_value_ok,
-            load_extras,
-            save_extras,
+            dedupe_key,
             search_and_holdout,
         )
 
@@ -378,10 +378,12 @@ def create_app(state: HarnessState) -> FastAPI:
             raise HTTPException(502, f"question generation failed: {result.error}")
 
         suite_dir = Path(state.optimization_root) / suite
-        existing = load_extras(suite_dir)
-        seen = {(t.objective, _json.dumps(t.inputs, sort_keys=True, default=str))
-                for t in [*builtin_search, *existing]}
-        added: list[Task] = []
+        # Issue #7: no `load_extras` here — a stale in-request read would be
+        # clobbered by (or itself clobber) a concurrent writer. In-request dedupe
+        # only needs to know about the builtins; existing extras + any concurrent
+        # writer's additions are handled by append_extras's own locked fresh read.
+        seen = {dedupe_key(t.objective, t.inputs) for t in builtin_search}
+        candidates: list[Task] = []
         for raw in (result.output or {}).get("tasks", []):
             try:
                 candidate = Task.model_validate(raw)
@@ -408,15 +410,19 @@ def create_app(state: HarnessState) -> FastAPI:
                 if not check_value_ok(new_check):   # recomputed bigint/inf → drop, never 500
                     continue
                 candidate.success_check = new_check
-            key = (candidate.objective, _json.dumps(candidate.inputs, sort_keys=True, default=str))
+            key = dedupe_key(candidate.objective, candidate.inputs)
             if key in seen:
                 continue
             seen.add(key)
-            added.append(candidate)
-        if not added:
+            candidates.append(candidate)
+        if not candidates:
             raise HTTPException(502, "the generator produced no usable questions — try again")
-        save_extras(suite_dir, [*existing, *added])
-        return {"suite": suite, "added": len(added), "total_extras": len(existing) + len(added)}
+        # flock + file I/O must not block the event loop; to_thread moves the
+        # blocking choke point off the loop rather than adding new blocking work.
+        added, total = await asyncio.to_thread(append_extras, suite_dir, candidates)
+        if not added:
+            raise HTTPException(502, "the generator's questions were all duplicates — try again")
+        return {"suite": suite, "added": len(added), "total_extras": total}
 
     @app.post("/api/optimization/{suite}/approval")
     async def resolve_tuning_approval(suite: str, req: ApprovalDecision) -> dict[str, Any]:
@@ -553,7 +559,7 @@ def create_app(state: HarnessState) -> FastAPI:
                 # the active lessons already on file, so it recommends against what
                 # exists rather than duplicating it
                 "playbook_active": [
-                    {"id": b.id, "text": b.text,
+                    {"text": b.text,
                      "task_type": b.task_type.value if b.task_type else None}
                     for b in sorted(state.playbook.bullets(),
                                     key=lambda b: (-b.score(), b.created_at))[:20]
@@ -567,19 +573,37 @@ def create_app(state: HarnessState) -> FastAPI:
         elif req.page == "playbook":
             # subject unused. Show the top and bottom of the active playbook plus the
             # most recently retired lessons, so curation advice sees both ends and the
-            # recent history (deterministic caps: 20 top + 5 bottom + 5 deprecated)
+            # recent history (deterministic caps: 20 top + 5 bottom + 5 deprecated).
+            # The bullet projection below is volatile-field-free (no id/created_at/
+            # updated_at) so identical logical state yields identical context bytes.
+            # Ordering must be content-deterministic too (panel P1): curate()
+            # deprecates bullets in a tight loop, so updated_at values collide at
+            # time.time() resolution — WHICH ones collide varies with scheduling
+            # jitter, so any payload order derived from comparing updated_at leaks
+            # that jitter into the bytes. updated_at therefore only SELECTS the 5
+            # most recently retired; the shown slice is ordered by text. The active
+            # sort is jitter-proof as-is: created_at ascending coincides with
+            # insertion order, so ties and distinct values order identically.
             active = sorted(state.playbook.bullets(),
                             key=lambda b: (-b.score(), b.created_at))
             deprecated = sorted(
                 (b for b in state.playbook.bullets(include_deprecated=True) if not b.active),
-                key=lambda b: b.updated_at, reverse=True,
-            )
+                key=lambda b: (-b.updated_at, b.text),
+            )[:5]
+            deprecated.sort(key=lambda b: b.text)  # presentation order is content-only
             bullets, seen_ids = [], set()
-            for b in [*active[:20], *active[-5:], *deprecated[:5]]:
+            for b in [*active[:20], *active[-5:], *deprecated]:
                 if b.id in seen_ids:  # dedupe when the caps overlap (small playbooks)
                     continue
-                seen_ids.add(b.id)
-                bullets.append(b.model_dump(mode="json"))
+                seen_ids.add(b.id)  # id used only for in-memory dedup, never in the payload
+                bullets.append({
+                    "text": b.text,
+                    "task_type": b.task_type.value if b.task_type else None,
+                    "helpful": b.helpful,
+                    "harmful": b.harmful,
+                    "active": b.active,
+                    "origin": b.origin,
+                })
             question = (
                 "the learned playbook — lessons with helpful/harmful track records. "
                 "Recommend curation: which lessons are earning their place, which look "
@@ -595,8 +619,11 @@ def create_app(state: HarnessState) -> FastAPI:
             }
         else:
             raise HTTPException(422, f"unknown advise page {req.page!r}")
+        from metaharness.optimization.suites import SUITE_NAMES
+
         try:
-            return await advise(runner, question, context, budget=state.budget)
+            return await advise(runner, question, context, budget=state.budget,
+                                page=req.page, legal_suites=SUITE_NAMES)
         except AdvisorError as exc:
             raise HTTPException(502, str(exc))
 
@@ -727,6 +754,16 @@ def create_app(state: HarnessState) -> FastAPI:
                 "fallback_reason": fallback_reason,
                 "prior_summary": summarize_run(self_spec, run_state)}
 
+    def _value_hazard_problems(spec) -> list[str]:
+        """Issue #10 intake-boundary gate: WorkflowSpec.model_validate only
+        checks SHAPE — an inf/huge equals-or-tol slips through it untouched and
+        every run of that step then burns as UNVERIFIED. Named per step so the
+        422 body points straight at the offending check."""
+        from metaharness.evals.verifiers import check_value_problems
+
+        return [f"{step.id}: {p}" for step in spec.steps
+                for p in check_value_problems(step.success_check)]
+
     @app.post("/api/workflows/validate")
     async def validate_workflow(req: StartRunRequest) -> dict[str, Any]:
         """Validate a hand-written or hand-edited workflow WITHOUT running it:
@@ -745,6 +782,9 @@ def create_app(state: HarnessState) -> FastAPI:
                 raise ValueError("provide workflow or workflow_yaml")
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+        problems = _value_hazard_problems(spec)
+        if problems:
+            raise HTTPException(422, "; ".join(problems))
         data = spec.model_dump(mode="json")
         return {"workflow": data,
                 "yaml": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
@@ -776,6 +816,9 @@ def create_app(state: HarnessState) -> FastAPI:
                 raise ValueError("provide workflow or workflow_yaml")
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+        problems = _value_hazard_problems(spec)
+        if problems:
+            raise HTTPException(422, "; ".join(problems))
         run_state = state.engine.start(spec, context=req.context)
         if req.wait:
             run_state = await state.engine.advance(run_state.run_id)

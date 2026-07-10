@@ -255,8 +255,13 @@ def _run_optimize(args) -> None:
         print("  target    ← mock small worker (offline demo; --local for a real model)")
 
     budget = None
-    if args.max_tokens or args.max_cost:
-        budget = Budget(max_tokens=args.max_tokens, max_cost_usd=args.max_cost)
+    # `is not None`, not truthiness (issue-#5 panel round 2, convergent P2):
+    # an explicit 0 cap (--max-wall-s 0 etc.) must build a Budget that stops on
+    # the first positive charge, not silently run uncapped and unaccounted.
+    # Mirrors serve's in-place mutation block, which already uses `is not None`.
+    if args.max_tokens is not None or args.max_cost is not None or args.max_wall_s is not None:
+        budget = Budget(max_tokens=args.max_tokens, max_cost_usd=args.max_cost,
+                        max_wall_s=args.max_wall_s)
 
     if args.proposer == "llm":
         if not found:
@@ -361,6 +366,8 @@ def main(argv: list[str] | None = None) -> None:
                        help="hard USD ceiling on the served harness's shared budget (default: unbounded accounting)")
     serve.add_argument("--max-tokens", type=int, default=None,
                        help="hard token ceiling on the served harness's shared budget (default: unbounded accounting)")
+    serve.add_argument("--max-wall-s", type=float, default=None,
+                       help="hard wall-clock ceiling (sum of worker latency_s) on the served harness's shared budget (default: unbounded accounting)")
 
     from metaharness.optimization.suites import SUITE_NAMES
 
@@ -384,6 +391,8 @@ def main(argv: list[str] | None = None) -> None:
                      help="candidate ledger directory (default ~/.metaharness/optimization/<suite>)")
     opt.add_argument("--max-tokens", type=int, default=None, help="hard token ceiling for the whole search")
     opt.add_argument("--max-cost", type=float, default=None, help="hard cost ceiling in USD for the whole search")
+    opt.add_argument("--max-wall-s", type=float, default=None,
+                     help="hard wall-clock ceiling (sum of worker latency_s) for the whole search")
 
     harvest = sub.add_parser(
         "harvest",
@@ -430,8 +439,11 @@ def main(argv: list[str] | None = None) -> None:
             state.budget.max_cost_usd = args.max_cost_usd
         if args.max_tokens is not None:
             state.budget.max_tokens = args.max_tokens
-        if args.max_cost_usd is not None or args.max_tokens is not None:
-            print(f"  budget cap: max_cost_usd={args.max_cost_usd} max_tokens={args.max_tokens}")
+        if args.max_wall_s is not None:
+            state.budget.max_wall_s = args.max_wall_s
+        if args.max_cost_usd is not None or args.max_tokens is not None or args.max_wall_s is not None:
+            print(f"  budget cap: max_cost_usd={args.max_cost_usd} max_tokens={args.max_tokens} "
+                  f"max_wall_s={args.max_wall_s}")
         uvicorn.run(create_app(state), host=args.host, port=args.port)
 
 

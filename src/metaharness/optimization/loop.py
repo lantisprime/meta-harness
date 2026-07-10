@@ -145,6 +145,7 @@ class HarnessOptimizer:
                         self.budget.charge(
                             cost_usd=result.cost_usd,
                             tokens=result.tokens_in + result.tokens_out,
+                            wall_s=result.latency_s,
                         )
                 suite.results.append(EvalTaskResult(
                     task_id=task.id, task_type=task.task_type.value, passes=passes,

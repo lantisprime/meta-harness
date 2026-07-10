@@ -84,3 +84,58 @@ async def test_run_from_reviewed_plan_background_then_approve(client):
 async def test_start_run_requires_some_workflow(client):
     resp = await client.post("/api/runs", json={"context": {}})
     assert resp.status_code == 422
+
+
+# -- Issue #10: source-side check-value gating at the API intake boundary ---------
+
+HAZARDOUS_CHECKS = [
+    {"equals": 1e999},                    # JSON inf via a raw Python float
+    {"equals": 10 ** 400},                 # overflows float()
+    {"tol": 1e308},                        # finite but above MAX_TOL
+    {"one_of": [1, 1e999]},                # non-finite member
+]
+
+
+async def _post_raw_json(client, url, body):
+    """httpx's own `json=` kwarg refuses to serialize inf/nan (allow_nan=False,
+    for spec-strict outbound bodies) — but the stdlib json module (default
+    allow_nan=True) happily emits `Infinity`, exactly what a hand-crafted API
+    body could send. Encode with the stdlib and post the raw bytes so the
+    hazard actually reaches the endpoint under test."""
+    import json
+
+    return await client.post(
+        url, content=json.dumps(body), headers={"content-type": "application/json"})
+
+
+@pytest.mark.parametrize("bad_check", HAZARDOUS_CHECKS)
+async def test_validate_workflow_rejects_value_hazard_checks(client, bad_check):
+    workflow = {"name": "x", "steps": [
+        {"id": "hazard-step", "objective": "o", "success_check": bad_check}]}
+    resp = await _post_raw_json(client, "/api/workflows/validate", {"workflow": workflow})
+    assert resp.status_code == 422
+    assert "hazard-step" in resp.text
+
+
+@pytest.mark.parametrize("bad_check", HAZARDOUS_CHECKS)
+async def test_start_run_rejects_value_hazard_checks(client, bad_check):
+    workflow = {"name": "x", "steps": [
+        {"id": "hazard-step", "objective": "o", "success_check": bad_check}]}
+    resp = await _post_raw_json(client, "/api/runs", {"workflow": workflow, "context": {}})
+    assert resp.status_code == 422
+    assert "hazard-step" in resp.text
+
+
+async def test_validate_workflow_still_accepts_good_plan(client):
+    """The gate is value-level only — GOOD_PLAN's benign one_of check must keep
+    validating cleanly (no dashboard/vocabulary regressions)."""
+    resp = await client.post("/api/workflows/validate", json={"workflow": GOOD_PLAN})
+    assert resp.status_code == 200
+    assert resp.json()["workflow"]["steps"][0]["success_check"] == {"one_of": ["low", "high"]}
+
+
+async def test_start_run_still_accepts_good_plan(client):
+    resp = await client.post("/api/runs", json={
+        "workflow": GOOD_PLAN, "context": {}, "wait": False})
+    assert resp.status_code == 200
+    assert resp.json()["run_id"]

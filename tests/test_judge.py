@@ -6,9 +6,10 @@ import json
 import pytest
 
 from metaharness.core import TaskExecutor
-from metaharness.core.types import Task, TaskType, Tier, Verdict
+from metaharness.core.types import Task, TaskType, Tier, Verdict, WorkerResult
 from metaharness.evals.judge import make_judge
 from metaharness.harness import ScriptedWorker
+from metaharness.harness.runner import Runner
 from metaharness.identity import KeyPair
 from metaharness.routing.router import Router
 
@@ -110,6 +111,95 @@ async def test_planning_tasks_are_exempt_from_judging():
                                           task_type=TaskType.PLANNING))
     assert outcome.final_verdict is Verdict.UNVERIFIED
     assert calls == []
+
+
+async def test_judge_charges_its_own_runner_spend_to_the_shared_budget():
+    """Issue #5 item 3b: the judge's own worker call runs a real runner whose
+    tokens/cost/latency were previously invisible to the budget. make_judge's
+    optional `budget` param must charge them (charge-always) after the
+    runner call, on top of whatever the main attempt already charged."""
+    from metaharness.core.budget import Budget
+
+    class Billed(Runner):
+        worker_id, tier, model = "judge-w", Tier.FRONTIER, "judge-w"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="judge-w", tier=self.tier,
+                                model="judge-w", output={"pass": True, "reason": "ok"},
+                                tokens_in=50, tokens_out=20, cost_usd=0.05, latency_s=1.5)
+
+    budget = Budget(max_tokens=1_000_000, max_cost_usd=1000.0)
+    judge = make_judge(Billed(), budget=budget)
+    task = Task(objective="do something")
+    result = WorkerResult(task_id=task.id, worker_id="w", tier=Tier.SMALL,
+                          model="m", output="output")
+    verification = await judge(task, result)
+    assert verification.verdict is Verdict.PASS
+    assert budget.spent_tokens == 70
+    assert budget.spent_cost_usd == pytest.approx(0.05)
+    assert budget.spent_wall_s == pytest.approx(1.5)
+
+
+async def test_judge_budget_exceeded_surfaces_as_budget_stop_not_judge_error():
+    """The judge's charge blowing the cap must stop the run as a budget event
+    (task.budget_exceeded), NEVER be swallowed into a judge.error note — a
+    budget stop must not be laundered into 'the judge broke'."""
+    from metaharness.core.budget import Budget
+
+    class Billed(Runner):
+        worker_id, tier, model = "judge-w", Tier.FRONTIER, "judge-w"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="judge-w", tier=self.tier,
+                                model="judge-w", output={"pass": True, "reason": "ok"},
+                                tokens_in=1000, tokens_out=0)
+
+    budget = Budget(max_tokens=5)  # the judge's own charge blows this cap
+    from metaharness.identity import ProvenanceLog
+
+    orch_kp = KeyPair.generate()
+    provenance = ProvenanceLog()
+    executor = TaskExecutor(
+        Router({Tier.SMALL: ScriptedWorker("w", lambda t: "some output")}),
+        provenance=provenance, orchestrator_keypair=orch_kp, budget=budget,
+        judge=make_judge(Billed(), budget=budget),
+    )
+    outcome = await executor.execute(Task(objective="do a thing"))
+
+    assert outcome.final_verdict == Verdict.FAIL
+    assert outcome.attempts[-1].verification.scorer == "budget"
+    kinds = [e.action for e in provenance.entries()]
+    assert "task.budget_exceeded" in kinds
+    assert "judge.error" not in kinds
+
+
+async def test_over_budget_before_judge_slot_never_invokes_the_judge():
+    """The charge-site BudgetExceeded (before the judge slot) must stop the run
+    without ever consulting the judge — asserting the judge runner's call count
+    stays zero (not just that its verdict is absent)."""
+    calls = []
+
+    class Billed(Runner):
+        worker_id, tier, model = "judge-w", Tier.FRONTIER, "judge-w"
+        async def run(self, task):
+            calls.append(task)
+            return WorkerResult(task_id=task.id, worker_id="judge-w", tier=self.tier,
+                                model="judge-w", output={"pass": True, "reason": "ok"})
+
+    from metaharness.core.budget import Budget
+
+    class MainWorker(Runner):
+        worker_id, tier, model = "w", Tier.SMALL, "w"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="w", tier=self.tier,
+                                model="w", output={"essay": "..."},
+                                tokens_in=30, tokens_out=10)  # blows the cap below
+
+    budget = Budget(max_tokens=5)  # the main attempt's own charge blows this cap
+    executor = TaskExecutor(
+        Router({Tier.SMALL: MainWorker()}), budget=budget, judge=make_judge(Billed()),
+    )
+    outcome = await executor.execute(Task(objective="write", task_type=TaskType.SUMMARIZE))
+    assert outcome.attempts[-1].verification.scorer == "budget"
+    assert calls == []  # judge never invoked
 
 
 async def test_broken_judge_is_recorded_not_silent():

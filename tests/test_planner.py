@@ -233,6 +233,67 @@ async def test_no_literal_no_derived_check():
     assert spec.steps[0].success_check is None
 
 
+# -- Issue #10: source-side check-value gating ---------------------------------
+
+
+@pytest.mark.parametrize("expression", ["1e999", "1e300*1e300", "10**400"])
+async def test_planner_arithmetic_overflow_derives_no_check(expression):
+    """An overflow/inf recomputed value must never land in the plan — every run
+    of that step would otherwise burn as UNVERIFIED (loop.py), not a crash, but
+    a silent hazard. Not a SandboxError (1e999 folds to inf at ast-parse;
+    1e300*1e300 overflows within the pow-exponent cap) — the value gate, not
+    the sandbox's own exception handling, is what has to catch these."""
+    plan = {"name": "x", "steps": [
+        {"id": "a", "task_type": "arithmetic", "objective": "Compute something huge.",
+         "inputs": {"expression": expression}}]}
+    planner = ScriptedWorker("p", lambda t, pl=plan: pl)
+    spec, source, _reason = await plan_workflow("compute", planner)
+    assert source == "planner"
+    assert spec.steps[0].success_check is None
+
+
+async def test_planner_benign_arithmetic_still_derives():
+    """Existing behavior (test_planner_derives_arithmetic_equals_from_expression)
+    must survive the value gate untouched."""
+    plan = {"name": "x", "steps": [
+        {"id": "a", "task_type": "arithmetic", "objective": "Compute the user hours.",
+         "inputs": {"expression": "340 * 6"}}]}
+    planner = ScriptedWorker("p", lambda t: plan)
+    spec, _, _reason = await plan_workflow("compute", planner)
+    assert spec.steps[0].success_check == {"equals": 2040}
+
+
+async def test_planner_drops_llm_authored_hazardous_check():
+    """Change 2b: an LLM plan can carry a value-hazard check directly (not just
+    auto-derived by Change 1) — plan_workflow drops it post-_derive_checks,
+    same silent-drop semantics, the rest of the plan intact."""
+    plan = {"name": "x", "steps": [
+        {"id": "a", "task_type": "extract", "objective": "Extract a number.",
+         "success_check": {"equals": 1e999}, "inputs": {}}]}
+    planner = ScriptedWorker("p", lambda t, pl=plan: pl)
+    spec, source, _reason = await plan_workflow("extract", planner)
+    assert source == "planner"
+    assert spec.name == "x"
+    assert spec.steps[0].success_check is None
+
+
+@pytest.mark.parametrize("bad_check", ["oops", ["equals", 1]])
+async def test_planner_non_dict_check_falls_back_without_raising(bad_check):
+    """Issue-#10 panel P1 (codex): _drop_hazardous_checks runs on RAW LLM
+    output, BEFORE model_validate — a non-dict success_check used to reach
+    check.get(...) and raise AttributeError out of plan_workflow (a 500 on
+    /api/plans//api/goals/followup). The pre-diff contract: model_validate
+    rejects the malformed step inside the try and the planner falls back."""
+    plan = {"name": "x", "steps": [
+        {"id": "a", "task_type": "extract", "objective": "Extract a number.",
+         "success_check": bad_check, "inputs": {}}]}
+    planner = ScriptedWorker("p", lambda t, pl=plan: pl)
+    spec, source, reason = await plan_workflow("extract", planner)
+    assert source == "fallback"
+    assert "invalid workflow" in reason
+    assert len(spec.steps) == 1 and spec.steps[0].objective == "extract"
+
+
 # -- follow-up planning: rework after a finished run --------------------------------
 
 

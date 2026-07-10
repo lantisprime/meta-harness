@@ -2,8 +2,9 @@
 budget ceilings, plateau stop, capability matrix learning, provenance trail."""
 from __future__ import annotations
 
-from metaharness.core import Budget, Task, TaskExecutor, TaskType, Tier, Verdict
+from metaharness.core import Budget, Task, TaskExecutor, TaskType, Tier, Verdict, WorkerResult
 from metaharness.harness import MockLLMWorker, ScriptedWorker
+from metaharness.harness.runner import Runner
 from metaharness.identity import KeyPair, ProvenanceLog, WorkerRegistry, registration_payload
 from metaharness.routing import CapabilityMatrix, Router
 
@@ -183,6 +184,37 @@ async def test_authenticity_wrong_key_rejected():
     assert outcome.attempts[0].verification.scorer == "authenticity"
 
 
+async def test_authenticity_failures_never_reach_the_capability_matrix():
+    """Regression (issue-#5 panel P1): the executor reorder flattened the
+    else-branch that kept matrix.record unreachable for authenticity failures,
+    so badly-signed/replayed results recorded as skill-FAILs. An authenticity
+    FAIL says nothing about the model's skill (verifiers.authenticity_failure
+    invariant: 'Not recorded in the capability matrix') and must record
+    NOTHING — while a normal verified attempt still records."""
+    registry = WorkerRegistry()
+    register(registry, "w-signed", KeyPair.generate())
+    # runner presents worker_id "w-signed" but has no key: results are unsigned
+    unsigned = ScriptedWorker("w-signed", lambda t: "positive", model="unsigned-model")
+    matrix = CapabilityMatrix()
+    executor = TaskExecutor(Router({Tier.SMALL: unsigned}, matrix=matrix),
+                            registry=registry)
+    outcome = await executor.execute(classify_task(max_attempts=2))
+    assert outcome.final_verdict == Verdict.FAIL
+    assert all(a.verification.scorer == "authenticity" for a in outcome.attempts)
+    assert matrix.samples("unsigned-model", TaskType.CLASSIFY) == 0  # nothing banked
+
+    # sanity: a properly signed worker's verified outcome still records
+    kp = KeyPair.generate()
+    register(registry, "w-ok", kp)
+    signed = MockLLMWorker("w-ok", Tier.SMALL, keypair=kp, seed=1,
+                           skills={TaskType.CLASSIFY: 1.0})
+    executor = TaskExecutor(Router({Tier.SMALL: signed}, matrix=matrix),
+                            registry=registry)
+    outcome = await executor.execute(classify_task())
+    assert outcome.final_verdict == Verdict.PASS
+    assert matrix.samples("mock-small", TaskType.CLASSIFY) >= 1
+
+
 async def test_signed_registered_worker_passes_authenticity():
     registry = WorkerRegistry()
     kp = KeyPair.generate()
@@ -203,6 +235,30 @@ async def test_budget_hard_stop():
     assert len(outcome.attempts) < 5
     assert outcome.attempts[-1].verification.failure_mode is not None
     assert outcome.attempts[-1].verification.scorer == "budget"
+
+
+async def test_worker_error_over_budget_surfaces_tool_error_not_budget_exceeded():
+    """Issue #5: charging before inspecting the result masked a genuine worker
+    failure as budget exhaustion. A worker that errors AND blows the cap on the
+    same attempt must record the real TOOL_ERROR — the run still stops (budget
+    event recorded), it just doesn't lie about why."""
+    from metaharness.core.types import MASTMode
+
+    class Failing(Runner):
+        worker_id, tier, model = "w", Tier.SMALL, "w"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id="w", tier=self.tier,
+                                model="w", error="tool blew up",
+                                tokens_in=30, tokens_out=10)
+
+    budget = Budget(max_tokens=5)  # the 40-token charge blows the cap
+    executor = TaskExecutor(Router({Tier.SMALL: Failing()}), budget=budget)
+    outcome = await executor.execute(classify_task(max_attempts=3))
+    assert outcome.final_verdict == Verdict.FAIL
+    assert len(outcome.attempts) == 1  # the budget stop still halts the run
+    assert outcome.attempts[-1].verification.failure_mode == MASTMode.TOOL_ERROR
+    assert outcome.attempts[-1].verification.scorer == "execution"
+    assert budget.spent_tokens == 40  # charged regardless
 
 
 async def test_unverified_stops_iteration():

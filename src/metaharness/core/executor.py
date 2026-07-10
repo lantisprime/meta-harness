@@ -106,50 +106,82 @@ class TaskExecutor:
                 result = await runner.run(variant)
                 result.task_id = task.id
 
-                try:
-                    if self.budget is not None:
-                        self.budget.charge(
-                            cost_usd=result.cost_usd,
-                            tokens=result.tokens_in + result.tokens_out,
-                        )
-                except BudgetExceeded as exc:
-                    verification = VerificationResult(
-                        verdict=Verdict.FAIL, score=0.0, detail=str(exc),
-                        failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
-                    )
-                    outcome.attempts.append(Attempt(n=n, result=result, verification=verification))
-                    self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
-                    break
-
-                # authenticity first: an unverifiable result is rejected on sight
+                # charge always, fail truthfully (issue #5): the deterministic
+                # verification (authenticity, then verify_output) is computed
+                # BEFORE the charge so a genuine worker malfunction is already
+                # known when the budget check below decides whether to mask it.
+                # The rubric-judge slot stays AFTER the charge — an over-budget
+                # attempt must stop before paying for an extra LLM judge call.
                 if self.registry is not None and not verify_result(result, self.registry):
                     verification = authenticity_failure(
                         f"result from {result.worker_id!r} has no valid signature "
                         "under its registered key"
                     )
+                    worker_malfunctioned = True
                 else:
                     verification = verify_output(task, result)
-                    if (verification.verdict == Verdict.UNVERIFIED
-                            and self.judge is not None
-                            and task.task_type != TaskType.PLANNING):
-                        # rubric-judge slot: no deterministic check exists, so a
-                        # fresh-context LLM grades the output against the step's
-                        # own contract — a FAIL enters the normal retry loop
-                        # BEFORE any dependent step consumes the output
-                        try:
-                            verification = await self.judge(variant, result)
-                        except Exception as exc:  # a broken judge must never fail the task,
-                            # but a silent one is undiagnosable — record why it broke
-                            self._record("judge.error", {
-                                "task_id": task.id, "attempt": n,
-                                "error": f"{type(exc).__name__}: {exc}"[:300],
-                            })
-                    # capability matrix learns from checkable outcomes only
-                    # (deterministic or rubric-judged; scorer says which)
-                    if verification.verdict in (Verdict.PASS, Verdict.FAIL):
-                        self.router.matrix.record(
-                            result.model, task.task_type, verification.verdict == Verdict.PASS
+                    worker_malfunctioned = bool(result.error)
+
+                try:
+                    if self.budget is not None:
+                        self.budget.charge(
+                            cost_usd=result.cost_usd,
+                            tokens=result.tokens_in + result.tokens_out,
+                            wall_s=result.latency_s,
                         )
+                except BudgetExceeded as exc:
+                    # a genuine worker malfunction (result.error or an
+                    # authenticity failure) always wins over budget-exhausted —
+                    # keep the verification already computed above. A mere
+                    # low-score verify-FAIL is NOT a masked failure; that case
+                    # keeps today's budget-FAIL verification exactly.
+                    if not worker_malfunctioned:
+                        verification = VerificationResult(
+                            verdict=Verdict.FAIL, score=0.0, detail=str(exc),
+                            failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
+                        )
+                    outcome.attempts.append(Attempt(n=n, result=result, verification=verification))
+                    self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
+                    break
+
+                if (verification.verdict == Verdict.UNVERIFIED
+                        and self.judge is not None
+                        and task.task_type != TaskType.PLANNING):
+                    # rubric-judge slot: no deterministic check exists, so a
+                    # fresh-context LLM grades the output against the step's
+                    # own contract — a FAIL enters the normal retry loop
+                    # BEFORE any dependent step consumes the output
+                    try:
+                        verification = await self.judge(variant, result)
+                    except BudgetExceeded as exc:
+                        # the judge call's own worker spend is charged against
+                        # the same budget (make_judge) — a budget stop here
+                        # must surface as a budget stop, never be laundered
+                        # into a "broken judge" note.
+                        verification = VerificationResult(
+                            verdict=Verdict.FAIL, score=0.0, detail=str(exc),
+                            failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
+                        )
+                        outcome.attempts.append(Attempt(n=n, result=result, verification=verification))
+                        self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
+                        break
+                    except Exception as exc:  # a broken judge must never fail the task,
+                        # but a silent one is undiagnosable — record why it broke
+                        self._record("judge.error", {
+                            "task_id": task.id, "attempt": n,
+                            "error": f"{type(exc).__name__}: {exc}"[:300],
+                        })
+                # capability matrix learns from checkable outcomes only
+                # (deterministic or rubric-judged; scorer says which). An
+                # authenticity failure says nothing about the model's SKILL and
+                # must never be recorded (verifiers.authenticity_failure
+                # invariant) — pre-issue-#5 this was enforced by nesting; the
+                # reorder flattened it, so guard on the scorer (panel P1).
+                if (verification.verdict in (Verdict.PASS, Verdict.FAIL)
+                        and verification.scorer != "authenticity"):
+                    self.router.matrix.record(
+                        result.model, task.task_type, verification.verdict == Verdict.PASS
+                    )
 
                 attempt = Attempt(n=n, result=result, verification=verification)
                 outcome.attempts.append(attempt)

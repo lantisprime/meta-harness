@@ -348,6 +348,40 @@ async def test_self_critique_aggregates_cost():
     assert result.tokens_out > single.tokens_out
 
 
+# -- budget: wall_s wiring (issue #5 item Part B) ---------------------------------
+
+
+def test_budget_wall_s_accumulates_and_back_compat_charge_defaults_to_zero():
+    from metaharness.core.budget import Budget
+
+    budget = Budget()
+    budget.charge(cost_usd=0.1, tokens=10)  # back-compat: no wall_s kwarg at all
+    assert budget.spent_wall_s == 0.0
+    budget.charge(wall_s=2.5)
+    budget.charge(wall_s=1.5)
+    assert budget.spent_wall_s == pytest.approx(4.0)
+
+
+def test_budget_max_wall_s_none_never_raises():
+    from metaharness.core.budget import Budget
+
+    budget = Budget()  # cap-less: a pure accumulator
+    for _ in range(5):
+        budget.charge(wall_s=1000.0)
+    assert budget.spent_wall_s == pytest.approx(5000.0)
+
+
+def test_budget_max_wall_s_exceeded_raises():
+    from metaharness.core.budget import Budget, BudgetExceeded
+
+    budget = Budget(max_wall_s=10.0)
+    budget.charge(wall_s=4.0)
+    budget.charge(wall_s=4.0)  # 8.0, still under cap
+    with pytest.raises(BudgetExceeded):
+        budget.charge(wall_s=3.0)  # 11.0 > 10.0
+    assert budget.spent_wall_s == pytest.approx(11.0)  # charge-always: still recorded
+
+
 async def test_tool_offload_parses_programs_from_prose():
     """Regression (2026-07-09, live tuning): real chat models answer the
     emit-a-program ask in prose, not {"program": ...} — MiniMax wrote

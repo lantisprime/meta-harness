@@ -150,7 +150,7 @@ class HarnessState:
             for tier in (Tier.FRONTIER, Tier.MID, Tier.SMALL):
                 members = self.router.pool(tier)
                 if members:
-                    judge_fn = make_judge(members[0])
+                    judge_fn = make_judge(members[0], budget=self.budget)
                     break
         self.executor = TaskExecutor(
             self.router,

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable, Optional
 
+from metaharness.core.budget import Budget
 from metaharness.core.types import (
     MASTMode,
     Task,
@@ -64,9 +65,16 @@ _MAX_OUTPUT_CHARS = 6_000
 Judge = Callable[[Task, WorkerResult], Awaitable[VerificationResult]]
 
 
-def make_judge(judge_runner: Runner) -> Judge:
+def make_judge(judge_runner: Runner, budget: Optional[Budget] = None) -> Judge:
     """Build the executor's judge hook from a (capable) runner. The runner is
-    called with a fresh, depersonalized grading task per evaluation."""
+    called with a fresh, depersonalized grading task per evaluation.
+
+    `budget`, when given, charges the judge runner's own cost/tokens/wall-clock
+    against the shared budget (charge-always semantics, issue #5 item 3b) —
+    otherwise a judge's worker spend is invisible to the run's budget. A
+    BudgetExceeded from this charge propagates to the caller (the executor's
+    judge except-block handles it like the charge-site case, never as a
+    swallowed judge.error)."""
 
     async def judge(task: Task, result: WorkerResult) -> VerificationResult:
         from metaharness.evals.evidence import (
@@ -104,6 +112,12 @@ def make_judge(judge_runner: Runner) -> Judge:
             max_attempts=1,
         )
         graded = await judge_runner.run(grading_task)
+        # charge always: even a broken/unparseable judge call spent real tokens
+        if budget is not None:
+            budget.charge(
+                cost_usd=graded.cost_usd, tokens=graded.tokens_in + graded.tokens_out,
+                wall_s=graded.latency_s,
+            )
         verdict_data = graded.output if isinstance(graded.output, dict) else None
         if graded.error or verdict_data is None or "pass" not in verdict_data:
             # no usable judgment is NOT a failure — it is honest uncertainty

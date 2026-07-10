@@ -28,7 +28,14 @@ from metaharness.optimization import (
     proposer_context,
     search_and_holdout,
 )
-from metaharness.optimization.suites import SUITE_NAMES
+from metaharness.optimization.suites import (
+    SUITE_NAMES,
+    _extras_lock,
+    append_extras,
+    extras_path,
+    load_extras,
+    save_extras,
+)
 
 
 # -- helpers -----------------------------------------------------------------------
@@ -334,6 +341,49 @@ async def test_llm_proposer_charges_budget(tmp_path):
     assert budget.spent_cost_usd == pytest.approx(0.001)
 
 
+async def test_llm_proposer_worker_failure_wins_over_budget_exhausted(tmp_path):
+    """Issue #5: charging before inspecting result.error masked a genuine
+    proposer worker failure as budget exhaustion. A worker error that also
+    blows the cap must raise ProposalError (not silently look like a budget
+    stop), and the tokens are still charged (charge-always)."""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+
+    class Failing(Runner):
+        worker_id, tier, model = "bad-proposer", Tier.FRONTIER, "bad-proposer"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id=self.worker_id, tier=self.tier,
+                                model=self.model, error="proposer blew up",
+                                tokens_in=30, tokens_out=10)
+
+    budget = Budget(max_tokens=5)  # the charge blows the cap either way
+    # LLMProposer wraps the runner in SchemaGuard; a None output also fails the
+    # proposal schema, so the surfaced error is SchemaGuard's (still a genuine
+    # worker/schema failure, still must win over budget-exhausted) and both
+    # attempts (retried once) are billed.
+    with pytest.raises(ProposalError, match="schema:"):
+        await LLMProposer(Failing(), budget=budget).propose(ledger)
+    assert budget.spent_tokens == 80
+
+
+async def test_llm_proposer_unparseable_output_wins_over_budget_exhausted(tmp_path):
+    """Issue-#5 panel round 2 (codex P2): re-raising the captured
+    BudgetExceeded BEFORE the parse check masked garbage proposer output as a
+    budget stop — the same masking class the issue exists to fix. Over-budget
+    + a ValidationError from Proposal.model_validate must raise the parse
+    ProposalError; the budget is still charged. (PROPOSAL_SCHEMA mirrors the
+    Proposal model, so through SchemaGuard garbage lands on the result.error
+    path instead — bypass the guard via the plain `runner` attribute to pin
+    the parse-path ordering itself.)"""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+    stub = StubWorker(output={"hypothesis": "h", "parent": "c0001", "delta": "garbage"})
+    budget = Budget(max_tokens=5)  # the 40-token charge blows the cap
+    proposer = LLMProposer(stub, budget=budget)
+    proposer.runner = stub  # unwrap SchemaGuard: no result.error, parse must fail
+    with pytest.raises(ProposalError, match="did not parse"):
+        await proposer.propose(ledger)
+    assert budget.spent_tokens == 40  # charged even though the proposal failed
+
+
 async def test_optimizer_stops_when_proposer_exhausts_budget(tmp_path):
     """Codex plan-review P1: a proposer LLM call that exhausts the budget must
     stop the search cleanly (report.stopped == 'budget'), not crash the run."""
@@ -579,6 +629,28 @@ async def test_optimizer_stops_loud_on_budget(tmp_path):
     report = await optimizer.optimize(rounds=4)
     assert report.stopped == "budget"
     assert not report.promoted
+
+
+async def test_optimizer_stops_on_max_wall_s(tmp_path):
+    """Budget.max_wall_s is enforceable end-to-end through the tuning loop: a
+    runner whose WorkerResult.latency_s accumulates past the cap stops the
+    search exactly like a token/cost cap (report.stopped == 'budget')."""
+    class SlowWorker(Runner):
+        worker_id, tier, model = "slow", Tier.SMALL, "slow"
+        async def run(self, task):
+            return WorkerResult(
+                task_id=task.id, worker_id=self.worker_id, tier=self.tier,
+                model=self.model, output=(task.success_check or {}).get("equals", "ok"),
+                latency_s=50.0,
+            )
+
+    search, holdout = search_and_holdout("math")
+    optimizer = HarnessOptimizer(
+        SlowWorker, RuleProposer(), search, holdout,
+        CandidateLedger(tmp_path), k=1, budget=Budget(max_wall_s=10.0),
+    )
+    report = await optimizer.optimize(rounds=2)
+    assert report.stopped == "budget"
 
 
 class FixedProposer:
@@ -1181,6 +1253,24 @@ async def test_code_proposer_charges_estimated_tokens(tmp_path):
     assert budget.spent_tokens > 0
 
 
+async def test_code_proposer_worker_failure_wins_over_budget_exhausted(tmp_path):
+    """Issue #5: same masking bug for the coding-agent proposer — a worker
+    error that also blows the cap must raise ProposalError, tokens charged."""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+
+    class Failing(Runner):
+        worker_id, tier, model = "bad-coder", Tier.FRONTIER, "bad-coder"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id=self.worker_id, tier=self.tier,
+                                model=self.model, error="coding agent crashed",
+                                tokens_in=30, tokens_out=10)
+
+    budget = Budget(max_tokens=5)  # the charge blows the cap either way
+    with pytest.raises(ProposalError, match="coding agent crashed"):
+        await CodeProposer(Failing(), budget=budget).propose(ledger)
+    assert budget.spent_tokens == 40  # no SchemaGuard wrap here — one attempt
+
+
 async def test_code_proposer_rejects_garbage_output(tmp_path):
     ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
     binary = _cli_stub(tmp_path / "claude",
@@ -1189,6 +1279,29 @@ async def test_code_proposer_rejects_garbage_output(tmp_path):
     worker = CodingAgentWorker("cw", cli="claude", binary=binary)
     with pytest.raises(ProposalError, match="no JSON proposal object"):
         await CodeProposer(worker).propose(ledger)
+
+
+async def test_code_proposer_garbage_output_wins_over_budget_exhausted(tmp_path):
+    """Issue-#5 panel round 2 (codex P2): the captured BudgetExceeded was
+    re-raised BEFORE _extract_last_json_object and the 'no JSON proposal
+    object' check, so a coding agent with no result.error that spent over cap
+    and emitted garbage text reported 'budget exhausted' instead of the
+    authentic malformed-output failure. Garbage must win; budget still
+    charged (charge-always)."""
+    ledger = seeded_ledger(tmp_path, [ARITH_FAIL])
+
+    class Garbage(Runner):
+        worker_id, tier, model = "chatty-coder", Tier.FRONTIER, "chatty-coder"
+        async def run(self, task):
+            return WorkerResult(task_id=task.id, worker_id=self.worker_id, tier=self.tier,
+                                model=self.model, output="no proposal here, just vibes",
+                                raw_text="no proposal here, just vibes",
+                                tokens_in=30, tokens_out=10)
+
+    budget = Budget(max_tokens=5)  # the 40-token charge blows the cap
+    with pytest.raises(ProposalError, match="no JSON proposal object"):
+        await CodeProposer(Garbage(), budget=budget).propose(ledger)
+    assert budget.spent_tokens == 40  # charged even though the proposal failed
 
 
 async def test_code_proposer_rejects_delta_naming_a_missing_staged_file(tmp_path):
@@ -1238,3 +1351,115 @@ async def test_code_proposer_end_to_end_promotes_a_staged_code_fix(tmp_path):
     assert best.params.code_hash                                        # gate stamped the hash
     assert best.scores.pass_hat_k == 1.0                               # the code fixed arithmetic
     assert report.promoted                                             # held-out gate said GO
+
+
+# -- Issue #7: extras choke point (append_extras / _extras_lock / atomic save) ----
+
+
+def _extra(objective: str, review: str = "x") -> Task:
+    return Task(task_type=TaskType.CLASSIFY, objective=objective,
+                inputs={"review": review}, success_check={"equals": "positive"})
+
+
+def test_append_extras_adds_to_empty_dir(tmp_path):
+    survivors, total = append_extras(tmp_path / "mixed", [_extra("A"), _extra("B")])
+    assert {t.objective for t in survivors} == {"A", "B"}
+    assert total == 2
+    assert {t.objective for t in load_extras(tmp_path / "mixed")} == {"A", "B"}
+
+
+def test_append_extras_dedupes_against_file_content(tmp_path):
+    suite_dir = tmp_path / "mixed"
+    save_extras(suite_dir, [_extra("A")])
+    survivors, total = append_extras(suite_dir, [_extra("A"), _extra("B")])
+    assert [t.objective for t in survivors] == ["B"]   # A already on file
+    assert total == 2
+    assert {t.objective for t in load_extras(suite_dir)} == {"A", "B"}
+
+
+def test_append_extras_dedupes_within_the_batch_first_wins(tmp_path):
+    suite_dir = tmp_path / "mixed"
+    # same (objective, inputs) dedupe key for both — success_check (not part of
+    # the key) distinguishes which one the batch kept.
+    first = _extra("A")
+    second = _extra("A")
+    second.success_check = {"equals": "negative"}
+    survivors, total = append_extras(suite_dir, [first, second])
+    assert len(survivors) == 1
+    assert survivors[0].success_check == {"equals": "positive"}   # first wins
+    assert total == 1
+
+
+def test_append_extras_writes_nothing_when_all_are_duplicates(tmp_path):
+    suite_dir = tmp_path / "mixed"
+    save_extras(suite_dir, [_extra("A")])
+    mtime_before = extras_path(suite_dir).stat().st_mtime_ns
+    survivors, total = append_extras(suite_dir, [_extra("A")])
+    assert survivors == []
+    assert total == 1
+    assert extras_path(suite_dir).stat().st_mtime_ns == mtime_before   # no rewrite
+
+
+def test_save_extras_atomic_no_leftover_tempfile_and_valid_json(tmp_path):
+    suite_dir = tmp_path / "mixed"
+    save_extras(suite_dir, [_extra("A")])
+    entries = list(suite_dir.iterdir())
+    assert entries == [extras_path(suite_dir)]   # no stray .tmp file
+    json.loads(extras_path(suite_dir).read_text(encoding="utf-8"))   # valid JSON
+
+
+def test_save_extras_keeps_world_readable_mode(tmp_path):
+    """Panel (GLM + kimi, convergent): mkstemp creates 0600 and os.replace
+    preserves it — without the fchmod, the atomic rewrite silently made
+    extra_tasks.json owner-only vs the old write_text 0644."""
+    suite_dir = tmp_path / "mixed"
+    save_extras(suite_dir, [_extra("A")])
+    assert extras_path(suite_dir).stat().st_mode & 0o777 == 0o644
+
+
+def test_save_extras_cleanup_failure_never_masks_the_write_error(tmp_path, monkeypatch):
+    """Panel (kimi): if the temp-file unlink in the failure path itself raises,
+    the ORIGINAL replace/write error must still propagate, not the OSError."""
+    suite_dir = tmp_path / "mixed"
+
+    def broken_replace(src, dst):
+        raise RuntimeError("disk exploded")
+
+    def broken_unlink(path):
+        raise OSError("unlink also failed")
+
+    monkeypatch.setattr("os.replace", broken_replace)
+    monkeypatch.setattr("os.unlink", broken_unlink)
+    with pytest.raises(RuntimeError, match="disk exploded"):
+        save_extras(suite_dir, [_extra("A")])
+
+
+def test_append_extras_blocks_on_real_flock_contention(tmp_path):
+    """Real lock contention across two threads: flock contends between
+    separate file descriptors even within one process, the same semantics as
+    two OS processes. Thread A holds `_extras_lock`, sleeps, then saves [A]
+    and releases; the main thread's `append_extras([B])` must block until A
+    releases, then merge — proving the lock wraps the fresh read, not just
+    the write."""
+    import threading
+    import time
+
+    suite_dir = tmp_path / "mixed"
+    suite_dir.mkdir(parents=True)
+    holder_ready = threading.Event()
+
+    def hold_and_save():
+        with _extras_lock(suite_dir):
+            holder_ready.set()
+            time.sleep(0.1)
+            save_extras(suite_dir, [_extra("A")])
+
+    thread = threading.Thread(target=hold_and_save)
+    thread.start()
+    holder_ready.wait(timeout=2)
+    survivors, total = append_extras(suite_dir, [_extra("B")])
+    thread.join(timeout=2)
+
+    assert [t.objective for t in survivors] == ["B"]
+    assert total == 2
+    assert {t.objective for t in load_extras(suite_dir)} == {"A", "B"}

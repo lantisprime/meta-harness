@@ -31,10 +31,12 @@ class Budget:
     max_wall_s: Optional[float] = None
     spent_cost_usd: float = 0.0
     spent_tokens: int = 0
+    spent_wall_s: float = 0.0
 
-    def charge(self, cost_usd: float = 0.0, tokens: int = 0) -> None:
+    def charge(self, cost_usd: float = 0.0, tokens: int = 0, wall_s: float = 0.0) -> None:
         self.spent_cost_usd += cost_usd
         self.spent_tokens += tokens
+        self.spent_wall_s += wall_s
         self.check()
 
     def check(self) -> None:
@@ -47,6 +49,15 @@ class Budget:
         if self.max_tokens is not None and self.spent_tokens > self.max_tokens:
             raise BudgetExceeded(
                 f"tokens {self.spent_tokens} > cap {self.max_tokens}"
+            )
+        # wall-clock here is the SUM of every charged WorkerResult.latency_s, not
+        # elapsed session time — deterministic and already inclusive of
+        # SchemaGuard retry latency (enrichment.py folds retries into the final
+        # result before it is charged). Orchestration overhead between calls is
+        # not counted; see core/executor.py and friends for the charge sites.
+        if self.max_wall_s is not None and self.spent_wall_s > self.max_wall_s:
+            raise BudgetExceeded(
+                f"wall time {self.spent_wall_s:.2f}s > cap {self.max_wall_s:.2f}s"
             )
 
     def remaining_cost(self) -> float:

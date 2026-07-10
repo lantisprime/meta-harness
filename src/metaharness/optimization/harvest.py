@@ -24,10 +24,11 @@ from pydantic import BaseModel, Field, ValidationError
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.sandbox import eval_arithmetic
 from metaharness.optimization.suites import (
+    append_extras,
     check_value_ok,
+    dedupe_key,
     extras_path,
     load_extras,
-    save_extras,
     search_and_holdout,
 )
 from metaharness.workflows.dsl import StepSpec, WorkflowSpec, resolve_reference
@@ -80,10 +81,9 @@ def _check_vocab_ok(check: dict[str, Any]) -> bool:
     return True
 
 
-def _dedupe_key(objective: str, inputs: dict[str, Any]) -> tuple[str, str]:
-    """Content-based identity — task_ids/run_ids are single-use, so dedupe must
-    be on (objective, inputs), mirroring the coverage endpoint (app.py:381)."""
-    return (objective, json.dumps(inputs, sort_keys=True, default=str))
+# canonical key, shared with the coverage endpoint (app.py) and the cross-writer
+# choke point (suites.append_extras) — every extras writer must agree on identity.
+_dedupe_key = dedupe_key
 
 
 def harvest_journals(
@@ -166,17 +166,12 @@ def harvest_journals(
 
     report.added = len(new_tasks)
     if not dry_run and new_tasks:
-        # panel F3 (mitigation): the coverage endpoint (app.py:405) can write
-        # extras while we scan journals — re-read fresh and re-dedupe right
-        # before saving so its additions survive, shrinking the lost-update
-        # window from the whole scan to this read-write gap. (Cross-writer
-        # locking is a deferred follow-up, not this module's to solve.)
-        fresh_extras = load_extras(suite_dir)
-        fresh_keys = {_dedupe_key(t.objective, t.inputs) for t in fresh_extras}
-        surviving = [t for t in new_tasks
-                     if _dedupe_key(t.objective, t.inputs) not in fresh_keys]
+        # Issue #7: append_extras is the single cross-writer choke point — it
+        # re-reads fresh under a file lock immediately before saving, so a
+        # concurrent writer (the coverage endpoint, app.py) can never be
+        # clobbered by this scan's stale in-memory `existing_extras`.
+        surviving, _ = append_extras(suite_dir, new_tasks)
         report.added = len(surviving)
-        save_extras(suite_dir, [*fresh_extras, *surviving])
     return report
 
 

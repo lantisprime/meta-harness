@@ -58,6 +58,40 @@ def scoreable_number(value: Any) -> bool:
     return math.isfinite(coerced)
 
 
+def check_value_problems(check: Optional[dict[str, Any]]) -> list[str]:
+    """Human-readable VALUE-level hazards in a success_check — the source-side
+    intake gate (Issue #10) for the workflow endpoints (app.py validate_workflow /
+    start_run) and the planner's LLM-authored checks (plan_workflow, post-
+    _derive_checks). Reuses the same scoreable_tol / scoreable_number policy as
+    verify_output and optimization.suites.check_value_ok so a hand-crafted API
+    body or an LLM plan can't smuggle in a value that later crashes or silently
+    corrupts scoring. VALUE-level only: no vocabulary/shape enforcement — a
+    string equals/one_of member is benign here (verify_output already treats it
+    as non-numeric, per Issue #9) and passes through untouched. Empty list means
+    no problems.
+
+    TOTAL over untrusted input (issue-#10 panel P1, codex): the planner calls
+    this on RAW LLM output, before WorkflowSpec.model_validate — a non-dict
+    success_check ("oops", ["equals", 1]) must return [] here, not raise, or
+    the planner's fallback contract breaks (500 instead of fallback_spec).
+    Shape validation stays model_validate's job downstream."""
+    if not isinstance(check, dict) or not check:
+        return []
+    problems: list[str] = []
+    if "tol" in check and scoreable_tol(check["tol"]) is None:
+        problems.append(f"tol {check['tol']!r} is not a finite tolerance in [0, {MAX_TOL}]")
+    equals = check.get("equals")
+    if "equals" in check and isinstance(equals, (int, float)) and not isinstance(equals, bool) \
+            and not scoreable_number(equals):
+        problems.append(f"equals {equals!r} is non-finite or overflowing")
+    if "one_of" in check and isinstance(check["one_of"], list):
+        for member in check["one_of"]:
+            if isinstance(member, (int, float)) and not isinstance(member, bool) \
+                    and not scoreable_number(member):
+                problems.append(f"one_of member {member!r} is non-finite or overflowing")
+    return problems
+
+
 def _values_equal(got: Any, want: Any, tol: float = 1e-9) -> bool:
     if isinstance(got, bool) != isinstance(want, bool):
         return False

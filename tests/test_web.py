@@ -468,6 +468,126 @@ async def test_coverage_hardens_check_values_and_survives_div_by_zero(wired_stat
     assert extras_file[0]["success_check"] == {"equals": 42, "tol": 0.5}  # recomputed, valid tol kept
 
 
+async def test_coverage_gather_overlap_keeps_both_requests_tasks(wired_state, tmp_path):
+    """Issue #7 acceptance criterion 1, endpoint-level: two /coverage requests
+    RACING via asyncio.gather (each converges on `append_extras` via
+    `asyncio.to_thread`) must not let one clobber the other's addition — the
+    real flock across both threads must serialize the read-merge-save.
+    Codex P3: thread/task interleaving is nondeterministic, so this asserts on
+    the FINAL FILE CONTENT and max(total_extras) across responses, NEVER on
+    which response got which count or which request 'ran first'."""
+    import asyncio
+    import json
+
+    from metaharness.core.types import Task, WorkerResult
+    from metaharness.harness.runner import Runner
+
+    batches = [
+        {"tasks": [{"task_type": "arithmetic", "objective": "Compute 100+1. Answer with the number only.",
+                    "inputs": {"expression": "100+1"}, "success_check": {"equals": 0}}]},
+        {"tasks": [{"task_type": "arithmetic", "objective": "Compute 200+2. Answer with the number only.",
+                    "inputs": {"expression": "200+2"}, "success_check": {"equals": 0}}]},
+    ]
+
+    class Generator(Runner):
+        """Returns a DISTINCT batch per call so the two overlapping requests
+        each contribute a different task — proving neither one's addition was
+        lost, not merely that the same task was added twice."""
+        worker_id, tier, model = "gen", Tier.SMALL, "gen"
+        keypair = None
+
+        def __init__(self):
+            self.calls = 0
+
+        async def run(self, task: Task) -> WorkerResult:
+            payload = batches[self.calls]
+            self.calls += 1
+            return WorkerResult(task_id=task.id, worker_id="gen", tier=self.tier,
+                                model="gen", output=payload, raw_text=json.dumps(payload))
+
+    wired_state.optimization_root = tmp_path / "optimization"
+    wired_state.router.pools[Tier.SMALL][0] = Generator()
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r1, r2 = await asyncio.gather(
+            c.post("/api/optimization/math/coverage", json={"n": 4}),
+            c.post("/api/optimization/math/coverage", json={"n": 4}),
+        )
+
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["added"] == 1 and r2.json()["added"] == 1
+    assert max(r1.json()["total_extras"], r2.json()["total_extras"]) == 2
+
+    extras_file = json.loads((tmp_path / "optimization" / "math" / "extra_tasks.json").read_text())
+    assert len(extras_file) == 2   # neither request's addition was clobbered
+    objectives = {t["objective"] for t in extras_file}
+    assert objectives == {"Compute 100+1. Answer with the number only.",
+                          "Compute 200+2. Answer with the number only."}
+
+
+async def test_coverage_then_harvest_keep_both_additions(wired_state, tmp_path):
+    """Harvest-vs-endpoint parity (Issue #7 acceptance criterion 1): the
+    coverage endpoint adds a task through `append_extras`, then a separate
+    writer — a direct `harvest_journals` run, standing in for the CLI process —
+    adds a different task to the same suite dir. Both must survive. Sequential
+    by design; the interleaved race across writers is covered by the
+    suites-level real-lock test (test_optimization.py) and the reworked
+    injected-interleave harvest test (test_harvest.py)."""
+    import json
+
+    from metaharness.core.types import Task, WorkerResult
+    from metaharness.harness.runner import Runner
+    from metaharness.optimization.harvest import harvest_journals
+    from metaharness.optimization.suites import load_extras
+    from metaharness.workflows.dsl import WorkflowSpec
+
+    generated = {"tasks": [
+        {"task_type": "arithmetic", "objective": "Compute 11+1. Answer with the number only.",
+         "inputs": {"expression": "11+1"}, "success_check": {"equals": 0}},
+    ]}
+
+    class Generator(Runner):
+        worker_id, tier, model = "gen", Tier.SMALL, "gen"
+        keypair = None
+        async def run(self, task: Task) -> WorkerResult:
+            return WorkerResult(task_id=task.id, worker_id="gen", tier=self.tier,
+                                model="gen", output=generated, raw_text=json.dumps(generated))
+
+    optimization_root = tmp_path / "optimization"
+    wired_state.optimization_root = optimization_root
+    wired_state.router.pools[Tier.SMALL][0] = Generator()
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/optimization/math/coverage", json={"n": 4})
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"suite": "math", "added": 1, "total_extras": 1}
+
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    spec = WorkflowSpec.model_validate({"name": "wf", "steps": [
+        {"id": "calc", "task_type": "arithmetic", "objective": "Compute 3*3.",
+         "inputs": {"expression": "3*3"}, "success_check": {"equals": 0}},
+    ]})
+    events = [
+        {"seq": 0, "at": 0.0, "kind": "run.started", "run_id": "run_p", "step_id": None,
+         "payload": {"workflow": spec.model_dump(mode="json"), "context": {}}},
+        {"seq": 1, "at": 0.0, "kind": "step.completed", "run_id": "run_p", "step_id": "calc",
+         "payload": {"step_id": "calc", "verdict": "pass", "output": 9,
+                     "attempts": 1, "cost_usd": 0.0}},
+    ]
+    (journal_dir / "run_p.jsonl").write_text(
+        "\n".join(json.dumps(e, sort_keys=True) for e in events) + "\n", encoding="utf-8")
+
+    report = harvest_journals(journal_dir, "math", optimization_root)
+    assert report.added == 1
+
+    objectives = {t.objective for t in load_extras(optimization_root / "math")}
+    assert objectives == {"Compute 11+1. Answer with the number only.", "Compute 3*3."}
+
+
 def _claude_proposal_stub(path, delta: dict, parent: str = "c0001") -> str:
     """A fake `claude` CLI that prints a Proposal JSON (wrapped in chatter) in
     claude's --output-format json envelope — no real coding CLI needed."""

@@ -171,3 +171,74 @@ def test_verify_output_unscoreable_ground_truth_is_unverified():
     # math.isclose OverflowError guard → non-match FAIL, never a crash.
     normal2 = _task({"equals": 5})
     assert verify_output(normal2, _result(normal2, 10 ** 400)).verdict == Verdict.FAIL
+
+
+# -- Issue #10: check_value_problems (source-side intake-boundary gate) -----------
+
+
+def test_check_value_problems_empty_for_benign_checks():
+    from metaharness.evals.verifiers import check_value_problems
+
+    assert check_value_problems(None) == []
+    assert check_value_problems({}) == []
+    assert check_value_problems({"contains": "x"}) == []
+    assert check_value_problems({"equals": 5}) == []
+    assert check_value_problems({"equals": 5, "tol": 0.5}) == []
+    assert check_value_problems({"equals": 5, "tol": 1.0}) == []  # cap boundary, inclusive
+    assert check_value_problems({"one_of": ["low", "high"]}) == []
+    assert check_value_problems({"one_of": [1, 2.0]}) == []
+    # strings are benign here (verify_output already treats them as non-numeric,
+    # per Issue #9) even when they spell a hazard as text
+    assert check_value_problems({"equals": "inf"}) == []
+    assert check_value_problems({"equals": "1e999"}) == []
+    # bool guard: True/False are not treated as numeric
+    assert check_value_problems({"equals": True}) == []
+    assert check_value_problems({"one_of": [True, False]}) == []
+
+
+def test_check_value_problems_total_over_non_dict_checks():
+    """Issue-#10 panel P1 (codex): the planner calls this on RAW LLM output
+    before model_validate — a non-dict success_check must return [] (shape is
+    model_validate's job downstream), never raise AttributeError, or the
+    planner's fallback contract regresses into a 500."""
+    from metaharness.evals.verifiers import check_value_problems
+
+    assert check_value_problems("oops") == []
+    assert check_value_problems(["equals", 1]) == []
+    assert check_value_problems(42) == []
+    assert check_value_problems(True) == []
+
+
+def test_check_value_problems_names_value_hazards():
+    from metaharness.evals.verifiers import check_value_problems
+
+    equals_problems = check_value_problems({"equals": float("inf")})
+    assert len(equals_problems) == 1 and "equals" in equals_problems[0]
+
+    tol_problems = check_value_problems({"equals": 5, "tol": 1e308})
+    assert len(tol_problems) == 1 and "tol" in tol_problems[0]
+
+    one_of_problems = check_value_problems({"one_of": [1, float("nan")]})
+    assert len(one_of_problems) == 1 and "one_of" in one_of_problems[0]
+
+    # a huge-int equals overflows float() the same as a non-finite float
+    bigint_problems = check_value_problems({"equals": 10 ** 400})
+    assert len(bigint_problems) == 1 and "equals" in bigint_problems[0]
+
+    # both hazards named when both are present
+    both = check_value_problems({"equals": 10 ** 400, "tol": -1})
+    assert len(both) == 2
+
+
+def test_workflow_spec_still_accepts_hazardous_historical_checks():
+    """Issue #10 compat (codex P1 on plan review): the value gate lives at
+    check_value_problems / the API intake boundary and the planner, NOT in
+    dsl.py — a model-level validator would make historical journals unreadable
+    and break replay (harvest.py:183, workflows/engine.py:253 both re-validate
+    persisted specs via WorkflowSpec.model_validate). model_validate must keep
+    accepting a hazardous check completely unchanged."""
+    from metaharness.workflows.dsl import WorkflowSpec
+
+    spec = WorkflowSpec.model_validate({"name": "x", "steps": [
+        {"id": "a", "objective": "o", "success_check": {"tol": 1e308}}]})
+    assert spec.steps[0].success_check == {"tol": 1e308}

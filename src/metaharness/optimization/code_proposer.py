@@ -26,7 +26,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from metaharness.core.budget import Budget
+from metaharness.core.budget import Budget, BudgetExceeded
 from metaharness.core.types import Task, TaskType
 from metaharness.harness.coding import CodingAgentWorker
 from metaharness.optimization.ledger import CandidateLedger
@@ -183,12 +183,23 @@ class CodeProposer:
             inputs={"_workspace": str(ledger.root)},
         )
         result = await self.worker.run(task)
-        # the coding agent's own tokens/cost count against the run budget; an
-        # exhausted budget raises BudgetExceeded, which the loop catches to stop.
+        # charge always, fail truthfully (issue #5): the coding agent's own
+        # tokens/cost count against the run budget even on a failed attempt,
+        # but a genuine worker failure must win over a budget-exhausted
+        # verdict — capture BudgetExceeded and re-raise it only after EVERY
+        # authentic-failure check below (result.error, garbage/unparseable
+        # output, bad parent, missing staged file) is ruled out (issue-#5
+        # panel round 2, codex P2: re-raising before the malformed-output
+        # checks re-introduced the same masking class for garbage output).
+        budget_exceeded: Optional[BudgetExceeded] = None
         if self.budget is not None:
-            self.budget.charge(
-                cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out
-            )
+            try:
+                self.budget.charge(
+                    cost_usd=result.cost_usd, tokens=result.tokens_in + result.tokens_out,
+                    wall_s=result.latency_s,
+                )
+            except BudgetExceeded as exc:
+                budget_exceeded = exc
         if result.error:
             raise ProposalError(f"coding-agent proposer failed: {result.error}")
 
@@ -216,4 +227,6 @@ class CodeProposer:
                 f"coding-agent delta references code_ref {code_ref!r}, but no such "
                 "file exists under the ledger root — the agent did not stage it"
             )
+        if budget_exceeded is not None:
+            raise budget_exceeded
         return proposal
