@@ -1,10 +1,10 @@
 # Session Handoff — meta-harness (2026-07-10, session 16)
 
-## State: issue #11 COMMITTED AND PUSHED, fully verified; no PR yet, issue remains open
-- Commit `81e5efb` is pushed on tracked branch `agent/timeout-aware-retry`, based on
-  synchronized `main` / `origin/main` at `892c129`.
-- Per the user's commit-and-push scope, no pull request was opened and GitHub issue #11
-  remains open.
+## State: issue #11 PUBLISHED AS DRAFT PR #13; fully verified, issue open until merge
+- Product commit `81e5efb` is pushed on tracked branch `agent/timeout-aware-retry`, based on
+  synchronized `main` / `origin/main` at `892c129`, and published as draft
+  [PR #13](https://github.com/lantisprime/meta-harness/pull/13).
+- The PR body contains `Closes #11`; GitHub issue #11 remains open until the PR is merged.
 - Timeout FAILs now receive one retry on the exact same tier before that tier can be
   excluded and escalation can occur. The retry is explicitly pinned to the prior tier, so a
   changed affordability filter cannot silently route the grace attempt elsewhere.
@@ -27,7 +27,7 @@
   `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`; they are not issue #11 work.
 
 ## Next steps
-1. Open a draft PR linked to #11 if publication beyond the pushed branch is approved.
+1. Let PR #13 checks/review complete, then mark it ready and merge when approved.
 
 ---
 
