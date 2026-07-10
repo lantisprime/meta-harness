@@ -3,7 +3,7 @@
 This is the heart of the meta-harness. One call runs a task to completion:
 
     route (cheapest capable) → run → confirm authenticity → verify →
-    on FAIL: reflect, escalate the tier, retry → record everything
+    on FAIL: reflect, retry timeout once in-tier, otherwise escalate → record everything
 
 Every attempt updates the capability matrix (verified outcomes only), charges
 the budget, and is journaled into the provenance chain under the orchestrator's
@@ -22,6 +22,7 @@ from metaharness.core.types import (
     Task,
     TaskOutcome,
     TaskType,
+    Tier,
     VerificationResult,
     Verdict,
     WorkerResult,
@@ -34,7 +35,7 @@ from metaharness.identity.keys import KeyPair
 from metaharness.identity.provenance import ProvenanceLog
 from metaharness.identity.registry import WorkerRegistry
 from metaharness.observability.tracing import tracer
-from metaharness.routing.router import Router
+from metaharness.routing.router import TIER_ORDER, Router
 
 # a reflector turns a failed attempt into advice for the next one
 Reflector = Callable[[Task, Attempt], Optional[str]]
@@ -92,7 +93,13 @@ class TaskExecutor:
         outcome = TaskOutcome(task=task)
         plateau = PlateauDetector()
         seen_signatures: set[str] = set()
-        excluded_tiers: set = set()
+        excluded_tiers: set[Tier] = set()
+        # A timeout is an operational signal, not evidence that the tier lacks
+        # capability. Give each routed tier one retry before excluding it; the
+        # set keeps repeated timeouts from turning max_attempts into an
+        # unbounded same-tier loop (issue #11).
+        timeout_retry_used: set[Tier] = set()
+        forced_retry_tier: Optional[Tier] = None
         advice: list[str] = []
         if self.playbook_hints:
             advice.extend(self.playbook_hints(task))
@@ -103,8 +110,20 @@ class TaskExecutor:
             self._record("task.started", {"task_id": task.id, "objective": task.objective[:200]})
 
             for n in range(1, task.max_attempts + 1):
+                route_exclusions = excluded_tiers
+                if forced_retry_tier is not None:
+                    # One-shot exact-tier retry. Merely leaving the tier
+                    # available is insufficient: after charging the timed-out
+                    # attempt, Router's affordability filter could otherwise
+                    # select a different (usually cheaper) tier.
+                    route_exclusions = excluded_tiers | {
+                        tier for tier in TIER_ORDER if tier != forced_retry_tier
+                    }
+                    forced_retry_tier = None
                 try:
-                    decision = self.router.decide(task, exclude=excluded_tiers, budget=self.budget)
+                    decision = self.router.decide(
+                        task, exclude=route_exclusions, budget=self.budget
+                    )
                 except ValueError as exc:
                     self._record("task.aborted", {"task_id": task.id, "reason": str(exc)})
                     break
@@ -248,14 +267,23 @@ class TaskExecutor:
                             "task_id": task.id, "attempt": n,
                             "error": f"{type(exc).__name__}: {exc}"[:300],
                         })
+                timeout_failure = (
+                    verification.verdict == Verdict.FAIL
+                    and verification.failure_mode == MASTMode.TIMEOUT
+                )
+
                 # capability matrix learns from checkable outcomes only
                 # (deterministic or rubric-judged; scorer says which). An
                 # authenticity failure says nothing about the model's SKILL and
                 # must never be recorded (verifiers.authenticity_failure
                 # invariant) — pre-issue-#5 this was enforced by nesting; the
                 # reorder flattened it, so guard on the scorer (panel P1).
+                # A timeout is likewise neutral: it says the attempt exhausted
+                # its wall-clock allowance, not that the model could not solve
+                # the task. A later PASS still earns normal positive evidence.
                 if (verification.verdict in (Verdict.PASS, Verdict.FAIL)
-                        and verification.scorer != "authenticity"):
+                        and verification.scorer != "authenticity"
+                        and not timeout_failure):
                     self.router.matrix.record(
                         result.model, task.task_type, verification.verdict == Verdict.PASS
                     )
@@ -309,11 +337,34 @@ class TaskExecutor:
                         "rejected. Take a materially different approach."
                     )
 
+                # A timeout gets one same-tier retry before escalation. This
+                # branch intentionally precedes ε-exploration handling: timeout
+                # FAILs are not banked in the matrix, so the exploration rule's
+                # "failure evidence" rationale does not apply. After the retry
+                # is consumed, another timeout escalates for progress/cost
+                # control even if that second route happened to be exploratory.
+                if timeout_failure:
+                    if decision.tier not in timeout_retry_used:
+                        timeout_retry_used.add(decision.tier)
+                        if n < task.max_attempts:
+                            forced_retry_tier = decision.tier
+                            self._record("task.timeout_retry", {
+                                "task_id": task.id,
+                                "after_attempt": n,
+                                "tier": decision.tier.value,
+                                "model": result.model,
+                            })
+                    elif n < task.max_attempts:
+                        next_tier = self.router.next_tier(decision.tier)
+                        if next_tier is not None:
+                            excluded_tiers.add(decision.tier)
+                            outcome.escalations += 1
+
                 # an ε-explored failure is the benched member's, not the tier's:
                 # the FAIL is already banked in the matrix, so retrying lets the
                 # next decide() pick the best member on merit — escalating would
                 # pay a higher tier for evidence we chose to buy cheap
-                if not decision.explored:
+                elif not decision.explored:
                     next_tier = self.router.next_tier(decision.tier)
                     if next_tier is not None:
                         excluded_tiers.add(decision.tier)
