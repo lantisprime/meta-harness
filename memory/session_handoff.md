@@ -1,84 +1,72 @@
-# Session Handoff — meta-harness (2026-07-12, session 13)
+# Session Handoff — meta-harness (2026-07-10, session 14)
 
-## State: FIVE issues shipped, pushed, closed. main == origin/main. Clean close-out.
-Post-handoff addendum (same session): the authoritative playbook was revised to **v10**
-(episode `20260710-025825-...-acf7`, supersedes v9) adding the SEAT-LIVENESS RULE to
-section 10; tag search verified single-hit; canonical retrieval measured 25,626 bytes —
-well under the 50KB cap.
-- `fc038c4` — issue #9 (last session's working-tree carryover): committed, pushed, #9 closed.
-- Filed #10 (source-side check gating, the #9 scout follow-up) — then BUILT and closed it same session.
-- `c2b8d20` — batch commit for #4, #5, #6, #7, #10 (all auto-closed on push). 25 files,
-  +1511/−124. Tests 426 → 489, all green. Only #1 and #2 remain open on GitHub.
-- ONE batch commit, not five: the issues interleave hunks in app.py / test_advisor.py /
-  test_optimization.py; per-issue splitting needed hunk surgery on a verified tree — the
-  commit message carries full per-issue sections instead. Deliberate trade-off.
+## State: issue #2 SHIPPED, pushed, closed. main == origin/main (fe69865). Clean close-out.
+- `fe69865` — issue #2: per-worker timeout config + task-type-aware defaults + structured
+  timeout journaling. 22 files, +560/−24. Tests 453 → 470 non-e2e, 36 → 38 Playwright,
+  all green (orchestrator re-ran both suites itself after the fix batch).
+- Filed **#11** (timeout FAIL triggers tier escalation — retry at a pricier tier for a
+  time-limit failure; scout finding, deliberately out of #2's scope).
+- Remaining open: **#1** (execution-based verification for code_edit steps) and #11.
 
-## What shipped (per issue, all panel-reviewed)
-- **#7**: fcntl.flock choke point `append_extras()` in suites.py (lock spans fresh-load→
-  merge→atomic-save), same-dir tempfile + os.replace (0644 preserved), both writers
-  converted (harvest CLI; coverage endpoint via asyncio.to_thread). Thread-contention +
-  injected-interleave + gather-overlap tests.
-- **#4**: PAGE_ACTION_POLICY per page in advisor.py; mutating actions need params.suite ∈
-  SUITE_NAMES (the vocabulary the EXECUTING endpoints accept — NOT _suites() dir listing,
-  codex plan-review P1); malformed model output (non-dict params, non-str/unhashable
-  action) drops silently, never 500s.
-- **#5 + Budget.max_wall_s**: charge-always/fail-truthfully at advisor/proposers/executor
-  (loop.py was the precedent); executor does deterministic-verify → charge → judge (no
-  judge spend past cap); judge runner spend charged via make_judge(budget=); wall budget =
-  sum of WorkerResult.latency_s; --max-wall-s on optimize AND serve; zero-value cap flags
-  honored (is-not-None guard).
-- **#6**: playbook/failures advise contexts emit stable projections (no pb_ ids /
-  timestamps); deprecated bullets selected by recency, PRESENTED in content order.
-- **#10**: planner drops unscoreable auto-derived arithmetic equals (1e999, 1e300*1e300);
-  `check_value_problems()` (total over any input shape) gates /api/workflows/validate +
-  /api/runs (named 422s) and plan_workflow (drops hazardous LLM checks). Historical
-  journals + engine replay DELIBERATELY untouched (model-level validation would break them).
+## What shipped (#2, full playbook v10 run)
+- `AgentConfig.timeout_s` / `AddWorkerRequest.timeout_s` — `Field(gt=0, le=86400,
+  allow_inf_nan=False)`; factory passes to coding_cli / subscription_cli / openai_compat
+  only when set; server forces None for mock.
+- Task-type-aware defaults when unset: `BASE_TIMEOUT_S` (600 coding / 300 subscription)
+  × `TASK_TYPE_TIMEOUT_FACTOR` (code_edit 3×) via `effective_timeout_s(task)`; explicit
+  config value wins FLAT across task types (mirrors budget_for override precedent).
+- Structured timeout: `WorkerTimeout` exc, `WorkerResult.timed_out` (UNSIGNED derived
+  metadata — deliberately excluded from result_signing_bytes so old signatures stay
+  valid), `MASTMode.TIMEOUT`, verify_output routes before TOOL_ERROR, httpx timeout
+  caught ONLY around the model `_post` (not the tool round-trip). step.attempt +
+  task.attempt payloads now carry failure_mode / latency_s / timed_out. TIMEOUT
+  vocabulary in grounded_reflector, CURATION_TEMPLATES, classify_failure, MAST_PLAIN.
+- Wizard: Advanced `<details>` block in step 2 (first numeric input in the wizard),
+  hidden for mock + cleared on kind-switch + excluded from save + server-side guard
+  (three layers, each pinned by a test), edit preload, summary line, settings card.
 
-## Playbook run (full process per issue, per user's explicit choice)
-Scout (2× sonnet Explore) → orchestrator spec → codex plan review (2 HOLDs repaired →
-BUILD; caught 3 pre-build P1s) → SONNET builders (all five — verified, see roster memory)
-→ 4-seat frozen-diff panels (codex + Claude sonnet + GLM-5.2 + kimi via tmux drivers) →
-triage → fixes by ORIGINAL builders via SendMessage → MiniMax-M3 behavioral verify
-(10/10 probes PASS, probe at /tmp/verify-brief/probe.py).
+## Playbook run (per user's explicit "yes full playbook")
+Scout (2× sonnet Explore) → orchestrator spec → codex plan review (HOLD → 6 findings
+repaired → BUILD; caught the openai_compat structured-timeout parity P1 PRE-BUILD) →
+sonnet builder (one seat, all 6 parts) → 4-seat frozen-diff panel (Claude sonnet agent +
+codex gpt-5.5-high tmux + GLM-5.2 + kimi-k2.7-code via pi tmux drivers) → 7 deduped P2
+fixes by the ORIGINAL builder via SendMessage → MiniMax-M3 behavioral verify (10/10
+probes PASS, own harness under /tmp/verify-issue2/).
 
-Panel value this session — 3 probe-confirmed P1s + 2 P2s, ALL invisible to a green suite:
-executor reorder let authenticity failures poison the routing capability matrix (Claude
-seat); planner value-gate 500 on non-dict success_check, breaking the fallback contract
-(codex); deprecated-sort time.time() collision jitter breaking byte-stability, 7/8 repro
-(Claude seat); --max-wall-s 0 silently uncapped (3-seat convergence); proposer
-garbage-output masking after the reorder (codex; fixed symmetrically in LLMProposer).
-Builder pushback highlight: #6 builder REJECTED the orchestrator's prescribed tie-break
-with failing-test evidence and shipped a better fix (select-vs-present split).
+Panel value: 0 P1 (plan review had already eaten the P1 class), 7 P2s incl. 3-seat
+convergence on Infinity-accepted validation, 2-seat convergence on the too-broad httpx
+catch, GLM's mutation-survivability audit of the new MAST vocabulary (all 4 branches
+untested), kimi's "the central `timeout=eff` line itself is unpinned" catch. Builder
+pushback: Starlette can't serialize an inf echo in a 422 body — test asserts the real
+property (fails loudly, never persists) instead of the panel's literal wire assertion.
 
 ## Process notes / gotchas (this session)
-- Reserved sockets drive-codex-mh-s9 / drive-pi-kimi-s9 were OWNED BY A LIVE SIBLING
-  session (episodic-memory repo) — used fresh session-scoped sockets drive-codex-mh-s13 /
-  drive-pi-kimi-s13 instead; drive-pi-glm-s9 was free (later reused for the MiniMax-M3
-  verify seat). Checked with `tmux -L <sock> ls` first, never killed anything.
-- pi dialog storms handled by an auto-approver loop with a strict read-only/scratch-space
-  allowlist; repo writes + git mutations escalated for manual look-then-approve.
-- NEW MEMORY: whole-pane `grep "Working|esc to interrupt"` busy-detection FALSE-POSITIVES
-  once a seat's report quotes those words — both final seats sat finished while the watcher
-  said WORKING; the user's "are you sure?" exposed it. Liveness = sample the status-bar
-  token counters twice (~25s apart); identical counters = idle.
-  ([[pi-busy-detection-grep-false-positive]])
+- Sockets: drive-codex-mh-s9 + drive-pi-kimi-s9 OWNED BY LIVE SIBLING (untouched).
+  Used drive-codex-mh-s13 (codex), drive-pi-kimi-s13 (kimi), drive-pi-glm-s9 (GLM,
+  then reused for the MiniMax-M3 verify seat). All stopped at close-out.
+- codex CLI's configured default model `gpt-5.6-sol` 400s ("requires a newer version of
+  Codex") on codex v0.143.0 — switch the seat via `/model` → gpt-5.5 + High effort.
+  Menu Enters over tmux frequently need a second (sometimes third) press.
+- Hit the playbook §6 zsh gotcha MYSELF: `set -- $pair` in a watcher loop doesn't
+  word-split under zsh → every capture failed → false ALL-IDLE. Plain per-seat commands
+  fixed it. The playbook rule is real; it also bites `for pair in ...; set -- $pair`.
+- pi seats in read-only mode generated ~20 permission dialogs across the session (rg
+  with pipes/||, pytest runs, /tmp probe writes) — all benign, look-then-approve each.
+  A dialog-watcher that exits on "How should Pi handle" + spinner-char busy detection
+  (NOT word-grep) worked reliably; twice-sampled token counters confirmed seat-done.
 
-## Deferred (small, non-blocking; consider filing)
-- Judge cost/tokens reach the shared Budget but NOT outcome.total_cost_usd (per-task
-  report undercounts judged attempts).
-- Advisor budget-exhausted message says "token budget exhausted" even when the cost or
-  wall cap tripped (message includes the real cap detail, just awkward).
-- check_value_problems ignores tuple one_of members (unreachable via JSON — 2 seats
-  agreed theoretical).
-- Top-5 deprecated-bullet SELECTION (not order) can differ across states on an exact
-  timestamp collision at the boundary — inherent to wall-clock recency semantics.
-- tuning branch cand.model_dump() still leaks volatile candidate fields (same class as #6,
-  different subsystem).
+## Deferred / known-small (carry-over + new)
+- Session-13 items still unfiled: judge cost not in outcome.total_cost_usd; advisor
+  budget-exhausted message wording; tuple one_of members in check_value_problems;
+  deprecated-bullet boundary collision; tuning cand.model_dump() volatile leak.
+- NEW: `temperature` / `max_tokens` on AgentConfig are equally unconstrained (no
+  ge/le) — same class as the #2 validation fix, pre-existing, not user-reachable via
+  wizard yet; fix when those fields get exposed.
 
 ## Next steps
-1. Remaining open issues: #2 (coding-CLI timeout default + per-worker UI exposure),
-   #1 (execution-based verification for code_edit steps).
-2. Optionally file the deferred items above.
+1. #1 (execution-based verification for code_edit steps) — the big one.
+2. #11 (timeout-aware escalation) — small, scout+spec first.
+3. Optionally file the session-13 deferred items.
 
 Working tree after close-out: only .gitignore (pre-existing session noise) + untracked
 .agents/.claude/.review-store/uv.lock remain uncommitted, same as session start.
