@@ -1,3 +1,27 @@
+# Session Handoff — meta-harness (2026-07-10, session 17)
+
+## State: issue #14 PUBLISHED AS DRAFT PR #15; CI green, Node.js 20 warning removed
+- Filed [GitHub issue #14](https://github.com/lantisprime/meta-harness/issues/14) for the
+  Node.js 20 Actions runtime deprecation warning.
+- Product commit `0dd336a` is pushed on tracked branch `agent/node24-actions`, based on
+  synchronized `main` / `origin/main` at `e57ca02`, and published as draft
+  [PR #15](https://github.com/lantisprime/meta-harness/pull/15).
+- `.github/workflows/ci.yml` now uses the official Node 24-native majors:
+  `actions/checkout@v6` and `actions/setup-python@v6`. The runner, Python 3.14 pin,
+  dependency installation, and pytest command are unchanged.
+- Validation: workflow YAML parses, both action-major references are asserted, and
+  `git diff --check` is clean. PR CI run #51 passed with both v6 actions, and GitHub's
+  check-annotations API returned an empty list: the Node.js 20 warning is gone.
+- Preserve the pre-existing `.gitignore` edit and untracked `.agents/`, `.claude/`,
+  `.review-store/`, and `uv.lock`; they are unrelated to issue #14.
+
+## Next steps
+1. Mark PR #15 ready and merge only when explicitly approved, then confirm final `main` CI
+   also has no Node.js 20 deprecation annotation.
+2. Continue workplan item 2: real-worker Software Engineer template regression run.
+
+---
+
 # Session Handoff — meta-harness (2026-07-10, session 16)
 
 ## State: issue #11 SHIPPED via PR #13; CI green, issue closed, main synchronized
