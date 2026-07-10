@@ -65,6 +65,8 @@ def subscription_status() -> dict[str, dict[str, Any]]:
 class SubscriptionWorker(CodingAgentWorker):
     """A tier worker whose completions come from a signed-in CLI."""
 
+    BASE_TIMEOUT_S = 300.0  # answer-only calls need less room than CodingAgentWorker's edits
+
     def __init__(
         self,
         worker_id: str,
@@ -73,12 +75,13 @@ class SubscriptionWorker(CodingAgentWorker):
         tier: Tier = Tier.FRONTIER,
         keypair: Optional[KeyPair] = None,
         system_prompt: str = "",
-        timeout_s: float = 300.0,
+        timeout_s: Optional[float] = None,  # None = task-type-aware default (issue #2)
         **kwargs: Any,
     ) -> None:
         if cli not in SUBSCRIPTION_CLIS:
             raise ValueError(
                 f"unknown subscription CLI {cli!r} (known: {sorted(SUBSCRIPTION_CLIS)})")
+        timeout_kwargs = {} if timeout_s is None else {"timeout_s": timeout_s}
         super().__init__(
             worker_id,
             cli=cli,
@@ -87,7 +90,7 @@ class SubscriptionWorker(CodingAgentWorker):
             keypair=keypair,
             system_prompt=system_prompt,
             workspace=WORKSPACES_DIR / "subscription-scratch",
-            timeout_s=timeout_s,
+            **timeout_kwargs,
             **kwargs,
         )
         # answer, don't edit: codex gets a read-only sandbox (claude's builder

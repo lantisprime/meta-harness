@@ -21,9 +21,22 @@ from metaharness.identity.registry import WorkerRegistry
 from metaharness.observability.tracing import tracer
 
 
+class WorkerTimeout(RuntimeError):
+    """A worker's `_execute` ran out of its allotted wall-clock time. Carries
+    the timeout actually applied (post task-type scaling / config override,
+    issue #2) so callers can report it without re-deriving it."""
+
+    def __init__(self, msg: str, timeout_s: float) -> None:
+        super().__init__(msg)
+        self.timeout_s = timeout_s
+
+
 def result_signing_bytes(result: WorkerResult) -> bytes:
     """The exact bytes a worker signs to vouch for a result. Covers the fields
-    that matter (who, what task, what output) — not latency/cost bookkeeping."""
+    that matter (who, what task, what output) — not latency/cost bookkeeping.
+    `timed_out` is deliberately excluded (issue #2): it is unsigned derived
+    metadata, and adding a key here would invalidate every signature already
+    recorded in past journals."""
     return canonical_bytes(
         {
             "kind": "worker_result",
@@ -98,6 +111,7 @@ class BaseRunner(Runner):
                     tier=self.tier,
                     model=self.model,
                     error=f"{type(exc).__name__}: {exc}",
+                    timed_out=isinstance(exc, WorkerTimeout),  # issue #2
                 )
             result.latency_s = time.monotonic() - started
             if self.keypair is not None:

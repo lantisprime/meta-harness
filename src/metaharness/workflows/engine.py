@@ -198,6 +198,12 @@ class WorkflowEngine:
                             "verdict": att.verification.verdict.value,
                             "scorer": att.verification.scorer,
                             "detail": att.verification.detail[:300],
+                            # issue #2: a timeout is now structurally identifiable
+                            # from the journal alone, not just free-text detail
+                            "failure_mode": (att.verification.failure_mode.value
+                                             if att.verification.failure_mode else None),
+                            "latency_s": round(att.result.latency_s, 2),
+                            "timed_out": att.result.timed_out,
                         },
                     )
                 record = StepRecord(

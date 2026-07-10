@@ -19,6 +19,8 @@ def classify_failure(task: Task, attempt: Attempt) -> MASTMode:
         return verification.failure_mode
     if verification.verdict == Verdict.UNVERIFIED:
         return MASTMode.NO_VERIFICATION
+    if attempt.result.timed_out:  # issue #2 — check before the generic TOOL_ERROR fallback
+        return MASTMode.TIMEOUT
     error = attempt.result.error or ""
     if error.startswith("schema:"):
         return MASTMode.SCHEMA_INVALID

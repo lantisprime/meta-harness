@@ -1634,6 +1634,7 @@ const MAST_PLAIN = {
   tool_error: 'a tool call failed',
   schema_invalid: 'output didn’t match the required format',
   budget_exceeded: 'ran out of budget',
+  timeout: 'ran out of time before finishing',
   unknown: 'cause not identified',
 };
 const mastPlain = m => MAST_PLAIN[m] || taskPlain(m);
@@ -2121,7 +2122,8 @@ function renderSettingsHome(){
         openai_compat: 'LLM endpoint', coding_cli: 'coding CLI',
         subscription_cli: 'subscription', mock: 'mock'}[a.kind] || a.kind)}</div>
       <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
-        ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}</div></div>
+        ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}
+        ${a.timeout_s ? ' · timeout ' + a.timeout_s + 's' : ''}</div></div>
       <button class="pill" data-act="agent_edit" data-id="${i}">Edit</button>
       <button class="pill" data-act="agent_del" data-id="${esc(a.worker_id)}">Remove</button></div>`).join('')
     : '<div class="empty">no saved agents — the ones running now were auto-discovered and vanish when the server restarts</div>';
@@ -2391,6 +2393,15 @@ async function provSave(){
 }
 
 /* ---------- agent wizard: kind → connection → role & prompt → test & save ---------- */
+// kind default timeout, in words — shown under the wizard's Advanced timeout
+// field (issue #2). Only kinds with a real timeout knob appear here; mock
+// has none.
+const TIMEOUT_KIND_HINT = {
+  openai_compat: 'default is 120s, flat for every task type',
+  coding_cli: 'default is 600s (1800s for code-edit tasks — 3× when unset)',
+  subscription_cli: 'default is 300s (900s for code-edit tasks — 3× when unset)',
+};
+
 const PROMPT_ARCHETYPES = {
   solver: {label: 'Solver', prompt:
 `You are a focused task-solver. Work only on the task given; never invent extra scope.
@@ -2430,6 +2441,7 @@ function startAgentWizard(a){
     provider: a ? a.provider : '', base_url: a ? a.base_url : '',
     model: a ? a.model : '', cli: a ? a.cli : '',
     system_prompt: a ? a.system_prompt : '', archetype: '',
+    timeout_s: a ? (a.timeout_s ?? null) : null,
     probed: [], test: null };
   if(SET.cfg) renderSettings(); else showView('settings');
 }
@@ -2520,12 +2532,19 @@ function renderAgentWizard(){
           <li><b>Output discipline</b> — exactly-what-was-asked; the harness verifies literal answers.</li>
           <li><b>Honesty valves</b> — say-so-if-impossible beats confident guessing; UNVERIFIED answers stop the pipeline safely.</li>
           <li><b>No scope creep</b> — the task contract (objective, boundaries, schema) is appended after this prompt and always wins.</li>
-        </ul></div>`;
+        </ul></div>
+      ${w.kind === 'mock' ? '' : `<details class="field"><summary style="cursor:pointer">Advanced</summary>
+        <div class="field" style="margin-top:8px"><label>Timeout (seconds)</label>
+          <input id="aw-timeout" type="number" step="any" class="mono"
+            value="${w.timeout_s == null ? '' : w.timeout_s}" placeholder="default">
+          <span class="small dim">Blank = ${TIMEOUT_KIND_HINT[w.kind] || 'the kind default'}.</span></div>
+      </details>`}`;
   }else{
     inner = `
       <div class="hint-panel"><b>About to ${w.editing ? 'update' : 'register'}</b>
         <span class="kv">${esc(w.worker_id)} · ${esc(w.tier)} · ${esc(w.kind)}
-        ${w.kind === 'coding_cli' ? '· ' + esc(w.cli) : '· ' + esc(w.provider || w.base_url) + (w.model ? ' · ' + esc(w.model) : '')}</span></div>
+        ${w.kind === 'coding_cli' ? '· ' + esc(w.cli) : '· ' + esc(w.provider || w.base_url) + (w.model ? ' · ' + esc(w.model) : '')}
+        ${w.timeout_s ? ' · timeout ' + w.timeout_s + 's' : ''}</span></div>
       <div style="display:flex;gap:10px;align-items:center">
         <button class="btn ghost" onclick="agentTest()">Test</button>
         <span class="small" id="aw-test">${w.test === null ? '' : w.test.ok
@@ -2546,6 +2565,9 @@ function agentSet(key, value){
   SET.agentWiz[key] = value;
   if(key === 'provider'){ SET.agentWiz.model = ''; SET.agentWiz.probed = []; }
   if(key === 'cli'){ SET.agentWiz.probed = []; }
+  // a timeout entered for one kind must not silently survive a switch to
+  // mock — MockLLMWorker has no timeout to apply it to (issue #2)
+  if(key === 'kind' && value === 'mock'){ SET.agentWiz.timeout_s = null; }
   renderSettings();
   if(key === 'provider') agentFetchModels();  // stored key/keyless: fetch instantly
   if(key === 'cli' && SET.agentWiz.kind === 'coding_cli') cliFetchModels();
@@ -2577,6 +2599,11 @@ function agentCapture(){
   const id = grab('aw-id'); if(id !== null && !w.editing) w.worker_id = id.trim();
   const tier = grab('aw-tier'); if(tier !== null) w.tier = tier;
   const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
+  const timeout = grab('aw-timeout');
+  if(timeout !== null){
+    const n = parseFloat(timeout);
+    w.timeout_s = (timeout.trim() === '' || !(n > 0)) ? null : n;  // blank/≤0 -> default
+  }
 }
 
 async function agentFetchModels(){
@@ -2630,7 +2657,10 @@ async function agentSave(){
   }
   const r = await post('/api/workers', {worker_id: w.worker_id, tier: w.tier, kind: w.kind,
     provider: w.provider, base_url: w.provider ? '' : w.base_url, model: w.model,
-    system_prompt: w.system_prompt, cli: w.cli, persist: true});
+    system_prompt: w.system_prompt, cli: w.cli, persist: true,
+    // a timeout entered before a kind switch to mock must not silently
+    // reach a kind that has no timeout to apply it to (issue #2)
+    ...(w.timeout_s && w.kind !== 'mock' ? {timeout_s: w.timeout_s} : {})});
   if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,140)); return; }
   toast(`${w.editing ? 'Updated' : 'Registered'} ${w.worker_id} on ${w.tier} tier`);
   SET.agentWiz = null;

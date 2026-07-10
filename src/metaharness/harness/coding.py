@@ -25,11 +25,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from metaharness.core.types import Task, Tier, WorkerResult
-from metaharness.harness.runner import BaseRunner
+from metaharness.core.types import Task, TaskType, Tier, WorkerResult
+from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
 
 WORKSPACES_DIR = Path.home() / ".metaharness" / "workspaces"
+
+# a coding CLI implementing a plan needs far more wall-clock than a one-shot
+# text task; scale the base timeout by task type (issue #2). Precedent for
+# table+override shape: context.TIER_CONTEXT_BUDGET / budget_for().
+TASK_TYPE_TIMEOUT_FACTOR: dict[TaskType, float] = {TaskType.CODE_EDIT: 3.0}
 
 
 @dataclass(frozen=True)
@@ -281,6 +286,8 @@ class CodingAgentWorker(BaseRunner):
     failure becomes WorkerResult.error — loud, never a silent pass.
     """
 
+    BASE_TIMEOUT_S: float = 600.0
+
     def __init__(
         self,
         worker_id: str,
@@ -292,7 +299,7 @@ class CodingAgentWorker(BaseRunner):
         workspace: Optional[Path] = None,   # default: per-task dir under ~/.metaharness/workspaces
         binary: Optional[str] = None,       # override path (tests use a stub script)
         extra_env: Optional[dict[str, str]] = None,
-        timeout_s: float = 600.0,
+        timeout_s: Optional[float] = None,  # None = task-type-aware default (issue #2)
     ) -> None:
         if cli not in CLI_ADAPTERS:
             raise ValueError(f"unknown coding CLI '{cli}' (known: {sorted(CLI_ADAPTERS)})")
@@ -309,7 +316,16 @@ class CodingAgentWorker(BaseRunner):
         self.workspace = Path(workspace) if workspace else None
         self.binary = binary or self.adapter.binary
         self.extra_env = extra_env or {}
-        self.timeout_s = timeout_s
+        self.timeout_s = timeout_s  # configured override; None = unset
+
+    def effective_timeout_s(self, task: Task) -> float:
+        """The timeout actually applied for one task: an explicit config
+        override wins flat across all task types; otherwise CODE_EDIT work
+        (a coding CLI implementing a plan) gets more room than a quick
+        one-shot text task (issue #2)."""
+        if self.timeout_s is not None:
+            return self.timeout_s
+        return self.BASE_TIMEOUT_S * TASK_TYPE_TIMEOUT_FACTOR.get(task.task_type, 1.0)
 
     def _workspace_for(self, task: Task) -> Path:
         explicit = (task.inputs or {}).get("_workspace")
@@ -337,15 +353,17 @@ class CodingAgentWorker(BaseRunner):
         except OSError as exc:
             raise RuntimeError(f"{self.cli}: cannot launch '{self.binary}': {exc}") from exc
 
+        eff = self.effective_timeout_s(task)
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(stdin_text.encode() if stdin_text is not None else None),
-                timeout=self.timeout_s,
+                timeout=eff,
             )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            raise RuntimeError(f"{self.cli}: timed out after {self.timeout_s:.0f}s")
+            # :g not :.0f — subsecond test timeouts (e.g. 0.5) must not render as "0s"
+            raise WorkerTimeout(f"{self.cli}: timed out after {eff:g}s", timeout_s=eff)
 
         stdout = stdout_b.decode(errors="replace")
         stderr = stderr_b.decode(errors="replace")

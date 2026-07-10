@@ -103,6 +103,73 @@ async def test_add_worker_persist_false_stays_ephemeral(harness):
     assert state.config.agent("temp") is None
 
 
+async def test_add_worker_timeout_validation_and_persist(harness, monkeypatch):
+    """issue #2: timeout_s=0 is rejected by AddWorkerRequest's gt=0 (422); a
+    valid value persists to config.json AND reaches the built worker."""
+    state, client = harness
+    resp = await client.post("/api/workers", json={
+        "worker_id": "bad-timeout", "tier": "small", "kind": "mock", "timeout_s": 0})
+    assert resp.status_code == 422
+
+    import metaharness.web.app as app_mod
+    monkeypatch.setattr(app_mod, "available_clis", lambda: {"codex": "/usr/bin/codex"})
+    resp = await client.post("/api/workers", json={
+        "worker_id": "cx-timeout", "tier": "small", "kind": "coding_cli",
+        "cli": "codex", "timeout_s": 900})
+    assert resp.status_code == 201
+
+    on_disk = json.loads(state.config_path.read_text())
+    saved = next(a for a in on_disk["agents"] if a["worker_id"] == "cx-timeout")
+    assert saved["timeout_s"] == 900
+    runner = next(r for r in state.router.pools[Tier.SMALL] if r.worker_id == "cx-timeout")
+    assert runner.timeout_s == 900
+
+
+async def test_add_worker_timeout_upper_bounds(harness, monkeypatch):
+    """issue #2 panel (Claude+codex+kimi P2): +Infinity and unbounded values
+    must 422 at the API boundary; the 24h ceiling itself is accepted."""
+    state, client = harness
+    import metaharness.web.app as app_mod
+    monkeypatch.setattr(app_mod, "available_clis", lambda: {"codex": "/usr/bin/codex"})
+
+    for bad in (float("inf"), 1e15, 0):
+        with pytest.raises(ValueError):
+            app_mod.AddWorkerRequest(worker_id="w", tier="small", timeout_s=bad)
+
+    base = {"worker_id": "cx-bounds", "tier": "small", "kind": "coding_cli",
+            "cli": "codex"}
+    # Infinity is rejected at the model boundary (pydantic finite_number). The
+    # wire response cannot be a clean 422 — starlette's JSONResponse
+    # (allow_nan=False) refuses to echo inf back in the error detail — but the
+    # property that matters holds: the request fails loudly and no worker is
+    # ever created or persisted.
+    with pytest.raises(Exception):
+        await client.post(
+            "/api/workers",
+            content=json.dumps({**base, "timeout_s": float("inf")}),
+            headers={"Content-Type": "application/json"})
+    assert state.config.agent("cx-bounds") is None
+    resp = await client.post("/api/workers", json={**base, "timeout_s": 1e15})
+    assert resp.status_code == 422
+    resp = await client.post("/api/workers", json={**base, "timeout_s": 86400})
+    assert resp.status_code == 201
+    assert state.config.agent("cx-bounds").timeout_s == 86400.0
+
+
+async def test_mock_worker_never_persists_a_timeout(harness):
+    """issue #2 panel (codex+kimi P2): a direct API caller bypasses the wizard
+    JS guards — the server must drop timeout_s for kind=mock, or the settings
+    card displays a fake timeout."""
+    state, client = harness
+    resp = await client.post("/api/workers", json={
+        "worker_id": "mock-t", "tier": "small", "kind": "mock",
+        "timeout_s": 5, "persist": True})
+    assert resp.status_code == 201
+    on_disk = json.loads(state.config_path.read_text())
+    saved = next(a for a in on_disk["agents"] if a["worker_id"] == "mock-t")
+    assert saved["timeout_s"] is None
+
+
 async def test_test_worker_mock_and_missing_cli(harness):
     _, client = harness
     assert (await client.post("/api/test_worker", json={"kind": "mock"})).json()["ok"]

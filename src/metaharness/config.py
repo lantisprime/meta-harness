@@ -106,6 +106,11 @@ class AgentConfig(BaseModel):
     thinking: Optional[bool] = None
     cli: str = ""                        # coding_cli kind: codex|opencode|claude|pi
     enabled: bool = True
+    # None = kind default (task-type-aware for coding CLIs, issue #2). Bounded:
+    # gt=0 alone accepts +Infinity, and :g renders >=1e6 as scientific notation
+    # (issue #2 panel, Claude+codex+kimi P2) — 24h is the sane ceiling.
+    timeout_s: Optional[float] = Field(default=None, gt=0, le=86400,
+                                       allow_inf_nan=False)
 
 
 class MCPServerConfig(BaseModel):

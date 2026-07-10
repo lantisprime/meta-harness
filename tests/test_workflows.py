@@ -3,10 +3,12 @@ HITL gates, and the load-bearing one — kill the engine mid-run and resume from
 the journal with completed steps intact."""
 from __future__ import annotations
 
+import stat
+
 import pytest
 
 from metaharness.core import Task, TaskExecutor, TaskType, Tier, Verdict
-from metaharness.harness import MockLLMWorker, ScriptedWorker
+from metaharness.harness import CodingAgentWorker, MockLLMWorker, ScriptedWorker
 from metaharness.routing import Router
 from metaharness.workflows import (
     Journal,
@@ -395,3 +397,55 @@ async def test_failed_step_attempts_journaled(tmp_path):
     assert all(e.payload["verdict"] == "fail" for e in atts)
     assert all(e.payload["detail"] for e in atts), "verifier reason is never empty"
     assert kinds.index("step.attempt") < kinds.index("step.failed")
+
+
+async def test_step_attempt_journal_records_timeout(tmp_path):
+    """issue #2: a real coding-CLI timeout is journaled as timed_out=True /
+    failure_mode='timeout' with a numeric latency — diagnosable from the run
+    journal alone, not just free-text detail."""
+    binary = tmp_path / "codex-stub"
+    binary.write_text("#!/bin/sh\nsleep 30\n")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+
+    worker = CodingAgentWorker("cc", cli="codex", workspace=tmp_path / "ws",
+                               binary=str(binary), timeout_s=0.5)
+    executor = TaskExecutor(Router({Tier.SMALL: worker}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    spec = WorkflowSpec.model_validate({
+        "name": "timeout-probe",
+        "steps": [{"id": "edit", "task_type": "code_edit",
+                  "objective": "make the change", "max_attempts": 1}],
+    })
+    state = engine.start(spec, context={})
+    state = await engine.advance(state.run_id)
+
+    atts = engine.journal(state.run_id).entries("step.attempt")
+    assert len(atts) == 1
+    payload = atts[0].payload
+    assert payload["timed_out"] is True
+    assert payload["failure_mode"] == "timeout"
+    assert isinstance(payload["latency_s"], float) and payload["latency_s"] > 0
+
+
+async def test_step_attempt_journal_records_non_timeout_tool_error(tmp_path):
+    """Guards the verifier branch order (issue #2): a plain execution failure
+    must still record timed_out=False / failure_mode='tool_error', not get
+    misclassified as a timeout."""
+
+    def boom(task: Task):
+        raise RuntimeError("boom")
+
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("w", boom)}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    spec = WorkflowSpec.model_validate({
+        "name": "tool-error-probe",
+        "steps": [{"id": "s", "objective": "do it", "max_attempts": 1}],
+    })
+    state = engine.start(spec, context={})
+    state = await engine.advance(state.run_id)
+
+    atts = engine.journal(state.run_id).entries("step.attempt")
+    assert len(atts) == 1
+    payload = atts[0].payload
+    assert payload["timed_out"] is False
+    assert payload["failure_mode"] == "tool_error"

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from metaharness.config import PROVIDER_CATALOG, AgentConfig, MCPServerConfig, is_masked
 from metaharness.core.types import Task, TaskType, Tier
@@ -82,6 +82,10 @@ class AddWorkerRequest(BaseModel):
     thinking: Optional[bool] = None
     max_tokens: Optional[int] = 4000
     cli: str = ""                         # coding_cli: pi | codex | opencode | claude
+    # None = kind default (issue #2); bounds mirror AgentConfig.timeout_s
+    # (issue #2 panel, Claude+codex+kimi P2 — gt=0 alone accepts +Infinity)
+    timeout_s: Optional[float] = Field(default=None, gt=0, le=86400,
+                                       allow_inf_nan=False)
     persist: bool = True                  # survive restarts via config.json
 
 
@@ -872,6 +876,10 @@ def create_app(state: HarnessState) -> FastAPI:
             model=req.model, system_prompt=req.system_prompt,
             task_types=req.task_types, temperature=req.temperature,
             max_tokens=req.max_tokens, thinking=req.thinking, cli=req.cli,
+            # mock has no timeout to apply it to; a direct API caller bypasses
+            # the wizard's JS guards, so drop it server-side too (issue #2
+            # panel, codex+kimi P2 — the card would display a fake timeout)
+            timeout_s=None if req.kind == "mock" else req.timeout_s,
         )
 
     @app.post("/api/workers", status_code=201)

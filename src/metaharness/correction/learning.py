@@ -35,6 +35,10 @@ CURATION_TEMPLATES: dict[MASTMode, str] = {
         "Tool calls in {task_type} tasks have been failing. Prefer the simplest tool "
         "invocation that can work, and validate inputs before calling."
     ),
+    MASTMode.TIMEOUT: (  # issue #2
+        "{task_type} tasks have been running out of time. Take the most direct path "
+        "to the objective and keep the change minimal — do not gold-plate."
+    ),
     MASTMode.STEP_REPETITION: (
         "If an approach failed once on a {task_type} task, do not repeat it verbatim — "
         "change the approach materially before retrying."

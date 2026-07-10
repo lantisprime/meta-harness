@@ -75,6 +75,7 @@ class MASTMode(str, Enum):
     TOOL_ERROR = "tool_error"
     SCHEMA_INVALID = "schema_invalid"
     BUDGET_EXCEEDED = "budget_exceeded"
+    TIMEOUT = "timeout"          # issue #2: distinct from generic TOOL_ERROR
     UNKNOWN = "unknown"
 
 
@@ -112,6 +113,11 @@ class WorkerResult(BaseModel):
     cost_usd: float = 0.0
     latency_s: float = 0.0
     error: Optional[str] = None
+    # unsigned derived metadata (issue #2): set by BaseRunner.run when `error`
+    # came from a WorkerTimeout. Deliberately excluded from
+    # runner.result_signing_bytes() — adding a signed key would invalidate
+    # every signature already recorded in past journals.
+    timed_out: bool = False
     # the directory this worker's file side-effects land in (builtin tool jail
     # root or coding-CLI cwd), recorded by the runner that KNOWS it — evidence
     # collection and run packaging must never infer this from cwd or guess

@@ -120,7 +120,12 @@ def verify_output(task: Task, result: WorkerResult) -> VerificationResult:
     PASS/FAIL), but it is NOT fully neutral — the optimization loop still counts
     non-PASS as a miss (loop.py:125). (codex P2.)"""
     if result.error:
-        mode = MASTMode.SCHEMA_INVALID if result.error.startswith("schema:") else MASTMode.TOOL_ERROR
+        if result.error.startswith("schema:"):
+            mode = MASTMode.SCHEMA_INVALID
+        elif result.timed_out:                      # issue #2
+            mode = MASTMode.TIMEOUT
+        else:
+            mode = MASTMode.TOOL_ERROR
         return VerificationResult(
             verdict=Verdict.FAIL, score=0.0, detail=result.error, failure_mode=mode,
             scorer="execution",

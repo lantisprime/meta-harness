@@ -24,12 +24,13 @@ from metaharness.harness import MockLLMWorker
 from metaharness.routing import Router
 
 
-def attempt(verdict: Verdict, *, output="x", error=None, mode=None, detail="") -> Attempt:
+def attempt(verdict: Verdict, *, output="x", error=None, mode=None, detail="",
+            timed_out=False) -> Attempt:
     return Attempt(
         n=1,
         result=WorkerResult(
             task_id="t", worker_id="w", tier=Tier.SMALL, model="m",
-            output=output, error=error,
+            output=output, error=error, timed_out=timed_out,
         ),
         verification=VerificationResult(
             verdict=verdict, score=0.0 if verdict == Verdict.FAIL else 1.0,
@@ -121,6 +122,15 @@ def test_reflector_schema_and_pass_and_budget():
     assert grounded_reflector(task, attempt(Verdict.FAIL, mode=MASTMode.BUDGET_EXCEEDED)) is None
 
 
+def test_reflector_timeout_gives_retry_actionable_advice():
+    """issue #2 (panel, GLM P2): TIMEOUT advice must fit what a RETRY can do —
+    take the most direct path — never 'raise the timeout', which is a config
+    action outside the worker's control."""
+    reflection = grounded_reflector(Task(), attempt(Verdict.FAIL, mode=MASTMode.TIMEOUT))
+    assert "ran out of time" in reflection and "direct path" in reflection
+    assert "timeout" not in reflection.lower()  # no un-actionable config advice
+
+
 # -- MAST ---------------------------------------------------------------------------
 
 
@@ -130,6 +140,11 @@ def test_classify_failure_rules():
     assert classify_failure(task, attempt(Verdict.FAIL, error="boom")) == MASTMode.TOOL_ERROR
     assert classify_failure(task, attempt(Verdict.FAIL)) == MASTMode.DISOBEY_TASK_SPEC
     assert classify_failure(task, attempt(Verdict.UNVERIFIED)) == MASTMode.NO_VERIFICATION
+    # issue #2 (panel, GLM P2): a timed-out attempt with no verifier label must
+    # classify as TIMEOUT, checked before the generic error->TOOL_ERROR fallback
+    assert classify_failure(
+        task, attempt(Verdict.FAIL, error="x: timed out after 1s", timed_out=True)
+    ) == MASTMode.TIMEOUT
 
 
 def test_failure_stats_clusters():
@@ -163,6 +178,19 @@ def test_small_cluster_earns_no_bullet():
     loop = LearningLoop(Playbook(), min_cluster=3)
     loop.observe(failed_outcome(TaskType.EXTRACT, MASTMode.SCHEMA_INVALID))
     assert loop.curate() == []
+
+
+def test_curation_covers_timeout_clusters():
+    """issue #2 (panel, GLM P2): a TIMEOUT failure cluster earns a playbook
+    bullet like any other curated mode — the template must exist."""
+    loop = LearningLoop(Playbook(), min_cluster=3)
+    for _ in range(3):
+        loop.observe(failed_outcome(TaskType.CODE_EDIT, MASTMode.TIMEOUT))
+    deltas = loop.curate()
+    assert len(deltas) == 1 and deltas[0].startswith("add")
+    bullets = loop.playbook.bullets()
+    assert len(bullets) == 1 and bullets[0].task_type == TaskType.CODE_EDIT
+    assert "out of time" in bullets[0].text
 
 
 def test_bullet_effectiveness_and_deprecation():

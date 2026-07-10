@@ -18,7 +18,12 @@ from metaharness.config import (
 )
 from metaharness.core.types import Tier
 from metaharness.factory import build_agent_runner
-from metaharness.harness import CodingAgentWorker, MockLLMWorker, OpenAICompatWorker
+from metaharness.harness import (
+    CodingAgentWorker,
+    MockLLMWorker,
+    OpenAICompatWorker,
+    SubscriptionWorker,
+)
 
 
 @pytest.fixture()
@@ -117,6 +122,29 @@ def test_resolve_endpoint_provider_ref_and_direct(salt_path):
     assert direct == ("http://localhost:1234/v1", "")
 
 
+def test_agent_config_timeout_roundtrip(tmp_path, salt_path):
+    """issue #2: timeout_s persists through save/load, set and unset."""
+    cfg = HarnessConfig()
+    cfg.agents.append(AgentConfig(worker_id="set", kind="coding_cli", cli="codex", timeout_s=900.0))
+    cfg.agents.append(AgentConfig(worker_id="unset", kind="coding_cli", cli="codex"))
+    path = tmp_path / "config.json"
+    cfg.save(path, salt_path)
+
+    loaded = HarnessConfig.load(path)
+    assert loaded.agent("set").timeout_s == 900.0
+    assert loaded.agent("unset").timeout_s is None
+
+
+def test_agent_config_timeout_bounds():
+    """issue #2 panel (Claude+codex+kimi P2): gt=0 alone accepts +Infinity and
+    unbounded values that :g renders as scientific notation ('1e+15s')."""
+    for bad in (float("inf"), float("nan"), 1e15, 0, -5):
+        with pytest.raises(ValueError):
+            AgentConfig(worker_id="w", timeout_s=bad)
+    assert AgentConfig(worker_id="w", timeout_s=86400).timeout_s == 86400.0
+    assert AgentConfig(worker_id="w", timeout_s=0.5).timeout_s == 0.5
+
+
 def test_catalog_has_local_and_remote_entries():
     ids = {p["id"] for p in PROVIDER_CATALOG}
     assert {"anthropic", "openai", "neuralwatt", "ollama", "lmstudio", "custom"} <= ids
@@ -145,6 +173,37 @@ def test_factory_builds_coding_cli_and_mock():
     assert isinstance(coding, CodingAgentWorker) and coding.cli == "codex"
     mock = build_agent_runner(AgentConfig(worker_id="m", kind="mock"), cfg)
     assert isinstance(mock, MockLLMWorker)
+
+
+def test_factory_timeout_pass_through(salt_path):
+    """issue #2: a configured timeout_s reaches the built worker; unset keeps
+    each worker class's own default."""
+    cfg = HarnessConfig()
+    cfg.providers["p"] = ProviderConfig(
+        id="p", base_url="https://api.p.com/v1", api_key=obfuscate("k1", salt_path))
+
+    coding = build_agent_runner(
+        AgentConfig(worker_id="c", kind="coding_cli", cli="codex", timeout_s=900.0), cfg)
+    assert coding.timeout_s == 900.0
+    coding_default = build_agent_runner(
+        AgentConfig(worker_id="c2", kind="coding_cli", cli="codex"), cfg)
+    assert coding_default.timeout_s is None  # None = task-type-aware default, not a literal
+
+    sub = build_agent_runner(
+        AgentConfig(worker_id="s", kind="subscription_cli", cli="codex", timeout_s=900.0), cfg)
+    assert isinstance(sub, SubscriptionWorker) and sub.timeout_s == 900.0
+    sub_default = build_agent_runner(
+        AgentConfig(worker_id="s2", kind="subscription_cli", cli="codex"), cfg)
+    assert sub_default.timeout_s is None
+
+    compat = build_agent_runner(
+        AgentConfig(worker_id="o", kind="openai_compat", provider="p", model="m1",
+                    timeout_s=900.0), cfg, salt_path=salt_path)
+    assert compat.timeout_s == 900.0
+    compat_default = build_agent_runner(
+        AgentConfig(worker_id="o2", kind="openai_compat", provider="p", model="m1"),
+        cfg, salt_path=salt_path)
+    assert compat_default.timeout_s == 120.0  # OpenAICompatWorker's own class default
 
 
 def test_factory_rejects_bad_definitions():

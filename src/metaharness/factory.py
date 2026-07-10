@@ -30,6 +30,9 @@ def build_agent_runner(
     config entry must fail loudly at wire time, not produce a dead worker."""
     keypair = keypair or KeyPair.generate()
     tier = Tier(agent.tier)
+    # None = the worker class's own default (task-type-aware for coding CLIs,
+    # issue #2) — never pass a literal timeout the config didn't ask for
+    timeout_kwargs = {} if agent.timeout_s is None else {"timeout_s": agent.timeout_s}
 
     if agent.kind == "openai_compat":
         base_url, api_key = config.resolve_endpoint(agent, salt_path)
@@ -48,6 +51,7 @@ def build_agent_runner(
             max_tokens=agent.max_tokens,
             thinking=agent.thinking,
             system_prompt=agent.system_prompt,
+            **timeout_kwargs,
         )
 
     if agent.kind == "coding_cli":
@@ -60,6 +64,7 @@ def build_agent_runner(
             tier=tier,
             keypair=keypair,
             system_prompt=agent.system_prompt,
+            **timeout_kwargs,
         )
 
     if agent.kind == "subscription_cli":
@@ -72,6 +77,7 @@ def build_agent_runner(
             tier=tier,
             keypair=keypair,
             system_prompt=agent.system_prompt,
+            **timeout_kwargs,
         )
 
     if agent.kind == "mock":

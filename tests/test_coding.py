@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from metaharness.core.types import Task, TaskType, Tier
-from metaharness.harness import CLI_ADAPTERS, CodingAgentWorker, available_clis
+from metaharness.core.types import MASTMode, Task, TaskType, Tier
+from metaharness.evals.verifiers import verify_output
+from metaharness.harness import CLI_ADAPTERS, CodingAgentWorker, SubscriptionWorker, available_clis
 from metaharness.identity import KeyPair
 
 
@@ -73,6 +74,48 @@ async def test_timeout_kills_process(tmp_path):
                                binary=binary, timeout_s=0.5)
     result = await worker.run(_task())
     assert result.error is not None and "timed out" in result.error
+    # issue #2: structured timeout signal, and the exact EFFECTIVE timeout
+    # (:g format — "0.5s" must not render as "0s")
+    assert result.timed_out is True
+    assert "0.5s" in result.error
+    verification = verify_output(_task(), result)
+    assert verification.failure_mode == MASTMode.TIMEOUT
+
+
+async def test_execute_applies_scaled_timeout_when_unset(tmp_path, monkeypatch):
+    """issue #2 panel (kimi P2): reverting _execute to `timeout=self.timeout_s`
+    stayed green because every timeout test set timeout_s explicitly. Leave it
+    UNSET and prove _execute enforced the task-type-SCALED value: base 0.2s ->
+    a code_edit task must report the 3x effective timeout, 0.6s."""
+    binary = _stub(tmp_path, "opencode", "sleep 30")
+    monkeypatch.setattr(CodingAgentWorker, "BASE_TIMEOUT_S", 0.2)
+    worker = CodingAgentWorker("oc", cli="opencode", workspace=tmp_path / "ws",
+                               binary=binary)  # timeout_s deliberately unset
+    result = await worker.run(_task(task_type=TaskType.CODE_EDIT))
+    assert result.timed_out is True
+    assert "0.6s" in result.error  # the SCALED value, not the 0.2 base
+
+
+def test_effective_timeout_s_unset_scales_by_task_type(tmp_path):
+    """issue #2: unset config -> code_edit gets 3x the base; other task types
+    keep the flat base."""
+    worker = CodingAgentWorker("cc", cli="codex", workspace=tmp_path / "ws")
+    assert worker.effective_timeout_s(_task(task_type=TaskType.CODE_EDIT)) == 1800.0
+    assert worker.effective_timeout_s(_task(task_type=TaskType.GENERAL)) == 600.0
+
+
+def test_effective_timeout_s_explicit_override_wins_flat(tmp_path):
+    """An explicit config override applies to every task type, no scaling."""
+    worker = CodingAgentWorker("cc", cli="codex", workspace=tmp_path / "ws", timeout_s=50.0)
+    assert worker.effective_timeout_s(_task(task_type=TaskType.CODE_EDIT)) == 50.0
+    assert worker.effective_timeout_s(_task(task_type=TaskType.GENERAL)) == 50.0
+
+
+def test_subscription_worker_effective_timeout_unset_scales_by_task_type(tmp_path):
+    """SubscriptionWorker's own 300s base also scales for code_edit."""
+    worker = SubscriptionWorker("sub", cli="codex")
+    assert worker.effective_timeout_s(_task(task_type=TaskType.CODE_EDIT)) == 900.0
+    assert worker.effective_timeout_s(_task(task_type=TaskType.GENERAL)) == 300.0
 
 
 async def test_pi_jsonl_parsing(tmp_path):

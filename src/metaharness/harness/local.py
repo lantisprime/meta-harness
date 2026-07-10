@@ -19,7 +19,7 @@ from typing import Any, Optional
 import httpx
 
 from metaharness.core.types import Task, Tier, WorkerResult
-from metaharness.harness.runner import BaseRunner
+from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
 
 
@@ -195,8 +195,21 @@ class OpenAICompatWorker(BaseRunner):
         try:
             for _round in range(self.max_tool_rounds + 1):
                 messages = fit_messages(messages, prompt_budget)
-                data = await self._post(
-                    client, self._body(task, messages, tool_schemas), headers)
+                try:
+                    data = await self._post(
+                        client, self._body(task, messages, tool_schemas), headers)
+                except httpx.TimeoutException as exc:
+                    # parity with CodingAgentWorker (issue #2): without this, a
+                    # config-exposed openai_compat timeout would journal as
+                    # timed_out=False / tool_error — a contract lie. Wraps ONLY
+                    # the model call: an httpx timeout escaping a tool handler
+                    # is a tool error, not a model timeout (issue #2 panel,
+                    # Claude+codex P2). :g not :.0f — subsecond test timeouts
+                    # must not render as "0s".
+                    raise WorkerTimeout(
+                        f"openai_compat: timed out after {self.timeout_s:g}s",
+                        timeout_s=self.timeout_s,
+                    ) from exc
                 usage = data.get("usage") or {}
                 tokens_in += int(usage.get("prompt_tokens", 0))
                 tokens_out += int(usage.get("completion_tokens", 0))

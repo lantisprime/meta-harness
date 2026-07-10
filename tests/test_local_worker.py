@@ -93,6 +93,61 @@ async def test_server_error_becomes_result_error():
     assert result.error is not None and "500" in result.error
 
 
+async def test_http_timeout_becomes_structured_worker_timeout():
+    """issue #2 parity: an OpenAICompatWorker timeout must journal as
+    timed_out=True, same as CodingAgentWorker — without this it silently
+    looked like a generic tool_error."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    worker = make_worker(handler, timeout_s=5.0)
+    result = await worker.run(Task(objective="x"))
+    assert result.timed_out is True
+    assert result.error is not None and "5s" in result.error
+
+
+async def test_non_timeout_httpx_error_is_not_timed_out():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    worker = make_worker(handler)
+    result = await worker.run(Task(objective="x"))
+    assert result.timed_out is False
+    assert result.error is not None
+
+
+async def test_tool_httpx_timeout_is_not_a_model_timeout():
+    """issue #2 panel (Claude+codex P2): the WorkerTimeout catch wraps ONLY the
+    model call — an httpx timeout escaping a TOOL handler must surface as a
+    tool error, never as 'the model timed out after Ns' with the wrong
+    duration."""
+
+    class TimeoutToolRegistry:
+        workspace_root = ""
+
+        def openai_schemas(self, names):
+            return [{"type": "function",
+                     "function": {"name": "probe", "parameters": {}}}]
+
+        async def call(self, name, arguments, focus=""):
+            raise httpx.ReadTimeout("tool transport stalled")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"index": 0, "message": {
+                "role": "assistant", "content": None,
+                "tool_calls": [{"id": "c1", "function":
+                                {"name": "probe", "arguments": "{}"}}]}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+
+    worker = make_worker(handler, tool_registry=TimeoutToolRegistry())
+    result = await worker.run(Task(objective="x", tools=["probe"]))
+    assert result.timed_out is False
+    assert result.error is not None and "ReadTimeout" in result.error
+    assert "timed out after" not in result.error  # never claims a model timeout
+
+
 def test_parse_output_variants():
     assert parse_output("plain text", expect_json=False) == "plain text"
     assert parse_output('{"a": 1}', expect_json=True) == {"a": 1}

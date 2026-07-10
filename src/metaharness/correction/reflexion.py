@@ -37,6 +37,13 @@ def grounded_reflector(task: Task, attempt: Attempt) -> Optional[str]:
             f"A previous attempt failed with an execution error: {verification.detail}. "
             "Simplify the approach and avoid whatever triggered the error."
         )
+    if mode == MASTMode.TIMEOUT:
+        # advice must fit what a retry can do — raising the timeout is a
+        # config action, not something the worker itself can choose (issue #2)
+        return (
+            "A previous attempt ran out of time before finishing. Take the most "
+            "direct path to the objective and keep the change minimal."
+        )
     if mode == MASTMode.BUDGET_EXCEEDED:
         return None  # no next attempt is coming; advice would be noise
 

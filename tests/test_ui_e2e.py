@@ -328,6 +328,102 @@ def test_agent_edit_flow_readmits_same_id(page, server):
     page.wait_for_selector(".prov-item:has-text('e2e-reviewer')")
 
 
+def test_agent_wizard_timeout_advanced_block(page, server):
+    """issue #2: the wizard's collapsed Advanced timeout field is wired
+    end-to-end — set on add, persisted to config.json, preloaded on edit.
+    Uses a coding_cli agent (Advanced is hidden for mock, which has no
+    timeout to apply it to)."""
+    base, home = server
+    page.goto(base); page.click("#nav-wizard")
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Who does the work?')")
+    import httpx
+    clis = list(httpx.get(base + "/api/config", timeout=5).json().get("coding_clis", {}))
+    if not clis:
+        pytest.skip("no coding CLI installed on this machine")
+    cli = clis[0]
+
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Coding CLI')")
+    page.click("button:has-text('Next →')")
+    page.click(f".pill:has-text('{cli}')")
+    page.click("button:has-text('Next →')")
+    # role & prompt step: open the collapsed Advanced block and set a timeout
+    page.wait_for_selector("details summary:has-text('Advanced')")
+    page.click("details summary:has-text('Advanced')")
+    page.fill("#aw-id", "e2e-timeout-agent")
+    page.fill("#aw-timeout", "555")
+    page.click("button:has-text('Next →')")
+    # step 4 summary line shows the timeout before saving
+    assert "timeout 555s" in page.locator(".hint-panel .kv").inner_text()
+    page.click("button:has-text('Register agent')")
+    page.wait_for_selector(".prov-item:has-text('e2e-timeout-agent')")
+    # settings-home agent card also shows it
+    assert "timeout 555s" in page.locator(
+        ".prov-item:has-text('e2e-timeout-agent') .kv").inner_text()
+
+    import json
+    saved = json.loads((home / ".metaharness" / "config.json").read_text())
+    agent = next(a for a in saved["agents"] if a["worker_id"] == "e2e-timeout-agent")
+    assert agent["timeout_s"] == 555
+
+    # edit flow preloads the saved value
+    page.click(".prov-item:has-text('e2e-timeout-agent') >> button:has-text('Edit')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click("button:has-text('Next →')")   # kind -> connection
+    page.click("button:has-text('Next →')")   # -> role & prompt
+    page.click("details summary:has-text('Advanced')")
+    assert page.locator("#aw-timeout").input_value() == "555"
+    page.click("button:has-text('← Back')"); page.click("button:has-text('← Back')")
+    page.click("button:has-text('Cancel')")
+
+
+def test_agent_wizard_kind_switch_to_mock_drops_timeout(page, server):
+    """issue #2 spec Part 5 (panel, GLM P2 — the mandated test was missing):
+    a timeout entered for coding_cli must not silently persist after switching
+    the kind to mock — mock has no timeout to apply it to."""
+    base, home = server
+    page.goto(base); page.click("#nav-wizard")
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Who does the work?')")
+    import httpx
+    clis = list(httpx.get(base + "/api/config", timeout=5).json().get("coding_clis", {}))
+    if not clis:
+        pytest.skip("no coding CLI installed on this machine")
+
+    page.click("#settings-body >> button:has-text('+ Add an agent')")
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Coding CLI')")
+    page.click("button:has-text('Next →')")
+    page.click(f".pill:has-text('{clis[0]}')")
+    page.click("button:has-text('Next →')")
+    # enter a timeout for the coding_cli kind…
+    page.click("details summary:has-text('Advanced')")
+    page.fill("#aw-id", "e2e-kindswitch")
+    page.fill("#aw-timeout", "77")
+    # …then walk back and switch the kind to Mock
+    page.click("button:has-text('← Back')")
+    page.click("button:has-text('← Back')")
+    page.click(".pill:has-text('Mock (testing)')")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Next →')")   # mock needs no connection
+    # Advanced (and its timeout) is gone for mock
+    assert page.locator("details summary:has-text('Advanced')").count() == 0
+    page.click("button:has-text('Next →')")
+    assert "timeout" not in page.locator(".hint-panel .kv").inner_text()
+    page.click("button:has-text('Register agent')")
+    page.wait_for_selector(".prov-item:has-text('e2e-kindswitch')")
+
+    import json
+    saved = json.loads((home / ".metaharness" / "config.json").read_text())
+    agent = next(a for a in saved["agents"] if a["worker_id"] == "e2e-kindswitch")
+    assert agent.get("timeout_s") is None
+    # settings card shows no fake timeout either
+    assert "timeout" not in page.locator(
+        ".prov-item:has-text('e2e-kindswitch') .kv").inner_text()
+
+
 def test_sweep_every_action_button_is_wired(page, server):
     """Sweep across every view and wizard surface: each onclick handler must
     reference a defined function, and walking the surfaces raises zero page
@@ -502,6 +598,8 @@ def test_console_panels_speak_plain_language(page, server):
     # MAST mapping: known code -> plain phrase, unknown code -> prettified words
     assert page.evaluate("mastPlain('step_repetition')") == "kept repeating a step"
     assert page.evaluate("mastPlain('brand_new.mode-x')") == "brand new mode x"
+    # issue #2 (panel, GLM P2): the new TIMEOUT mode has console vocabulary
+    assert page.evaluate("mastPlain('timeout')") == "ran out of time before finishing"
     # agent rows: display name leads, key demoted to the mono meta line
     page.wait_for_selector("#workers .lrow")
     meta = page.locator("#workers .rr-meta").first.inner_text()

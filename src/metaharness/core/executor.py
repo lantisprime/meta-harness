@@ -193,6 +193,11 @@ class TaskExecutor:
                         "model": result.model, "verdict": verification.verdict.value,
                         "detail": verification.detail[:200],
                         "worker_signature": result.signature_b64,
+                        # issue #2: parity with the step.attempt journal payload
+                        "failure_mode": (verification.failure_mode.value
+                                         if verification.failure_mode else None),
+                        "latency_s": round(result.latency_s, 2),
+                        "timed_out": result.timed_out,
                     },
                 )
 
