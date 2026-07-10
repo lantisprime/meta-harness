@@ -1,25 +1,24 @@
 # Session Handoff — meta-harness (2026-07-10, session 17)
 
-## State: issue #14 FILED AND IMPLEMENTED LOCALLY; workflow-only, publication pending
+## State: issue #14 PUBLISHED AS DRAFT PR #15; workflow-only, runtime verification pending
 - Filed [GitHub issue #14](https://github.com/lantisprime/meta-harness/issues/14) for the
   Node.js 20 Actions runtime deprecation warning.
-- Work is isolated on `agent/node24-actions`, based on synchronized `main` / `origin/main`
-  at `e57ca02`. No issue #14 changes have been committed or pushed.
+- Product commit `0dd336a` is pushed on tracked branch `agent/node24-actions`, based on
+  synchronized `main` / `origin/main` at `e57ca02`, and published as draft
+  [PR #15](https://github.com/lantisprime/meta-harness/pull/15).
 - `.github/workflows/ci.yml` now uses the official Node 24-native majors:
   `actions/checkout@v6` and `actions/setup-python@v6`. The runner, Python 3.14 pin,
   dependency installation, and pytest command are unchanged.
 - Validation: workflow YAML parses, both action-major references are asserted, and
-  `git diff --check` is clean. `actionlint` is not installed locally; pull-request CI is
-  the decisive runtime validation and remains pending publication.
+  `git diff --check` is clean. `actionlint` is not installed locally; PR CI is the decisive
+  runtime validation and is pending on the final branch head.
 - Preserve the pre-existing `.gitignore` edit and untracked `.agents/`, `.claude/`,
   `.review-store/`, and `uv.lock`; they are unrelated to issue #14.
 
 ## Next steps
-1. Stage only `.github/workflows/ci.yml` and this handoff, then commit/push and open a draft
-   PR linked to #14 when publication is approved.
-2. Confirm PR CI passes without the Node.js 20 deprecation annotation; merge only when
+1. Confirm PR #15 CI passes without the Node.js 20 deprecation annotation; merge only when
    explicitly approved, then confirm final `main` CI.
-3. Continue workplan item 2: real-worker Software Engineer template regression run.
+2. Continue workplan item 2: real-worker Software Engineer template regression run.
 
 ---
 
