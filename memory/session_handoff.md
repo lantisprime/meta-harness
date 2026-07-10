@@ -1,3 +1,32 @@
+# Session Handoff — meta-harness (2026-07-11, session 19)
+
+## State: issue #16 fix via PR #20; pending HITL state is durable across restart
+- [PR #20](https://github.com/lantisprime/meta-harness/pull/20) fixes the live regression
+  filed as [issue #16](https://github.com/lantisprime/meta-harness/issues/16).
+- Root cause: `WorkflowEngine.resume()` ignored unresolved `hitl.requested` journal events,
+  so a run restarted at a gate appeared `running` with no `awaiting` step and emitted a
+  duplicate request on its next advance.
+- Resume now replays requested/resolved HITL events in order, restoring
+  `awaiting_approval` and the exact pending step until a matching resolution occurs.
+- Approval and rejection now clear pending state immediately and reject mismatched, empty,
+  or duplicate resolutions before they can create invalid journal entries.
+- Regression coverage kills the engine at a gate, resumes it, verifies the pending state,
+  resolves it once, and asserts exactly one request and one resolution without rerunning
+  completed work. A second test pins invalid and duplicate resolution behavior.
+- Final validation: **530 passed, 2 skipped**, including **38 Playwright tests**;
+  `git diff --check` passed. The remaining warnings are the pre-existing FastAPI lifespan
+  deprecations. No independent review mechanism was available under the active no-subagent
+  policy; the final two-file product/test diff was inspected directly.
+- Preserve the pre-existing `.gitignore` edit and untracked `.agents/`, `.claude/`,
+  `.review-store/`, and `uv.lock`; they are unrelated to issue #16.
+
+## Next steps
+1. Fix #17: make Software Engineering approvals review the completed spec, plan, and review
+   artifacts instead of pausing before those phases execute.
+2. Then fix #18: give read-only subscription phases access to the active run workspace.
+
+---
+
 # Session Handoff — meta-harness (2026-07-11, session 18)
 
 ## State: workplan item 2 regression complete; browser suite green; issues #16–#18 filed

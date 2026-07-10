@@ -243,14 +243,25 @@ class WorkflowEngine:
     # -- HITL ------------------------------------------------------------------------
 
     def approve(self, run_id: str, step_id: str) -> None:
-        _, state, journal = self._runs[run_id]
-        state.approved.add(step_id)
-        journal.append("hitl.resolved", run_id, step_id=step_id, payload={"approved": True})
+        self._resolve_hitl(run_id, step_id, approved=True)
 
     def reject(self, run_id: str, step_id: str) -> None:
+        self._resolve_hitl(run_id, step_id, approved=False)
+
+    def _resolve_hitl(self, run_id: str, step_id: str, *, approved: bool) -> None:
         _, state, journal = self._runs[run_id]
-        state.rejected.add(step_id)
-        journal.append("hitl.resolved", run_id, step_id=step_id, payload={"approved": False})
+        if state.status != RunStatus.AWAITING_APPROVAL or state.awaiting != step_id:
+            if state.awaiting:
+                detail = f"; awaiting approval on {state.awaiting!r}"
+            else:
+                detail = "; no approval is pending"
+            raise ValueError(f"cannot resolve HITL step {step_id!r}{detail}")
+        journal.append(
+            "hitl.resolved", run_id, step_id=step_id, payload={"approved": approved}
+        )
+        (state.approved if approved else state.rejected).add(step_id)
+        state.awaiting = None
+        state.status = RunStatus.RUNNING
 
     # -- durability --------------------------------------------------------------------
 
@@ -274,8 +285,14 @@ class WorkflowEngine:
                 state.completed[entry.step_id] = record
             elif entry.kind == "step.skipped" and entry.step_id:
                 state.skipped[entry.step_id] = entry.payload.get("reason", "")
+            elif entry.kind == "hitl.requested" and entry.step_id:
+                state.status = RunStatus.AWAITING_APPROVAL
+                state.awaiting = entry.step_id
             elif entry.kind == "hitl.resolved" and entry.step_id:
                 (state.approved if entry.payload.get("approved") else state.rejected).add(entry.step_id)
+                if state.awaiting == entry.step_id:
+                    state.awaiting = None
+                    state.status = RunStatus.RUNNING
             elif entry.kind == "run.finished":
                 state.status = (
                     RunStatus.COMPLETED

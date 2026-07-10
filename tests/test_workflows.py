@@ -168,11 +168,36 @@ async def test_resume_after_crash_skips_completed_steps(tmp_path):
 
     engine2, resumed = WorkflowEngine.resume(journal_path, executor)
     assert resumed.completed["classify"].output == "high"
+    assert resumed.status == RunStatus.AWAITING_APPROVAL
+    assert resumed.awaiting == "notify"
     engine2.approve(resumed.run_id, "notify")
     final = await engine2.advance(resumed.run_id)
     assert final.status == RunStatus.COMPLETED
     # classify/summarize did NOT re-run after resume
     assert calls == ["classify", "summarize", "transform"]
+    journal = engine2.journal(resumed.run_id)
+    assert len(journal.entries("hitl.requested")) == 1
+    assert len(journal.entries("hitl.resolved")) == 1
+
+
+async def test_hitl_resolution_rejects_a_non_pending_or_duplicate_step(tmp_path):
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    state = engine.start(load_workflow(TRIAGE_YAML), context={"ticket": "x"})
+    state = await engine.advance(state.run_id)
+
+    with pytest.raises(ValueError, match="awaiting approval on 'notify'"):
+        engine.approve(state.run_id, "")
+    with pytest.raises(ValueError, match="awaiting approval on 'notify'"):
+        engine.reject(state.run_id, "other")
+
+    assert state.status == RunStatus.AWAITING_APPROVAL
+    assert state.awaiting == "notify"
+    assert engine.journal(state.run_id).entries("hitl.resolved") == []
+
+    engine.approve(state.run_id, "notify")
+    with pytest.raises(ValueError, match="no approval is pending"):
+        engine.approve(state.run_id, "notify")
+    assert len(engine.journal(state.run_id).entries("hitl.resolved")) == 1
 
 
 async def test_resume_remembers_prior_approval(tmp_path):
