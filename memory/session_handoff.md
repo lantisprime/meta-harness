@@ -1,7 +1,11 @@
 # Session Handoff — meta-harness (2026-07-10, session 15)
 
-## State: issue #1 IMPLEMENTED LOCALLY, fully verified, not committed/pushed/closed
-- `main == origin/main == cc81b32`; this session intentionally did not publish.
+## State: issue #1 PUBLISHED AS DRAFT PR #12; branch pushed, main/issue unchanged until merge
+- `main == origin/main == cc81b32`; implementation commit `5115291` is pushed on
+  `agent/execution-verification-code-edit` and published as draft PR
+  [#12](https://github.com/lantisprime/meta-harness/pull/12).
+- The PR body contains `Closes #1`; GitHub issue #1 therefore remains open until the PR is
+  merged. The draft has not been marked ready or merged.
 - Product diff: execution-based verification for `code_edit` attempts, plus the trust,
   budget, retry-feedback, journal, docs, and regression-test surfaces it requires.
 - Final gates: **490 non-E2E passed**, **38 Playwright passed**, focused verifier/executor/
@@ -38,9 +42,9 @@
   `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`; they are not issue #1 product work.
 
 ## Next steps
-1. Review/stage only the issue #1 files (exclude pre-existing environment noise), commit, push,
-   and close GitHub #1 if desired.
-2. #11 timeout-aware same-tier retry/escalation remains the next product issue.
+1. Let PR #12 checks/review complete, then mark it ready and merge when approved; merging closes
+   GitHub #1 through the PR linkage.
+2. #11 timeout-aware same-tier retry/escalation remains the next product issue after #1 lands.
 
 ---
 
