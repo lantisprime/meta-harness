@@ -1,3 +1,32 @@
+# Session Handoff — meta-harness (2026-07-11, session 20)
+
+## State: issue #17 fix via PR #21; Software Engineering gates review artifacts
+- [PR #21](https://github.com/lantisprime/meta-harness/pull/21) fixes
+  [issue #17](https://github.com/lantisprime/meta-harness/issues/17).
+- Root cause: `hitl: true` had only pre-step semantics, so the Software Engineering
+  specification, plan, and review gates paused before their named artifacts existed.
+- The workflow DSL now has explicit `hitl_timing: before | after` semantics. `before` remains
+  the default, preserving every existing custom workflow; only the Software Engineering
+  spec, plan, and review phases opt into `after`.
+- Post-artifact gates record the verified step output before pausing. Approval continues to
+  downstream work; rejection fails closed before downstream phases execute. Restarting at a
+  post-artifact gate preserves the output and does not rerun the completed phase.
+- The plan UI distinguishes “approve before run” from “approve output.” At a post-artifact
+  gate, the run UI and Console show the completed output alongside the decision controls.
+- Final validation: **534 passed, 2 skipped**, including **39 Playwright tests**;
+  `git diff --check` passed. Remaining warnings are the pre-existing FastAPI lifespan
+  deprecations. No independent review mechanism was available under the active no-subagent
+  policy; direct diff review removed an unrelated research-template behavior change.
+- Preserve the pre-existing `.gitignore` edit and untracked `.agents/`, `.claude/`,
+  `.review-store/`, and `uv.lock`; they are unrelated to issue #17.
+
+## Next steps
+1. Fix #18: give read-only subscription phases access to the active run workspace without
+   granting write permission.
+2. Repeat the bounded real-worker Software Engineering regression after #18.
+
+---
+
 # Session Handoff — meta-harness (2026-07-11, session 19)
 
 ## State: issue #16 fix via PR #20; pending HITL state is durable across restart
