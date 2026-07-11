@@ -94,9 +94,11 @@ def _build_pi(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[
 
 
 def _build_codex(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
-    argv = [worker.binary, "exec", "--skip-git-repo-check",
-            "--sandbox", getattr(worker, "sandbox", "workspace-write"),
+    sandbox = getattr(worker, "sandbox", "workspace-write")
+    argv = [worker.binary, "exec", "--skip-git-repo-check", "--sandbox", sandbox,
             "--cd", str(ws)]
+    if sandbox == "read-only":
+        argv += ["--ephemeral"]
     if worker.cli_model:
         argv += ["-m", worker.cli_model]
     argv += ["-"]  # prompt from stdin
@@ -113,6 +115,9 @@ def _build_opencode(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple
 
 def _build_claude(worker: "CodingAgentWorker", prompt: str, ws: Path) -> tuple[list[str], Optional[str]]:
     argv = [worker.binary, "-p", "--output-format", "json"]
+    if getattr(worker, "sandbox", None) == "read-only":
+        argv += ["--safe-mode", "--no-session-persistence",
+                 "--permission-mode", "plan", "--tools", "Read,Glob,Grep"]
     if worker.cli_model:
         argv += ["--model", worker.cli_model]
     if worker.system_prompt:

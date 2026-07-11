@@ -1,3 +1,35 @@
+# Session Handoff — meta-harness (2026-07-11, session 21)
+
+## State: issue #18 fix via PR #23; subscription phases share the active workspace
+- [PR #23](https://github.com/lantisprime/meta-harness/pull/23) fixes
+  [issue #18](https://github.com/lantisprime/meta-harness/issues/18).
+- Root cause: `SubscriptionWorker` hard-coded `subscription-scratch`, so read-only
+  explore/specify/verify/review phases inspected a different filesystem from implementation
+  and packaging.
+- Harness wiring now binds subscription CLIs to the active file-tool workspace. Codex keeps
+  its read-only sandbox and uses ephemeral sessions; Claude uses safe, non-persistent plan
+  mode with only Read/Glob/Grep tools. The global scratch default is removed.
+- A full stub-CLI Software Engineering regression proves subscription phases read the seeded
+  workspace without modifying it, only implementation writes, verify/review see the updated
+  artifact, resume does not rerun work, and every phase/package entry records one root.
+- Final local validation: **536 passed, 2 skipped**, including **39 Playwright tests**.
+- Bounded real-worker run `run_c53d77c5816e` completed all six phases with correct
+  post-artifact gates, one subscription/package workspace root, **3 generated tests passed**,
+  and an integrity-clean package. Workspace bytes stayed unchanged through spec and plan.
+- The real run exposed a separate existing defect: verify demands command-output evidence
+  but has no execution tool. It is filed as [issue #22](https://github.com/lantisprime/meta-harness/issues/22)
+  and deliberately excluded from #18.
+- No independent review mechanism was available under the active no-subagent policy; direct
+  diff review confirmed the five-file product/test scope. Preserve the pre-existing
+  `.gitignore` edit and untracked `.agents/`, `.claude/`, `.review-store/`, and `uv.lock`.
+
+## Next steps
+1. Fix #22 by giving verification a safe, deterministic way to capture test command output
+   without granting subscription workers write access.
+2. Repeat the judged real-worker Software Engineering regression after #22.
+
+---
+
 # Session Handoff — meta-harness (2026-07-11, session 20)
 
 ## State: issue #17 fix via PR #21; Software Engineering gates review artifacts

@@ -118,6 +118,117 @@ def test_subscription_worker_effective_timeout_unset_scales_by_task_type(tmp_pat
     assert worker.effective_timeout_s(_task(task_type=TaskType.GENERAL)) == 300.0
 
 
+def test_subscription_cli_adapters_enforce_read_only_tools(tmp_path):
+    workspace = tmp_path / "workspace"
+
+    claude = SubscriptionWorker("sub-claude", cli="claude")
+    claude_argv, _ = CLI_ADAPTERS["claude"].build(claude, "inspect", workspace)
+    assert "--safe-mode" in claude_argv
+    assert "--no-session-persistence" in claude_argv
+    assert claude_argv[claude_argv.index("--permission-mode") + 1] == "plan"
+    assert claude_argv[claude_argv.index("--tools") + 1] == "Read,Glob,Grep"
+
+    codex = SubscriptionWorker("sub-codex", cli="codex")
+    codex_argv, _ = CLI_ADAPTERS["codex"].build(codex, "inspect", workspace)
+    assert codex_argv[codex_argv.index("--sandbox") + 1] == "read-only"
+    assert "--ephemeral" in codex_argv
+
+
+async def test_subscription_phases_share_active_workspace_read_only(tmp_path):
+    """Issue #18: read-only phases inspect the run workspace, while only the
+    code-edit worker mutates it; provenance and packaging agree on one root."""
+    import io
+    import zipfile
+
+    from metaharness.tools import default_registry
+    from metaharness.web import HarnessState
+    from metaharness.workflows import RunStatus, get_template
+    from metaharness.workflows.package import build_package_bytes
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    artifact = workspace / "artifact.txt"
+    artifact.write_text("seed\n")
+
+    subscription_binary = _stub(tmp_path, "subscription-claude", r'''
+prompt=$(cat)
+content=$(tr '\n' ' ' < artifact.txt)
+case "$prompt" in
+  *all_met*) printf '{"result":"{\\"all_met\\":true,\\"criteria\\":[{\\"criterion\\":\\"artifact\\",\\"met\\":true,\\"evidence\\":\\"%s\\"}]}"}\n' "$content" ;;
+  *) printf '{"result":"saw artifact.txt: %s"}\n' "$content" ;;
+esac
+''')
+    coding_binary = _stub(tmp_path, "coding-claude", r'''
+prompt=$(cat)
+case "$prompt" in
+  *"Implement the approved plan"*)
+    printf 'implemented\n' >> artifact.txt
+    result='implemented artifact.txt' ;;
+  *) result='technical plan for artifact.txt' ;;
+esac
+printf '{"result":"%s"}\n' "$result"
+''')
+
+    sub_key = KeyPair.generate()
+    code_key = KeyPair.generate()
+    subscription = SubscriptionWorker(
+        "subscription", cli="claude", tier=Tier.MID,
+        keypair=sub_key, binary=subscription_binary,
+    )
+    coding = CodingAgentWorker(
+        "coding", cli="claude", tier=Tier.FRONTIER,
+        keypair=code_key, workspace=workspace, binary=coding_binary,
+    )
+    state = HarnessState()
+    state.tools = default_registry(workspace)
+    state.register_worker(subscription, sub_key, tiers=["mid"])
+    state.register_worker(coding, code_key, tiers=["frontier"])
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    state.wire(
+        {Tier.MID: subscription, Tier.FRONTIER: coding},
+        journal_dir=journal_dir, judge=False,
+    )
+
+    spec = get_template("software_engineering").instantiate("update artifact.txt")
+    run = state.engine.start(spec, context={"goal": "update artifact.txt"})
+    run = await state.engine.advance(run.run_id)
+    assert run.status is RunStatus.AWAITING_APPROVAL
+    assert run.awaiting == "specify"
+    assert "seed" in run.completed["explore"].output
+    assert "seed" in run.completed["specify"].output
+    assert artifact.read_text() == "seed\n"
+
+    state.engine.approve(run.run_id, "specify")
+    run = await state.engine.advance(run.run_id)
+    assert run.awaiting == "plan"
+    assert artifact.read_text() == "seed\n"
+
+    state.engine.approve(run.run_id, "plan")
+    run = await state.engine.advance(run.run_id)
+    assert run.awaiting == "review"
+    assert artifact.read_text() == "seed\nimplemented\n"
+    evidence = run.completed["verify"].output["criteria"][0]["evidence"]
+    assert "implemented" in evidence
+    assert "implemented" in run.completed["review"].output
+    assert {record.workspace_root for record in run.completed.values()} == {str(workspace)}
+
+    state.engine.approve(run.run_id, "review")
+    run = await state.engine.advance(run.run_id)
+    assert run.status is RunStatus.COMPLETED
+
+    package = build_package_bytes(spec, run, state.engine.journal(run.run_id).entries())
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        assert {step["workspace_root"] for step in manifest["steps"].values()} == {
+            str(workspace)
+        }
+        workspace_files = [name for name in archive.namelist()
+                           if name.startswith("workspace/")]
+        assert len(workspace_files) == 1
+        assert workspace_files[0].endswith("/artifact.txt")
+
+
 async def test_pi_jsonl_parsing(tmp_path):
     events = "\n".join([
         json.dumps({"type": "session", "id": "s1"}),
