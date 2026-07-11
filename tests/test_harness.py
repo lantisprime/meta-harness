@@ -224,6 +224,34 @@ def test_check_schema_reports_violations():
     assert check_schema("not a dict", schema)
 
 
+async def test_mock_worker_conforms_to_nested_schema_constraints():
+    schema = {
+        "type": "object",
+        "required": ["recommendation", "checks"],
+        "properties": {
+            "recommendation": {"type": "string", "enum": ["ship", "no-ship"]},
+            "checks": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                    "type": "object",
+                    "required": ["evidence"],
+                    "properties": {"evidence": {"type": "string"}},
+                },
+            },
+        },
+    }
+    worker = MockLLMWorker(
+        "mock", Tier.SMALL, skills={TaskType.GENERAL: 1.0}, seed=1,
+    )
+
+    result = await worker.run(Task(objective="review", output_schema=schema))
+
+    assert check_schema(result.output, schema) == []
+    assert result.output["recommendation"] == "ship"
+    assert len(result.output["checks"]) == 2
+
+
 async def test_schema_guard_retry_then_error():
     calls = {"n": 0}
 

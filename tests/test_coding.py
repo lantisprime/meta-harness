@@ -154,6 +154,7 @@ async def test_subscription_phases_share_active_workspace_read_only(tmp_path):
 prompt=$(cat)
 content=$(tr '\n' ' ' < artifact.txt)
 case "$prompt" in
+  *recommendation*checks*findings*) printf '{"result":"{\\"recommendation\\":\\"ship\\",\\"checks\\":[{\\"area\\":\\"spec\\",\\"result\\":\\"pass\\",\\"evidence\\":\\"implemented artifact.txt\\"},{\\"area\\":\\"tests\\",\\"result\\":\\"pass\\",\\"evidence\\":\\"verification passed\\"},{\\"area\\":\\"edge cases\\",\\"result\\":\\"pass\\",\\"evidence\\":\\"no uncovered requirement\\"},{\\"area\\":\\"plan\\",\\"result\\":\\"pass\\",\\"evidence\\":\\"no deviation\\"}],\\"findings\\":[]}"}\n' ;;
   *all_met*) printf '{"result":"{\\"all_met\\":true,\\"criteria\\":[{\\"criterion\\":\\"artifact\\",\\"met\\":true,\\"evidence\\":\\"%s\\"}]}"}\n' "$content" ;;
   *) printf '{"result":"saw artifact.txt: %s"}\n' "$content" ;;
 esac
@@ -210,7 +211,16 @@ printf '{"result":"%s"}\n' "$result"
     assert artifact.read_text() == "seed\nimplemented\n"
     evidence = run.completed["verify"].output["criteria"][0]["evidence"]
     assert "implemented" in evidence
-    assert "implemented" in run.completed["review"].output
+    assert run.completed["review"].output == {
+        "recommendation": "ship",
+        "checks": [
+            {"area": "spec", "result": "pass", "evidence": "implemented artifact.txt"},
+            {"area": "tests", "result": "pass", "evidence": "verification passed"},
+            {"area": "edge cases", "result": "pass", "evidence": "no uncovered requirement"},
+            {"area": "plan", "result": "pass", "evidence": "no deviation"},
+        ],
+        "findings": [],
+    }
     assert {record.workspace_root for record in run.completed.values()} == {str(workspace)}
 
     state.engine.approve(run.run_id, "review")

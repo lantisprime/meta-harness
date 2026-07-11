@@ -173,7 +173,11 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
                 "Adversarially review the delivered work for: {goal}\n"
                 "You did not write this code; hunt for defects: spec criteria "
                 "gamed rather than met, missing tests, edge cases, deviations from "
-                "the plan. End with a ship / no-ship recommendation and findings."
+                "the plan. Return the final review artifact immediately; do not "
+                "spend the response narrating your analysis. Use no-ship only for "
+                "concrete blocking findings; ship with an empty findings list is "
+                "valid when the adversarial review finds no defect. Record the "
+                "checks you performed so an empty finding list is still auditable."
             ),
             feeds_from=["specify", "plan", "verify"],
             depends_on=["verify"],
@@ -181,7 +185,49 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
             boundaries=[
                 "Review with fresh eyes: treat prior phase outputs as claims to "
                 "check, not facts.",
+                "Your entire response must be the required JSON artifact: no "
+                "analysis or prose before or after it.",
             ],
+            output_schema={
+                "type": "object",
+                "required": ["recommendation", "checks", "findings"],
+                "properties": {
+                    "recommendation": {
+                        "type": "string",
+                        "enum": ["ship", "no-ship"],
+                    },
+                    "findings": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "required": ["severity", "description", "evidence"],
+                            "properties": {
+                                "severity": {
+                                    "type": "string",
+                                    "enum": ["critical", "high", "medium", "low"],
+                                },
+                                "description": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                    "checks": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 6,
+                        "items": {
+                            "type": "object",
+                            "required": ["area", "result", "evidence"],
+                            "properties": {
+                                "area": {"type": "string"},
+                                "result": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
             hitl=True,  # ship gate
             hitl_timing="after",
         ),

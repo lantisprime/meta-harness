@@ -4,8 +4,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from metaharness.core.types import TaskType, Tier
+from metaharness.core.types import TaskType, Tier, Verdict, WorkerResult
 from metaharness.evals import run_suite, sdlc_capability_suite, summarize_by_phase
+from metaharness.evals.verifiers import verify_output
 from metaharness.harness import MockLLMWorker, ScriptedWorker
 from metaharness.identity import KeyPair
 from metaharness.web import HarnessState, create_app
@@ -38,11 +39,42 @@ def test_software_engineering_instantiates_deterministically():
     assert by_id["verify"].output_schema is not None
     assert by_id["verify"].requires_execution_evidence is True
     assert by_id["verify"].to_task({}).requires_execution_evidence is True
+    assert by_id["review"].output_schema["required"] == [
+        "recommendation", "checks", "findings",
+    ]
     # the goal is embedded in every phase contract
     assert all("--json flag" in s.objective for s in spec.steps)
     # same input -> same spine, twice (deterministic, no LLM)
     assert template.instantiate("add a --json flag to the exporter").model_dump() \
         == spec.model_dump()
+
+
+@pytest.mark.parametrize("output", [
+    {"findings": []},
+    {"recommendation": "approve", "checks": [{}] * 4, "findings": []},
+    {"recommendation": "ship", "checks": [], "findings": []},
+    {
+        "recommendation": "ship",
+        "checks": [{"area": "spec", "result": "pass"}] * 4,
+        "findings": [],
+    },
+])
+def test_review_rejects_an_incomplete_terminal_artifact(output):
+    review = get_template("software_engineering").instantiate("tiny goal").step("review")
+    task = review.to_task({})
+    result = WorkerResult(
+        task_id=task.id,
+        worker_id="reviewer",
+        tier=Tier.FRONTIER,
+        model="reviewer-model",
+        output=output,
+    )
+
+    verification = verify_output(task, result)
+
+    assert verification.verdict is Verdict.FAIL
+    assert verification.scorer == "schema"
+    assert verification.detail
 
 
 def test_workflow_name_never_cuts_mid_word():
@@ -60,9 +92,23 @@ async def test_template_run_end_to_end_with_gates(tmp_path):
     """Each SE gate exposes its completed artifact before downstream work."""
     state = HarnessState()
     kp = KeyPair.generate()
+
+    def artifact(task):
+        required = set((task.output_schema or {}).get("required", []))
+        if "recommendation" in required:
+            return {
+                "recommendation": "ship",
+                "checks": [
+                    {"area": "spec", "result": "pass", "evidence": "checked"},
+                ] * 4,
+                "findings": [],
+            }
+        if task.output_schema:
+            return {"all_met": True, "criteria": []}
+        return f"work product for {task.id}"
+
     worker = ScriptedWorker(
-        "w", lambda t: {"all_met": True, "criteria": []}
-        if t.output_schema else f"work product for {t.id}",
+        "w", artifact,
         tier=Tier.FRONTIER, keypair=kp)
     state.register_worker(worker, kp, tiers=["frontier"])
     state.wire({Tier.FRONTIER: worker}, journal_dir=tmp_path)
