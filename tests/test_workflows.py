@@ -213,6 +213,40 @@ async def test_resume_remembers_prior_approval(tmp_path):
     assert final.status == RunStatus.COMPLETED  # no second approval needed
 
 
+async def test_resume_at_post_artifact_gate_keeps_output_without_rerunning(tmp_path):
+    calls: list[str] = []
+
+    def handler(task: Task):
+        calls.append(task.task_type.value)
+        return "artifact ready for review"
+
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("w", handler)}))
+    spec = WorkflowSpec.model_validate({
+        "name": "post-artifact",
+        "steps": [{"id": "draft", "objective": "Draft it.",
+                   "hitl": True, "hitl_timing": "after"}],
+    })
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    run = engine.start(spec)
+    run = await engine.advance(run.run_id)
+    assert run.status is RunStatus.AWAITING_APPROVAL
+    assert run.completed["draft"].output == "artifact ready for review"
+
+    engine2, resumed = WorkflowEngine.resume(
+        tmp_path / f"{run.run_id}.jsonl", executor)
+    assert resumed.status is RunStatus.AWAITING_APPROVAL
+    assert resumed.awaiting == "draft"
+    assert resumed.completed["draft"].output == "artifact ready for review"
+    engine2.approve(resumed.run_id, "draft")
+    final = await engine2.advance(resumed.run_id)
+
+    assert final.status is RunStatus.COMPLETED
+    assert calls == ["general"]
+    journal = engine2.journal(resumed.run_id)
+    assert len(journal.entries("hitl.requested")) == 1
+    assert len(journal.entries("hitl.resolved")) == 1
+
+
 async def test_unresolvable_reference_fails_run_visibly(tmp_path):
     """Regression (run_a3d567c20a20, 2026-07-08): a plan step referencing a
     missing context key raised inside advance(); the background task swallowed

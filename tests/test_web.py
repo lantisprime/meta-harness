@@ -59,6 +59,7 @@ async def test_full_run_over_http(client):
     assert resp.status_code == 200, resp.text
     run = resp.json()
     assert run["status"] == "awaiting_approval" and run["awaiting"] == "notify"
+    assert "notify" not in run["completed"]  # default remains a pre-step gate
     run_id = run["run_id"]
 
     # runs list + detail expose state and journal
@@ -77,6 +78,28 @@ async def test_full_run_over_http(client):
                              json={"step_id": "notify", "approved": True})
     assert resp.status_code == 200
     assert resp.json()["status"] == "completed"
+
+
+async def test_post_artifact_gate_exposes_completed_output_over_http(client):
+    workflow = WORKFLOW_YAML.replace("hitl: true", "hitl: true\n    hitl_timing: after")
+    run = (await client.post(
+        "/api/runs", json={"workflow_yaml": workflow, "context": {}}
+    )).json()
+
+    assert run["status"] == "awaiting_approval"
+    assert run["awaiting"] == "notify"
+    assert run["completed"]["notify"]["output"]
+
+    detail = (await client.get(f"/api/runs/{run['run_id']}")).json()
+    assert detail["state"]["completed"]["notify"]["output"]
+    events = detail["journal"]
+    completed_at = next(i for i, event in enumerate(events)
+                        if event["kind"] == "step.completed"
+                        and event["step_id"] == "notify")
+    requested_at = next(i for i, event in enumerate(events)
+                        if event["kind"] == "hitl.requested"
+                        and event["step_id"] == "notify")
+    assert completed_at < requested_at
 
 
 async def test_rejection_over_http(client):

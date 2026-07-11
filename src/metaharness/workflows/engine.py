@@ -108,6 +108,8 @@ class WorkflowEngine:
         spec, state, journal = self._runs[run_id]
         if state.status in (RunStatus.COMPLETED, RunStatus.FAILED):
             return state
+        if state.status == RunStatus.AWAITING_APPROVAL:
+            return state
         state.status = RunStatus.RUNNING
         state.awaiting = None
 
@@ -116,13 +118,21 @@ class WorkflowEngine:
             span.set_attribute("workflow.name", spec.name)
 
             for step in spec.topological_order():
-                if step.id in state.completed or step.id in state.skipped:
-                    continue
                 if step.id in state.rejected:
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
                     journal.append("run.finished", run_id, payload={"status": "failed", "reason": f"step {step.id} rejected"})
                     return state
+                if step.id in state.completed:
+                    if (step.hitl and step.hitl_timing == "after"
+                            and step.id not in state.approved):
+                        state.status = RunStatus.AWAITING_APPROVAL
+                        state.awaiting = step.id
+                        journal.append("hitl.requested", run_id, step_id=step.id)
+                        return state
+                    continue
+                if step.id in state.skipped:
+                    continue
                 skipped_deps = [d for d in step.depends_on if d in state.skipped]
                 if skipped_deps:
                     # cascade: a step whose dependency never ran cannot run either
@@ -153,7 +163,8 @@ class WorkflowEngine:
                                        payload={"reason": reason})
                         continue
 
-                if step.hitl and step.id not in state.approved:
+                if (step.hitl and step.hitl_timing == "before"
+                        and step.id not in state.approved):
                     state.status = RunStatus.AWAITING_APPROVAL
                     state.awaiting = step.id
                     journal.append("hitl.requested", run_id, step_id=step.id)
@@ -235,6 +246,12 @@ class WorkflowEngine:
                     "step.completed", run_id, step_id=step.id,
                     payload=record.model_dump(mode="json"),
                 )
+                if (step.hitl and step.hitl_timing == "after"
+                        and step.id not in state.approved):
+                    state.status = RunStatus.AWAITING_APPROVAL
+                    state.awaiting = step.id
+                    journal.append("hitl.requested", run_id, step_id=step.id)
+                    return state
 
             state.status = RunStatus.COMPLETED
             journal.append("run.finished", run_id, payload={"status": "completed"})

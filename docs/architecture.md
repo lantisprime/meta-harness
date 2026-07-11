@@ -79,7 +79,7 @@ graph TB
 
 - **Prescribed workflows** are YAML definitions (version-controlled, PR-reviewed) compiled into journaled step sequences. Code is the source of truth; YAML is the authoring surface for fixed processes; the Planner decomposes the open-ended steps at runtime.
 - **Durable by journaling.** Every step's inputs, outputs, and side-effect receipts are appended to a run journal. A crash or a deliberate pause resumes by replaying the journal and skipping completed steps — no work is silently redone. This is the "resume from checkpoint, don't restart" lesson applied literally.
-- **Human-approval gates** are a first-class state. A step can mark itself as awaiting approval; the run durably parks (zero compute) until a decision arrives from the web UI. Gates are placed at plan approval, before any irreversible action, at stage boundaries, and on low-confidence triggers.
+- **Human-approval gates** are a first-class state. A step can mark itself as awaiting approval; the run durably parks (zero compute) until a decision arrives from the web UI. DSL gates default to `hitl_timing: before` for backward-compatible permission checks; `hitl_timing: after` parks after the verified step output is recorded so the human reviews the artifact itself. The Software Engineering template's spec, plan, and ship gates use the post-artifact form. Gates are placed at plan approval, before any irreversible action, at stage boundaries, and on low-confidence triggers.
 - **Guardrails** live in one place (`core/budget.py`): hard cost/token ceilings, plateau detection (stop iterating when scores stop improving), step-repetition detection (dedup action signatures), and per-tool circuit breakers.
 
 ### 3.2 Intelligence Layer

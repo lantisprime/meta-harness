@@ -169,7 +169,7 @@ def test_goal_step_template_plan_and_full_run(page, server):
     page.wait_for_selector(".planstep")
     assert page.locator(".planstep").count() == 6
     assert page.locator(".badge:has-text('software_engineering template')").count() == 1
-    assert page.locator(".badge:has-text('HITL — waits for you')").count() == 3
+    assert page.locator(".badge:has-text('HITL — approve output')").count() == 3
     assert page.locator(".badge:has-text('🔧 grep')").first.is_visible()
 
     # run it: mock workers answer instantly; approve all three gates in the UI,
@@ -178,6 +178,9 @@ def test_goal_step_template_plan_and_full_run(page, server):
     for gate in ("specify", "plan", "review"):
         page.wait_for_selector(f".guide b:has-text('Approval needed: {gate}')",
                                timeout=30_000)
+        gate_guide = page.locator("#wiz-body .guide", has_text=f"Approval needed: {gate}")
+        assert "Review the completed artifact below" in gate_guide.inner_text()
+        assert page.locator(".steppanel .out").count() == 1
         page.click(f"button:has-text('Approve {gate}')")
     page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
     # done screen: one tab per step, all six done
@@ -701,6 +704,32 @@ def test_console_approval_survives_hostile_step_id(page, server):
     finally:
         page.remove_listener("pageerror", handler)
     assert errors == [], f"page JS errors during hostile-id approval: {errors}"
+
+
+def test_console_post_artifact_gate_exposes_output_before_approval(page, server):
+    """A post-step gate must show the artifact the human is deciding on."""
+    import httpx
+    base, _ = server
+    wf = (
+        "name: post-artifact-gate\n"
+        "steps:\n"
+        "  - id: draft\n"
+        "    task_type: transform\n"
+        "    objective: Produce the artifact to review.\n"
+        "    hitl: true\n"
+        "    hitl_timing: after\n"
+    )
+    resp = httpx.post(base + "/api/runs", json={"workflow_yaml": wf, "context": {}})
+    assert resp.status_code == 200, resp.text
+    run_id = resp.json()["run_id"]
+
+    page.goto(base); page.click("#nav-console")
+    row = page.locator(".runrow", has_text="Post artifact gate")
+    row.wait_for()
+    assert row.locator("button:has-text('Approve')").count() == 1
+    page.evaluate("id => { openRuns.add(id); return refreshConsole(); }", run_id)
+    assert page.locator("#runs .rr-detail .rr-out").count() == 1
+    assert "nothing recorded yet" not in page.locator("#runs").inner_text()
 
 
 def test_custom_workflow_built_by_wizard_runs(page, server):
