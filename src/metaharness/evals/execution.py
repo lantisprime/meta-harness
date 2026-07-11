@@ -2,7 +2,8 @@
 
 The worker's narration is not evidence that its edit works. When a signed v2
 result names a workspace containing a recognized test suite, ``TaskExecutor``
-calls this module before deterministic text scoring or the rubric judge.
+calls this module for post-edit verification. Marked workflow verification
+steps also receive the same runner's receipt before their read-only worker runs.
 
 Safety is fail-closed:
 
@@ -24,6 +25,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import signal
 import sys
@@ -361,26 +363,22 @@ def _sandbox_failed_to_start(backend: str, text: str) -> bool:
     )
 
 
-async def verify_code_edit_execution(
-    task: Task,
-    result: WorkerResult,
+async def run_workspace_execution(
+    workspace_root: str | Path,
     *,
     timeout_s: float = DEFAULT_EXECUTION_TIMEOUT_S,
     sandbox_builder: Optional[SandboxBuilder] = None,
 ) -> Optional[VerificationResult]:
-    """Run a recognized check and translate its exit status into a verdict.
+    """Run the recognized workspace check and return its sandboxed receipt.
 
-    The caller owns authenticity and schema ordering. ``None`` always means
-    "no safe execution signal" and must fall through to deterministic/judge
-    verification rather than blame the worker.
+    Discovery owns the command; no worker-supplied text reaches the process
+    launcher. ``None`` means no safe execution signal exists.
     """
-    if task.task_type != TaskType.CODE_EDIT or result.error or not result.workspace_root:
-        return None
-    check = discover_execution_check(result.workspace_root)
+    check = discover_execution_check(workspace_root)
     if check is None:
         return None
     try:
-        workspace = Path(result.workspace_root).expanduser().resolve(strict=True)
+        workspace = Path(workspace_root).expanduser().resolve(strict=True)
     except (OSError, RuntimeError):
         return None
 
@@ -445,19 +443,23 @@ async def verify_code_edit_execution(
     )
     if stdout_truncated or stderr_truncated:
         text += "\n[verification output truncated]"
+    command = shlex.join(check.argv)
     if timed_out:
         return VerificationResult(
             verdict=Verdict.FAIL,
             score=0.0,
-            detail=f"{check.label} exceeded the {timeout_s:g}s execution timeout",
+            detail=(f"command: {command}\nstatus: timed out\n"
+                    f"{check.label} exceeded the {timeout_s:g}s execution timeout"),
             failure_mode=MASTMode.TIMEOUT,
             scorer="execution",
         )
     if proc.returncode == 0:
+        tail = text[-2000:] if text else "no test output"
         return VerificationResult(
             verdict=Verdict.PASS,
             score=1.0,
-            detail=f"{check.label} passed in {backend} sandbox ({check.marker})",
+            detail=(f"command: {command}\nstatus: passed\n"
+                    f"sandbox: {backend} ({check.marker})\noutput:\n{tail}"),
             scorer="execution",
         )
     if _sandbox_failed_to_start(backend, text):
@@ -466,7 +468,25 @@ async def verify_code_edit_execution(
     return VerificationResult(
         verdict=Verdict.FAIL,
         score=0.0,
-        detail=f"{check.label} failed with exit {proc.returncode}: {tail}",
+        detail=(f"command: {command}\nstatus: failed (exit {proc.returncode})\n"
+                f"output:\n{tail}"),
         failure_mode=MASTMode.DISOBEY_TASK_SPEC,
         scorer="execution",
+    )
+
+
+async def verify_code_edit_execution(
+    task: Task,
+    result: WorkerResult,
+    *,
+    timeout_s: float = DEFAULT_EXECUTION_TIMEOUT_S,
+    sandbox_builder: Optional[SandboxBuilder] = None,
+) -> Optional[VerificationResult]:
+    """Verify an attested code-edit result with the safe workspace runner."""
+    if task.task_type != TaskType.CODE_EDIT or result.error or not result.workspace_root:
+        return None
+    return await run_workspace_execution(
+        result.workspace_root,
+        timeout_s=timeout_s,
+        sandbox_builder=sandbox_builder,
     )

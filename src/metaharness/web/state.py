@@ -162,6 +162,7 @@ class HarnessState:
             playbook_hints=self.learning.hints_for,
             observer=self.learning.observe,
             judge=judge_fn,
+            workspace_root=self.tools.workspace_root,
         )
         self.engine = WorkflowEngine(self.executor, journal_dir=journal_dir)
 

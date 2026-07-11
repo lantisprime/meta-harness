@@ -55,10 +55,9 @@ Respond with ONLY a JSON object: {{"pass": true/false, "reason": "<one sentence>
 """
 
 _EVIDENCE_RULE = """
-When workspace evidence is shown above, it is ground truth: the task's real
-deliverable may live in those files. Grade the FILES against the contract —
-a weak text summary over correct, complete files passes; a confident text
-summary over missing or wrong files fails."""
+When harness evidence is shown above, it is ground truth. Grade the artifact
+against that evidence — a weak summary over correct evidence passes; a
+confident summary contradicted by the evidence fails."""
 
 _MAX_OUTPUT_CHARS = 6_000
 
@@ -101,13 +100,20 @@ def make_judge(judge_runner: Runner, budget: Optional[Budget] = None) -> Judge:
             attempt_window_start(result.latency_s),
             result.tool_calls,
         )
-        evidence_text = ("\n" + render_evidence(evidence) + "\n") if evidence else ""
+        evidence_blocks = [render_evidence(evidence)] if evidence else []
+        execution_receipt = task.inputs.get("harness_execution_evidence")
+        if isinstance(execution_receipt, str) and execution_receipt:
+            evidence_blocks.append(execution_receipt)
+        evidence_text = (
+            "\nHarness evidence:\n" + "\n\n".join(evidence_blocks) + "\n"
+            if evidence_blocks else ""
+        )
         grading_task = Task(
             task_type=TaskType.REASONING,
             objective=JUDGE_PROMPT.format(
                 objective=task.objective, boundaries=boundaries, output=text,
                 evidence=evidence_text,
-                evidence_rule=_EVIDENCE_RULE if evidence else ""),
+                evidence_rule=_EVIDENCE_RULE if evidence_blocks else ""),
             output_schema=JUDGE_SCHEMA,
             max_attempts=1,
         )

@@ -46,6 +46,7 @@ class StepSpec(BaseModel):
     hitl: bool = False    # require human approval at hitl_timing
     hitl_timing: Literal["before", "after"] = "before"
     tools: list[str] = Field(default_factory=list)  # tool subset for this step
+    requires_execution_evidence: bool = False
     # conditional execution: {"step": "<id>", "equals"|"contains"|"one_of": value,
     # "negate": bool} — evaluated deterministically against the referenced step's
     # output at advance-time; unmet -> this step is journaled as skipped
@@ -70,6 +71,7 @@ class StepSpec(BaseModel):
             tier_hint=self.tier_hint,
             max_attempts=self.max_attempts,
             tools=list(self.tools),
+            requires_execution_evidence=self.requires_execution_evidence,
         )
 
 

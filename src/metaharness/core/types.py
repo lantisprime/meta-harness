@@ -96,6 +96,9 @@ class Task(BaseModel):
     max_attempts: int = 3
     # tool names this task may call (small per-step subset, never the catalog)
     tools: list[str] = Field(default_factory=list)
+    # Ask the orchestrator to attach a harness-owned, sandboxed test receipt.
+    # This never grants the worker a command-execution tool.
+    requires_execution_evidence: bool = False
 
 
 class WorkerResult(BaseModel):

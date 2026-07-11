@@ -52,6 +52,41 @@ async def test_pass_on_first_attempt():
     assert outcome.final_output == "positive"
 
 
+async def test_required_execution_evidence_is_attached_without_worker_shell(tmp_path):
+    seen = []
+
+    def handler(task: Task):
+        seen.append(task)
+        return {"all_met": True, "criteria": []}
+
+    async def workspace_verifier(root):
+        assert root == str(tmp_path)
+        return VerificationResult(
+            verdict=Verdict.PASS,
+            score=1.0,
+            scorer="execution",
+            detail="command: python -m pytest -q\nstatus: passed\noutput:\n1 passed",
+        )
+
+    task = Task(
+        objective="verify it",
+        output_schema={"type": "object"},
+        requires_execution_evidence=True,
+        tools=["read_file"],
+        max_attempts=1,
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: ScriptedWorker("w", handler)}),
+        workspace_root=str(tmp_path),
+        workspace_verifier=workspace_verifier,
+    ).execute(task)
+
+    assert outcome.final_verdict is Verdict.UNVERIFIED
+    assert seen[0].tools == ["read_file"]
+    assert "1 passed" in seen[0].inputs["harness_execution_evidence"]
+    assert "harness_execution_evidence" not in task.inputs
+
+
 async def test_escalates_on_verified_failure():
     always_wrong = MockLLMWorker("w-small", Tier.SMALL, seed=1,
                                  skills={TaskType.CLASSIFY: 0.0})

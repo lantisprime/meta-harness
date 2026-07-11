@@ -36,6 +36,8 @@ def test_software_engineering_instantiates_deterministically():
     assert "write_file" in by_id["implement"].tools
     assert by_id["explore"].tools == ["list_files", "grep", "read_file"]
     assert by_id["verify"].output_schema is not None
+    assert by_id["verify"].requires_execution_evidence is True
+    assert by_id["verify"].to_task({}).requires_execution_evidence is True
     # the goal is embedded in every phase contract
     assert all("--json flag" in s.objective for s in spec.steps)
     # same input -> same spine, twice (deterministic, no LLM)
