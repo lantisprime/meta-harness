@@ -7,6 +7,7 @@ so plain CI stays fast; run locally with the [e2e] extra installed.
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -115,6 +116,167 @@ def test_settings_provider_wizard_end_to_end(page, server):
     # persisted to the ISOLATED home, keys never in plaintext
     cfg = (home / ".metaharness" / "config.json").read_text()
     assert "lmstudio" in cfg
+
+
+def test_mcp_wizard_configures_local_server_without_shell_splitting(page, server):
+    base, home = server
+    page.goto(base); page.click("#nav-wizard")
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Extra tool servers')")
+    page.click("button:has-text('+ Connect MCP server')")
+
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Custom local')")
+    page.click("button:has-text('Next →')")
+    page.fill("#mw-name", "e2e-local-tools")
+    page.fill("#mw-command", "npx")
+    page.fill(
+        "#mw-args",
+        "-y\n@modelcontextprotocol/server-filesystem\n/path with spaces",
+    )
+    page.click("button:has-text('+ Add variable')")
+    page.fill("#mw-env-key-0", "MCP_ROOT")
+    page.fill("#mw-env-value-0", "/path with spaces")
+    page.click("button:has-text('Next →')")
+
+    assert page.locator(".hint-panel:has-text('e2e-local-tools')").count() == 1
+    assert page.locator(".hint-panel:has-text('3 arguments')").count() == 1
+    page.click("button:has-text('Save connection')")
+    page.wait_for_selector(".prov-item:has-text('e2e-local-tools')")
+
+    saved = json.loads((home / ".metaharness" / "config.json").read_text())
+    local = saved["mcp_servers"]["e2e-local-tools"]
+    assert local["command"] == "npx"
+    assert local["args"] == [
+        "-y", "@modelcontextprotocol/server-filesystem", "/path with spaces",
+    ]
+    assert local["env"]["MCP_ROOT"].startswith("enc1:")
+
+
+def test_mcp_wizard_configures_remote_server(page, server):
+    base, home = server
+    page.goto(base); page.click("#nav-wizard")
+    page.click("#nav-settings")
+    page.wait_for_selector("h2:has-text('Extra tool servers')")
+    page.click("button:has-text('+ Connect MCP server')")
+
+    page.wait_for_selector(".subwiz-steps")
+    page.click(".pill:has-text('Custom remote')")
+    page.click("button:has-text('Next →')")
+    page.fill("#mw-name", "e2e-remote-tools")
+    page.fill("#mw-url", "https://tools.example.test/mcp")
+    page.click("button:has-text('Next →')")
+    assert page.locator(
+        ".hint-panel:has-text('https://tools.example.test/mcp')"
+    ).count() == 1
+    page.click("button:has-text('Save connection')")
+    page.wait_for_selector(".prov-item:has-text('e2e-remote-tools')")
+
+    saved = json.loads((home / ".metaharness" / "config.json").read_text())
+    remote = saved["mcp_servers"]["e2e-remote-tools"]
+    assert remote["transport"] == "http"
+    assert remote["url"] == "https://tools.example.test/mcp"
+
+
+def test_mcp_wizard_offers_curated_oauth_only_presets(page, server):
+    base, home = server
+    page.goto(base); page.click("#nav-wizard")
+    page.click("#nav-settings")
+    page.click("button:has-text('+ Connect MCP server')")
+    for label in (
+        "Filesystem", "Brave Search", "Playwright", "Gmail", "Google Calendar",
+        "Custom local", "Custom remote",
+    ):
+        assert page.locator(f".pill:has-text('{label}')").count() == 1
+
+    page.click(".pill:has-text('Gmail')")
+    page.click("button:has-text('Next →')")
+    assert page.locator("#mw-name").input_value() == "gmail"
+    assert page.locator("#mw-url").input_value() == (
+        "https://gmailmcp.googleapis.com/mcp/v1"
+    )
+    assert page.locator("#mw-oauth-token").get_attribute("type") == "password"
+    assert page.locator("text=mailbox password").count() == 0
+    page.fill("#mw-oauth-token", "e2e-oauth-access-token")
+    page.fill("#mw-oauth-project", "e2e-workspace-project")
+    page.click("button:has-text('Next →')")
+    assert "OAuth token set" in page.locator(".hint-panel").inner_text()
+    page.click("button:has-text('Save connection')")
+    page.wait_for_selector(".prov-item:has-text('gmail')")
+
+    saved = json.loads((home / ".metaharness" / "config.json").read_text())
+    assert "e2e-oauth-access-token" not in json.dumps(saved)
+    assert saved["mcp_servers"]["gmail"]["oauth_token"].startswith("enc1:")
+    assert page.locator(
+        ".prov-item:has-text('gmail') button:has-text('Load tools')"
+    ).count() == 1
+
+    page.route(
+        "**/api/config/mcp/gmail/load",
+        lambda route: route.fulfill(json={"ok": True, "tools": 1}),
+    )
+    page.route(
+        "**/api/tools",
+        lambda route: route.fulfill(json=[{
+            "name": "gmail.search_threads", "description": "Search Gmail threads.",
+            "source": "mcp:gmail", "annotations": {"readOnlyHint": True},
+        }]),
+    )
+    try:
+        page.click(".prov-item:has-text('gmail') button:has-text('Load tools')")
+        page.wait_for_selector(".toast.on:has-text('Loaded 1 tool from gmail')")
+        page.click("summary:has-text('Browse the full tool catalog')")
+        page.wait_for_selector("text=Search Gmail threads.")
+    finally:
+        page.unroute("**/api/config/mcp/gmail/load")
+        page.unroute("**/api/tools")
+    page.evaluate("""() => {
+        TOOLS_NAMES = ['gmail.search_threads'];
+        TOOLS_CATALOG = [{name:'gmail.search_threads', source:'mcp:gmail'}];
+    }""")
+    page.click(".prov-item:has-text('gmail') button:has-text('Remove')")
+    page.wait_for_selector(".prov-item:has-text('gmail')", state="detached")
+    assert page.evaluate("TOOLS_NAMES") is None
+    assert page.evaluate("TOOLS_CATALOG") is None
+
+
+def test_workflow_tool_picker_groups_mcp_tools_without_cli(page, server):
+    base, _ = server
+
+    def tools(route):
+        route.fulfill(json=[
+            {"name": "read_file", "description": "Read a workspace file.",
+             "source": "builtin"},
+            {"name": "gmail.search_threads",
+             "description": "Search Gmail threads with the connected account.",
+             "source": "mcp:gmail", "annotations": {}},
+        ])
+
+    page.route("**/api/tools", tools)
+    try:
+        page.goto(base); page.click("#nav-wizard")
+        page.wait_for_selector(".tierrow")
+        page.click("button:has-text('Continue →')")
+        page.click(".pill:has-text('Custom (build by hand)')")
+        page.fill("#goal", "find a customer email")
+        page.click("#planbtn")
+        page.wait_for_selector("h2:has-text('Add step 1')")
+        page.fill("#sb-obj", "Search Gmail for the customer thread.")
+        page.click("button:has-text('Next →')")
+        assert page.locator(".kv:has-text('Built-in tools · 1')").count() == 1
+        assert page.locator(".kv:has-text('MCP server · gmail · 1')").count() == 1
+        gmail = page.locator(".tool-toggle", has_text="search_threads")
+        assert gmail.get_attribute("data-tool") == "gmail.search_threads"
+        assert page.locator(
+            "text=Search Gmail threads with the connected account."
+        ).count() == 1
+        assert page.locator(".badge.warn:has-text('human gate')").count() == 1
+        gmail.click()
+        assert page.evaluate("wiz.builder.draft.tools") == ["gmail.search_threads"]
+        page.click("button:has-text('Next →')")
+        assert page.locator("#sb-hitl").is_checked()
+    finally:
+        page.unroute("**/api/tools")
 
 
 def test_agent_wizard_with_archetype_prompt(page, server):

@@ -10,6 +10,7 @@ from metaharness.config import (
     PROVIDER_CATALOG,
     AgentConfig,
     HarnessConfig,
+    MCPServerConfig,
     ProviderConfig,
     deobfuscate,
     is_masked,
@@ -87,6 +88,38 @@ def test_public_dict_masks_keys(salt_path):
     assert "gsk-verylongsecretkey" not in public
     assert "enc1:" not in public  # obfuscated form is also never exposed
     assert cfg.public_dict(salt_path)["providers"]["groq"]["configured"] is True
+
+
+def test_mcp_secrets_are_obfuscated_masked_and_recoverable(tmp_path, salt_path):
+    cfg = HarnessConfig(mcp_servers={
+        "search": MCPServerConfig(
+            name="search", command="npx",
+            env={"BRAVE_API_KEY": "brave-secret-value"},
+        ),
+        "gmail": MCPServerConfig(
+            name="gmail", transport="http",
+            url="https://gmailmcp.googleapis.com/mcp/v1",
+            oauth_token="oauth-access-token-value",
+            oauth_project="workspace-project",
+        ),
+    })
+    path = tmp_path / "config.json"
+    cfg.save(path, salt_path)
+
+    on_disk = path.read_text()
+    assert "brave-secret-value" not in on_disk
+    assert "oauth-access-token-value" not in on_disk
+    loaded = HarnessConfig.load(path)
+    assert loaded.mcp_servers["search"].plain_env(salt_path) == {
+        "BRAVE_API_KEY": "brave-secret-value",
+    }
+    assert loaded.mcp_servers["gmail"].plain_oauth_token(salt_path) == (
+        "oauth-access-token-value"
+    )
+    public = loaded.public_dict(salt_path)["mcp_servers"]
+    assert public["search"]["env"] == {"BRAVE_API_KEY": "bra…ue"}
+    assert public["gmail"]["oauth_token"] == "oau…ue"
+    assert public["gmail"]["authenticated"] is True
 
 
 def test_apply_provider_update_ignores_masked_echo(salt_path):

@@ -164,7 +164,12 @@ class HarnessState:
             judge=judge_fn,
             workspace_root=self.tools.workspace_root,
         )
-        self.engine = WorkflowEngine(self.executor, journal_dir=journal_dir)
+        self.engine = WorkflowEngine(
+            self.executor, journal_dir=journal_dir,
+            # MCP tool names are namespaced. Treat any dotted external name as
+            # gated even while its server is unloaded, closing load-time races.
+            tool_requires_approval=lambda name: "." in name,
+        )
 
     def attach_tools(self, runner: Runner) -> None:
         """Point a runner (and whatever it wraps) at the shared tool registry.

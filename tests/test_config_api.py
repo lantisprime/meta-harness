@@ -206,8 +206,89 @@ async def test_mcp_server_config_crud(harness):
     assert resp.status_code == 200
     assert "files" in state.config.mcp_servers
     assert (await client.get("/api/config")).json()["mcp_servers"]["files"]["command"] == "npx"
+    from metaharness.tools import ToolSpec
+    state.tools.register(ToolSpec(
+        "files.search", "search files", {}, lambda: "ok", source="mcp:files",
+    ))
     assert (await client.delete("/api/config/mcp/files")).status_code == 200
+    assert state.tools.get("files.search") is None
     assert (await client.delete("/api/config/mcp/files")).status_code == 404
+
+
+async def test_mcp_oauth_token_is_masked_and_server_loads_in_app(
+        harness, monkeypatch):
+    state, client = harness
+    resp = await client.post("/api/config/mcp", json={
+        "name": "gmail", "transport": "http",
+        "url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "oauth_token": "oauth-secret-token-value",
+        "oauth_project": "workspace-project",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["oauth_token"] == "oau…ue"
+    assert "oauth-secret-token-value" not in state.config_path.read_text()
+    public = (await client.get("/api/config")).json()["mcp_servers"]["gmail"]
+    assert public["oauth_token"] == "oau…ue"
+    assert public["authenticated"] is True
+
+    seen = {}
+
+    async def fake_load(registry, config):
+        seen["names"] = list(config.mcp_servers)
+        seen["token"] = config.mcp_servers["gmail"].plain_oauth_token()
+        return {"gmail": {"ok": True, "tools": 9}}
+
+    import metaharness.tools
+    monkeypatch.setattr(metaharness.tools, "load_mcp_tools", fake_load)
+    loaded = await client.post("/api/config/mcp/gmail/load")
+    assert loaded.status_code == 200
+    assert loaded.json() == {"ok": True, "tools": 9}
+    assert seen == {"names": ["gmail"], "token": "oauth-secret-token-value"}
+
+    poisoned = await client.post("/api/config/mcp", json={
+        "name": "bad", "command": "npx", "env": {"TOKEN": "enc1:not-ciphertext"},
+    })
+    assert poisoned.status_code == 422
+
+
+async def test_mcp_remote_url_and_oauth_origin_are_validated(harness):
+    _, client = harness
+    invalid = await client.post("/api/config/mcp", json={
+        "name": "bad", "transport": "http", "url": "not-a-url",
+    })
+    assert invalid.status_code == 422
+    exfiltration = await client.post("/api/config/mcp", json={
+        "name": "bad", "transport": "http", "url": "https://evil.example/mcp",
+        "oauth_token": "oauth-token", "oauth_project": "workspace-project",
+    })
+    assert exfiltration.status_code == 422
+    assert "oauth-token" not in exfiltration.text
+    missing_project = await client.post("/api/config/mcp", json={
+        "name": "gmail", "transport": "http",
+        "url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "oauth_token": "never-echo-this-token",
+    })
+    assert missing_project.status_code == 422
+    assert "never-echo-this-token" not in missing_project.text
+
+
+async def test_mcp_tools_always_gain_server_side_hitl_gate(harness):
+    state, client = harness
+    assert state.tools.get("mail.send") is None  # temporarily unloaded/stale MCP name
+    workflow = {"name": "unsafe", "steps": [{
+        "id": "send", "objective": "Send the message",
+        "tools": ["mail.send"], "hitl": False,
+    }]}
+    validated = await client.post("/api/workflows/validate", json={"workflow": workflow})
+    assert validated.status_code == 200
+    step = validated.json()["workflow"]["steps"][0]
+    assert step["hitl"] is True and step["hitl_timing"] == "before"
+    started = await client.post("/api/runs", json={
+        "workflow": workflow, "wait": True,
+    })
+    assert started.status_code == 200
+    assert started.json()["status"] == "awaiting_approval"
+    assert started.json()["awaiting"] == "send"
 
 
 async def test_coding_cli_worker_add_validates_path(harness):

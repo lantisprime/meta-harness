@@ -31,6 +31,7 @@ class ToolSpec:
     handler: Callable[..., Any]                   # sync or async; kwargs from args
     source: str = "builtin"                       # builtin | mcp:<server>
     keywords: tuple[str, ...] = ()                # extra terms for selection
+    annotations: dict[str, Any] = field(default_factory=dict)  # MCP safety hints
 
 
 class ToolError(Exception):

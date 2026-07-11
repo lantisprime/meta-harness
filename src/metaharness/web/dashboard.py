@@ -920,11 +920,41 @@ async function makePlan(){
 const TASK_TYPES = ['classify','extract','summarize','transform','arithmetic',
                     'code_edit','reasoning','planning','general'];
 let TOOLS_NAMES = null;
+let TOOLS_CATALOG = null;
 async function loadToolNames(){
   if(TOOLS_NAMES === null){
-    try{ TOOLS_NAMES = (await get('/api/tools')).map(t => t.name); }catch(e){ TOOLS_NAMES = []; }
+    try{
+      TOOLS_CATALOG = await get('/api/tools');
+      TOOLS_NAMES = TOOLS_CATALOG.map(t => t.name);
+    }catch(e){ TOOLS_CATALOG = []; TOOLS_NAMES = []; }
   }
   return TOOLS_NAMES;
+}
+
+function toolPicker(selected, mode){
+  const groups = {};
+  (TOOLS_CATALOG || []).forEach(tool =>
+    (groups[tool.source || 'builtin'] = groups[tool.source || 'builtin'] || []).push(tool));
+  return Object.entries(groups).map(([source, tools]) => {
+    const mcp = source.startsWith('mcp:');
+    const label = mcp ? `MCP server · ${source.slice(4)}` : 'Built-in tools';
+    return `<div style="margin:10px 0"><div class="kv">${esc(label)} · ${tools.length}</div>
+      ${tools.map(tool => {
+        const friendly = mcp && tool.name.includes('.') ? tool.name.split('.').slice(1).join('.') : tool.name;
+        const click = mode === 'builder'
+          ? 'toggleDraftTool(this.dataset.tool)' : "this.classList.toggle('on')";
+        const safety = mcp ? badge('warn','human gate') : '';
+        return `<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <button class="tool-toggle ${selected.includes(tool.name) ? 'on' : ''}"
+            onclick="${click}" data-tool="${esc(tool.name)}">${esc(friendly)}</button>
+          ${safety}<span class="small dim">${esc(tool.description || '')}</span></div>`;
+      }).join('')}</div>`;
+  }).join('') || '<div class="small dim">No tools are loaded.</div>';
+}
+
+function mcpToolNeedsGate(name){
+  const tool = (TOOLS_CATALOG || []).find(t => t.name === name);
+  return !!tool && (tool.source || '').startsWith('mcp:');
 }
 
 function checkOf(step){
@@ -1015,8 +1045,7 @@ function stepEditForm(st, i){
     <div class="field"><label>Objective — the full delegation contract for this step</label>
       <textarea id="se-obj">${esc(st.objective)}</textarea></div>
     <div class="field"><label>Tools this step may call</label>
-      <div class="pillrow">${(TOOLS_NAMES || []).map(t =>
-        `<button class="tool-toggle ${(st.tools || []).includes(t) ? 'on' : ''}" onclick="this.classList.toggle('on')" data-tool="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>
+      ${toolPicker(st.tools || [], 'edit')}</div>
     <div class="field" style="display:flex;gap:10px">
       <span style="width:160px"><label>Success check</label><select id="se-check">
         ${['none','equals','contains','one_of'].map(k => `<option ${check.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
@@ -1046,15 +1075,16 @@ function stepEditForm(st, i){
 function editStep(i){ wiz.editingStep = i; renderPlanStep(); }
 
 function collectStepForm(){
+  const tools = [...document.querySelectorAll('.step-edit .tool-toggle.on')].map(b => b.dataset.tool);
   return {
     id: document.getElementById('se-id').value.trim(),
     task_type: document.getElementById('se-type').value,
     objective: document.getElementById('se-obj').value.trim(),
-    tools: [...document.querySelectorAll('.step-edit .tool-toggle.on')].map(b => b.dataset.tool),
+    tools,
     success_check: buildCheck(document.getElementById('se-check').value,
                               document.getElementById('se-checkval').value),
     depends_on: document.getElementById('se-deps').value.split(',').map(x => x.trim()).filter(Boolean),
-    hitl: document.getElementById('se-hitl').checked,
+    hitl: document.getElementById('se-hitl').checked || tools.some(mcpToolNeedsGate),
     when: buildWhen(document.getElementById('se-when-step').value,
                     document.getElementById('se-when-kind').value,
                     document.getElementById('se-when-val').value),
@@ -1135,8 +1165,7 @@ function renderStepBuilder(){
         <div class="pillrow">${TASK_TYPES.map(t =>
           `<button class="pill ${d.task_type === t ? 'on' : ''}" onclick="wiz.builder.draft.task_type='${t}';renderPlanStep()">${t}</button>`).join('')}</div></div>
       <div class="field"><label>Tools (only what this step truly needs — fewer is better)</label>
-        <div class="pillrow">${(TOOLS_NAMES || []).map(t =>
-          `<button class="tool-toggle ${d.tools.includes(t) ? 'on' : ''}" onclick="toggleDraftTool('${esc(t)}')">${esc(t)}</button>`).join('')}</div></div>`;
+        ${toolPicker(d.tools, 'builder')}</div>`;
   }else{
     const prior = wiz.plan.steps.map(st => st.id);
     inner = `
@@ -1179,6 +1208,7 @@ function renderStepBuilder(){
 function toggleDraftTool(t){
   const tools = wiz.builder.draft.tools;
   tools.includes(t) ? tools.splice(tools.indexOf(t), 1) : tools.push(t);
+  if(tools.includes(t) && mcpToolNeedsGate(t)) wiz.builder.draft.hitl = true;
   renderPlanStep();
 }
 
@@ -1218,6 +1248,7 @@ function builderNav(delta){
 function builderCommit(){
   builderCapture();
   const d = wiz.builder.draft;
+  if(d.tools.some(mcpToolNeedsGate)){ d.hitl = true; d.hitl_timing = 'before'; }
   if(wiz.plan.steps.some(st => st.id === d.id)){ toast(`step id ${d.id} is already used`); return; }
   wiz.plan.steps.push({id: d.id, task_type: d.task_type, objective: d.objective,
     inputs: {goal: '$context.goal'}, boundaries: [], tools: d.tools.slice(),
@@ -2093,7 +2124,7 @@ initCardArranging();
 initCardAdvisors();
 
 /* ================= SETTINGS: wizard-driven configuration ================= */
-const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null };
+const SET = { cfg: null, tools: [], provWiz: null, agentWiz: null, mcpWiz: null };
 
 async function renderSettings(refetch){
   const body = document.getElementById('settings-body');
@@ -2105,6 +2136,7 @@ async function renderSettings(refetch){
   }
   if(SET.provWiz){ body.innerHTML = renderProvWizard(); return; }
   if(SET.agentWiz){ body.innerHTML = renderAgentWizard(); return; }
+  if(SET.mcpWiz){ body.innerHTML = renderMcpWizard(); return; }
   body.innerHTML = renderSettingsHome();
 }
 
@@ -2140,8 +2172,9 @@ function renderSettingsHome(){
   const mcp = Object.values(cfg.mcp_servers || {});
   const mcpRows = mcp.length ? mcp.map(s => `
     <div class="prov-item"><div class="pi-main">
-      <div class="pi-name">${esc(s.name)} ${badge('dim', s.transport)}</div>
+      <div class="pi-name">${esc(s.name)} ${badge('dim', s.transport)} ${s.authenticated ? badge('ok','OAuth token') : ''}</div>
       <div class="kv">${esc(s.transport === 'http' ? s.url : s.command + ' ' + (s.args || []).join(' '))}</div></div>
+      <button class="pill" data-act="mcp_load" data-id="${esc(s.name)}">Load tools</button>
       <button class="pill" data-act="mcp_del" data-id="${esc(s.name)}">Remove</button></div>`).join('')
     : '<div class="empty">none configured — fine for most workflows</div>';
 
@@ -2173,16 +2206,9 @@ function renderSettingsHome(){
             : badge('dim','not installed')} <b>${esc(st.label)}</b>
             ${st.installed && !st.authenticated ? `<span class="dim"> — ${esc(st.login_hint)}</span>` : ''}</div>`).join('')}</div>
       <div class="card"><h2>Extra tool servers</h2>
-        <div class="sub">MCP servers add tools your workflows can call — they load when the server starts.</div>${mcpRows}
-        <div class="field" style="margin-top:10px"><label>Add: name</label><input id="mcp-name" class="mono" placeholder="files"></div>
-        <div class="field"><label>Transport</label><select id="mcp-transport" onchange="document.getElementById('mcp-stdio').style.display = this.value === 'stdio' ? '' : 'none'; document.getElementById('mcp-http').style.display = this.value === 'http' ? '' : 'none'">
-          <option value="stdio">stdio (command)</option><option value="http">http (url)</option></select></div>
-        <div id="mcp-stdio"><div class="field"><label>Command + args</label>
-          <input id="mcp-cmd" class="mono" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp"></div></div>
-        <div id="mcp-http" style="display:none"><div class="field"><label>URL</label>
-          <input id="mcp-url" class="mono" placeholder="http://localhost:8000/mcp"></div></div>
-        <button class="btn ghost" onclick="addMcp()">Add MCP server</button>
-        <div class="small dim" style="margin-top:6px">restart the server (or re-run) to load its tools</div></div>
+        <div class="sub">MCP servers add tools your workflows can call. Load them now after saving, and they also reconnect when the server starts.</div>${mcpRows}
+        <button class="btn ghost" onclick="startMcpWizard()">+ Connect MCP server</button>
+        <div class="small dim" style="margin-top:6px">Loaded tools appear by MCP server in the workflow step wizard.</div></div>
     </div>
     <div class="card" style="margin-top:16px">
       <details><summary style="cursor:pointer"><b>Browse the full tool catalog</b>
@@ -2200,6 +2226,7 @@ document.getElementById('settings-body').addEventListener('click', ev => {
     prov_del:  () => deleteProvider(id),
     agent_edit:() => startAgentWizardIdx(+id),
     agent_del: () => removeAgent(id),
+    mcp_load:  () => loadMcp(id),
     mcp_del:   () => deleteMcp(id),
     pick:      () => pickModel(el.dataset.input, el.dataset.value),
   })[el.dataset.act]?.();
@@ -2208,7 +2235,18 @@ document.getElementById('settings-body').addEventListener('click', ev => {
 async function deleteMcp(name){
   const r = await fetch('/api/config/mcp/' + encodeURIComponent(name), {method:'DELETE'});
   toast(r.ok ? 'Removed tool server ' + name : 'Failed: ' + (await r.text()).slice(0,140));
+  if(r.ok){ TOOLS_CATALOG = null; TOOLS_NAMES = null; }
   renderSettings(true);
+}
+
+async function loadMcp(name){
+  toast('Loading tools from ' + name + '…');
+  const r = await post('/api/config/mcp/' + encodeURIComponent(name) + '/load', {});
+  if(!r.ok){ toast('Load failed: ' + (await r.text()).slice(0,140)); return; }
+  const report = await r.json();
+  toast(report.ok ? `Loaded ${report.tools} tool${report.tools === 1 ? '' : 's'} from ${name}`
+                  : `Could not load ${name}: ${report.detail || 'connection failed'}`);
+  if(report.ok){ TOOLS_CATALOG = null; TOOLS_NAMES = null; renderSettings(true); }
 }
 
 async function deleteProvider(pid){
@@ -2223,21 +2261,194 @@ async function removeAgent(id){
   renderSettings(true);
 }
 
-async function addMcp(){
-  const name = document.getElementById('mcp-name').value.trim();
-  const transport = document.getElementById('mcp-transport').value;
-  if(!name){ toast('MCP server needs a name'); return; }
-  const body = {name, transport};
-  if(transport === 'stdio'){
-    const parts = document.getElementById('mcp-cmd').value.trim().split(/\\s+/);
-    if(!parts[0]){ toast('give a command'); return; }
-    body.command = parts[0]; body.args = parts.slice(1);
+/* ---------- MCP wizard: connection type → details → review & save ---------- */
+const MCP_PRESETS = {
+  filesystem: {label: 'Filesystem', transport: 'stdio', name: 'filesystem',
+    command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem@2026.7.10', '/path/to/allowed/folder'],
+    hint: '<b>Filesystem · official MCP server</b>Search, read, and manage files inside directories you explicitly allow. Replace the example directory before saving.'},
+  brave: {label: 'Brave Search', transport: 'stdio', name: 'brave-search',
+    command: 'npx', args: ['-y', '@brave/brave-search-mcp-server@2.0.85', '--transport', 'stdio'],
+    env: [{key: 'BRAVE_API_KEY', value: ''}], required_env: 'BRAVE_API_KEY',
+    hint: '<b>Brave Search · vendor maintained</b>Web, news, image, and local search through your Brave Search API key.'},
+  playwright: {label: 'Playwright', transport: 'stdio', name: 'playwright',
+    command: 'npx', args: ['-y', '@playwright/mcp@0.0.78', '--isolated', '--headless'],
+    hint: '<b>Playwright · Microsoft maintained</b>Browse and interact with websites in an isolated headless browser session.'},
+  gmail: {label: 'Gmail', transport: 'http', name: 'gmail',
+    url: 'https://gmailmcp.googleapis.com/mcp/v1', requires_oauth: true,
+    hint: '<b>Gmail · official Google endpoint</b>Search mail and create drafts. Requires a scoped OAuth access token; mailbox passwords are never accepted.'},
+  calendar: {label: 'Google Calendar', transport: 'http', name: 'google-calendar',
+    url: 'https://calendarmcp.googleapis.com/mcp/v1', requires_oauth: true,
+    hint: '<b>Google Calendar · official Google endpoint</b>List and manage calendar events with a scoped OAuth access token.'},
+  local: {label: 'Custom local', transport: 'stdio', name: '',
+    hint: '<b>Custom local command</b>Start any trusted MCP server installed on this machine.'},
+  remote: {label: 'Custom remote', transport: 'http', name: '',
+    hint: '<b>Custom remote URL</b>Connect to a trusted MCP HTTP endpoint that is already running.'},
+};
+
+function startMcpWizard(){
+  SET.mcpWiz = {step: 0, preset: 'filesystem', transport: 'stdio', name: '',
+    command: '', args: [], env: [], url: '', oauth_token: '',
+    oauth_project: '', requires_oauth: false, required_env: ''};
+  mcpApplyPreset('filesystem');
+  renderSettings();
+}
+
+function mcpWizSteps(){
+  const labels = ['Connection type','Details','Review'];
+  return '<div class="subwiz-steps">' + labels.map((l, i) =>
+    `<span class="t ${i === SET.mcpWiz.step ? 'on' : ''} ${i < SET.mcpWiz.step ? 'done' : ''}">${i + 1} · ${l}</span>`).join('') + '</div>';
+}
+
+function renderMcpWizard(){
+  const w = SET.mcpWiz;
+  let inner = '';
+  if(w.step === 0){
+    const preset = MCP_PRESETS[w.preset];
+    inner = `<div class="sub">Start with a maintained preset, or connect your own trusted server.</div>
+      <div class="pillrow">${Object.entries(MCP_PRESETS).map(([id, p]) =>
+        `<button class="pill ${w.preset === id ? 'on' : ''}" onclick="mcpPick('${id}')">${esc(p.label)}</button>`).join('')}</div>
+      <div class="hint-panel">${preset.hint}</div>
+      <div class="small dim" style="margin-top:8px">Presets are never enabled automatically. Review their command, permissions, and credentials before saving.</div>`;
+  }else if(w.step === 1){
+    const common = `<div class="field"><label>Connection name</label>
+      <input id="mw-name" class="mono" value="${esc(w.name)}" placeholder="filesystem-tools">
+      <span class="small dim">A short name used in config and tool source labels.</span></div>`;
+    if(w.transport === 'stdio'){
+      const envRows = w.env.map((pair, i) => `<div style="display:flex;gap:8px;margin-top:8px">
+        <input id="mw-env-key-${i}" class="mono" value="${esc(pair.key)}" placeholder="VARIABLE_NAME" style="flex:1">
+        <input id="mw-env-value-${i}" class="mono" type="password" value="${esc(pair.value)}" placeholder="value" style="flex:1">
+        <button class="pill" onclick="mcpRemoveEnv(${i})">Remove</button></div>`).join('');
+      inner = `${common}
+        <div class="field"><label>Command</label>
+          <input id="mw-command" class="mono" value="${esc(w.command)}" placeholder="npx">
+          <span class="small dim">Just the executable. Arguments go below.</span></div>
+        <div class="field"><label>Arguments — one per line</label>
+          <textarea id="mw-args" class="mono" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/path/to/folder">${esc(w.args.join('\\n'))}</textarea>
+          <span class="small dim">Each line stays one argument, including paths or values containing spaces.</span></div>
+        <details class="field" open><summary style="cursor:pointer">Environment variables (optional)</summary>
+          ${envRows || '<div class="small dim" style="margin-top:8px">No extra environment variables.</div>'}
+          <button class="btn ghost" style="margin-top:8px" onclick="mcpAddEnv()">+ Add variable</button></details>`;
+    }else{
+      inner = `${common}<div class="field"><label>MCP server URL</label>
+        <input id="mw-url" class="mono" type="url" value="${esc(w.url)}" placeholder="https://tools.example.com/mcp" ${w.requires_oauth ? 'disabled' : ''}>
+        <span class="small dim">The full HTTP endpoint supplied by the server operator.</span></div>
+        ${w.requires_oauth ? `<div class="field"><label>OAuth access token</label>
+          <input id="mw-oauth-token" class="mono" type="password" value="${esc(w.oauth_token)}" placeholder="OAuth bearer token">
+          <span class="small dim">Use a scoped, temporary OAuth token from your provider. Tokens normally expire and must then be replaced. It is obfuscated at rest, masked in the API, and sent only to the pinned Google endpoint above.</span></div>
+          <div class="field"><label>Google Cloud project ID</label>
+            <input id="mw-oauth-project" class="mono" value="${esc(w.oauth_project)}" placeholder="my-workspace-project">
+            <span class="small dim">The project where this Workspace MCP API is enabled; sent as x-goog-user-project.</span></div>` : ''}`;
+    }
   }else{
-    body.url = document.getElementById('mcp-url').value.trim();
-    if(!body.url){ toast('give a URL'); return; }
+    const destination = w.transport === 'stdio'
+      ? `${esc(w.command)}${w.args.length ? ' · ' + w.args.length + ' argument' + (w.args.length === 1 ? '' : 's') : ' · no arguments'}`
+      : esc(w.url);
+    const envNote = w.transport === 'stdio' && w.env.length
+      ? `<div class="small dim" style="margin-top:8px">Environment: ${w.env.map(p => esc(p.key)).join(', ')} (values hidden)</div>` : '';
+    const authNote = w.requires_oauth
+      ? `<div class="small dim" style="margin-top:8px">OAuth token ${w.oauth_token ? 'set' : 'missing'} · value hidden · project ${esc(w.oauth_project)}</div>` : '';
+    inner = `<div class="hint-panel"><b>Ready to connect ${esc(w.name)}</b>
+      <span class="kv">${w.transport === 'stdio' ? 'Local command' : 'Remote URL'} → ${destination}</span>${envNote}${authNote}</div>
+      <div class="small dim">Saving writes this connection to config. Then use Load tools—no terminal or manual CLI step required.</div>`;
+  }
+  return `<div class="card"><h2>Connect MCP server</h2>
+    ${mcpWizSteps()}${inner}
+    <div class="wiz-nav">
+      <button class="btn ghost" onclick="mcpWizNav(-1)">${w.step === 0 ? 'Cancel' : '← Back'}</button>
+      ${w.step < 2
+        ? '<button class="btn" onclick="mcpWizNav(1)">Next →</button>'
+        : '<button class="btn" onclick="mcpSave()">Save connection</button>'}</div></div>`;
+}
+
+function mcpApplyPreset(id){
+  const p = MCP_PRESETS[id];
+  Object.assign(SET.mcpWiz, {preset: id, transport: p.transport, name: p.name || '',
+    command: p.command || '', args: (p.args || []).slice(),
+    env: (p.env || []).map(pair => ({...pair})), url: p.url || '', oauth_token: '',
+    oauth_project: '', requires_oauth: !!p.requires_oauth,
+    required_env: p.required_env || ''});
+}
+
+function mcpPick(id){
+  mcpApplyPreset(id);
+  renderSettings();
+}
+
+function mcpCapture(){
+  const w = SET.mcpWiz;
+  if(w.step !== 1) return;
+  const name = document.getElementById('mw-name');
+  if(name) w.name = name.value.trim();
+  if(w.transport === 'stdio'){
+    w.command = document.getElementById('mw-command').value.trim();
+    w.args = document.getElementById('mw-args').value.split('\\n')
+      .map(arg => arg.trim()).filter(Boolean);
+    w.env = w.env.map((pair, i) => ({
+      key: document.getElementById(`mw-env-key-${i}`).value.trim(),
+      value: document.getElementById(`mw-env-value-${i}`).value,
+    }));
+  }else{
+    w.url = document.getElementById('mw-url').value.trim();
+    const token = document.getElementById('mw-oauth-token');
+    if(token) w.oauth_token = token.value.trim();
+    const project = document.getElementById('mw-oauth-project');
+    if(project) w.oauth_project = project.value.trim();
+  }
+}
+
+function mcpAddEnv(){
+  mcpCapture();
+  SET.mcpWiz.env.push({key: '', value: ''});
+  renderSettings();
+}
+
+function mcpRemoveEnv(i){
+  mcpCapture();
+  SET.mcpWiz.env.splice(i, 1);
+  renderSettings();
+}
+
+function mcpWizNav(delta){
+  mcpCapture();
+  const w = SET.mcpWiz;
+  if(w.step === 0 && delta < 0){ SET.mcpWiz = null; renderSettings(); return; }
+  if(delta > 0 && w.step === 1){
+    if(!w.name){ toast('give the MCP connection a name'); return; }
+    if(w.transport === 'stdio' && !w.command){ toast('give the local command'); return; }
+    if(w.transport === 'http' && !w.url){ toast('give the MCP server URL'); return; }
+    if(w.requires_oauth && !w.oauth_token){ toast('give an OAuth access token'); return; }
+    if(w.requires_oauth && !w.oauth_project){ toast('give the Google Cloud project ID'); return; }
+    if(w.preset === 'filesystem' && w.args.includes('/path/to/allowed/folder')){
+      toast('replace the example with an allowed directory'); return;
+    }
+    if(w.required_env && !w.env.some(p => p.key === w.required_env && p.value)){
+      toast(`give ${w.required_env}`); return;
+    }
+    if(w.transport === 'stdio' && w.env.some(p => !p.key && p.value)){
+      toast('environment variable values need a name'); return;
+    }
+    w.env = w.env.filter(p => p.key);
+  }
+  w.step = Math.max(0, Math.min(2, w.step + delta));
+  renderSettings();
+}
+
+async function mcpSave(){
+  const w = SET.mcpWiz;
+  const body = {name: w.name, transport: w.transport};
+  if(w.transport === 'stdio'){
+    body.command = w.command;
+    body.args = w.args;
+    body.env = Object.fromEntries(w.env.map(p => [p.key, p.value]));
+  }else{
+    body.url = w.url;
+    if(w.oauth_token) body.oauth_token = w.oauth_token;
+    if(w.oauth_project) body.oauth_project = w.oauth_project;
   }
   const r = await post('/api/config/mcp', body);
-  toast(r.ok ? 'Saved MCP server ' + name : 'Failed: ' + (await r.text()).slice(0,140));
+  if(!r.ok){ toast('save failed: ' + (await r.text()).slice(0,140)); return; }
+  toast('Connected MCP server ' + w.name);
+  SET.mcpWiz = null;
   renderSettings(true);
 }
 
