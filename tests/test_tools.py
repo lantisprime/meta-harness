@@ -242,3 +242,52 @@ async def test_mcp_stdio_server_tools_load_and_call(tmp_path):
     assert registry.get("testsrv.shout") is not None
     result = await registry.call("testsrv.shout", {"text": "quiet"})
     assert "QUIET" in result
+
+
+async def test_mcp_http_sends_oauth_token_as_bearer_header(monkeypatch):
+    pytest.importorskip("mcp")
+    from contextlib import asynccontextmanager
+
+    import mcp
+    import mcp.client.streamable_http
+    from metaharness.tools.mcp import _session_cm
+
+    seen = {}
+
+    @asynccontextmanager
+    async def fake_stream(url, headers=None, **_kwargs):
+        seen.update(url=url, headers=headers)
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, _read, _write):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def initialize(self):
+            pass
+
+    monkeypatch.setattr(
+        mcp.client.streamable_http, "streamablehttp_client", fake_stream,
+    )
+    monkeypatch.setattr(mcp, "ClientSession", FakeSession)
+    server = MCPServerConfig(
+        name="gmail", transport="http",
+        url="https://gmailmcp.googleapis.com/mcp/v1",
+        oauth_token="oauth-token-value",
+        oauth_project="workspace-project",
+    )
+    async with _session_cm(server):
+        pass
+    assert seen == {
+        "url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "headers": {
+            "Authorization": "Bearer oauth-token-value",
+            "x-goog-user-project": "workspace-project",
+        },
+    }

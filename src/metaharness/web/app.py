@@ -13,7 +13,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from metaharness.config import PROVIDER_CATALOG, AgentConfig, MCPServerConfig, is_masked
+from metaharness.config import (
+    PROVIDER_CATALOG,
+    AgentConfig,
+    HarnessConfig,
+    MCPServerConfig,
+    is_masked,
+)
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.factory import build_agent_runner
 from metaharness.harness.coding import CLI_KEY_HINTS, available_clis, list_cli_models
@@ -723,9 +729,20 @@ def create_app(state: HarnessState) -> FastAPI:
             template = get_template(req.workflow_type)
             if template is None:
                 raise HTTPException(422, f"unknown workflow_type {req.workflow_type!r}")
-            return template.instantiate(req.goal), f"template:{template.id}", None
-        return await plan_workflow(req.goal, state.planner_runner(), context,
-                                   tools=state.tools)
+            result = template.instantiate(req.goal), f"template:{template.id}", None
+        else:
+            result = await plan_workflow(req.goal, state.planner_runner(), context,
+                                         tools=state.tools)
+        _enforce_mcp_hitl(result[0])
+        return result
+
+    def _enforce_mcp_hitl(spec) -> None:
+        """MCP annotations are untrusted hints; all MCP calls require approval."""
+        for step in spec.steps:
+            if any("." in name or ((tool := state.tools.get(name))
+                   and tool.source.startswith("mcp:")) for name in step.tools):
+                step.hitl = True
+                step.hitl_timing = "before"
 
     @app.post("/api/runs/{run_id}/followup")
     async def plan_run_followup(run_id: str) -> dict[str, Any]:
@@ -789,6 +806,7 @@ def create_app(state: HarnessState) -> FastAPI:
         problems = _value_hazard_problems(spec)
         if problems:
             raise HTTPException(422, "; ".join(problems))
+        _enforce_mcp_hitl(spec)
         data = spec.model_dump(mode="json")
         return {"workflow": data,
                 "yaml": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
@@ -823,6 +841,7 @@ def create_app(state: HarnessState) -> FastAPI:
         problems = _value_hazard_problems(spec)
         if problems:
             raise HTTPException(422, "; ".join(problems))
+        _enforce_mcp_hitl(spec)
         run_state = state.engine.start(spec, context=req.context)
         if req.wait:
             run_state = await state.engine.advance(run_state.run_id)
@@ -1033,19 +1052,42 @@ def create_app(state: HarnessState) -> FastAPI:
 
     @app.post("/api/config/mcp")
     async def update_mcp_server(spec: dict[str, Any]) -> dict[str, Any]:
+        secret_values = [str(spec.get("oauth_token", ""))]
+        secret_values.extend(str(value) for value in (spec.get("env") or {}).values())
+        if any(value.startswith("enc1:") for value in secret_values):
+            raise HTTPException(422, "MCP secrets must be plaintext, not enc1 envelopes")
         try:
             server = MCPServerConfig.model_validate(spec)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc))
+        except ValueError:
+            raise HTTPException(422, "invalid MCP server configuration")
         state.config.mcp_servers[server.name] = server
         state.save_config()
-        return server.model_dump()
+        return state.config.public_dict()["mcp_servers"][server.name]
+
+    @app.post("/api/config/mcp/{name}/load")
+    async def load_mcp_server(name: str) -> dict[str, Any]:
+        server = state.config.mcp_servers.get(name)
+        if server is None:
+            raise HTTPException(404, f"unknown MCP server {name}")
+        import asyncio
+        from metaharness.tools import load_mcp_tools
+        one = HarnessConfig(mcp_servers={name: server})
+        try:
+            async with asyncio.timeout(60):
+                report = await load_mcp_tools(state.tools, one)
+        except TimeoutError:
+            return {"ok": False, "detail": "connection timed out after 60s"}
+        result = report[name]
+        if not result.get("ok"):
+            return {"ok": False, "detail": "connection failed; check server settings and credentials"}
+        return result
 
     @app.delete("/api/config/mcp/{name}")
     async def delete_mcp_server(name: str) -> dict[str, Any]:
         if name not in state.config.mcp_servers:
             raise HTTPException(404, f"unknown MCP server {name}")
         del state.config.mcp_servers[name]
+        state.tools.unregister_source(f"mcp:{name}")
         state.save_config()
         return {"deleted": name}
 
@@ -1106,7 +1148,8 @@ def create_app(state: HarnessState) -> FastAPI:
     @app.get("/api/tools")
     async def tools() -> list[dict[str, Any]]:
         return [
-            {"name": t.name, "description": t.description, "source": t.source}
+            {"name": t.name, "description": t.description, "source": t.source,
+             "annotations": t.annotations}
             for t in state.tools.all()
         ]
 

@@ -60,7 +60,7 @@ Then open http://127.0.0.1:8321. Useful flags: `--critique` (enable SelfCritique
 
 Agents saved in the **Settings** view (wizard-driven: providers → keys → test → save; agent wizard with system-prompt archetypes) persist to `~/.metaharness/config.json` and are rebuilt at every serve — configured agents claim their tiers before `--local` discovery fills the rest. Coding CLIs found on `PATH` (pi, codex, opencode, claude) can be registered as agents that implement plans in real workspaces.
 
-MCP tool servers: `pip install -e '.[mcp]'`, add servers in Settings (stdio command or HTTP URL), and their tools join the registry at startup — the planner hands each step only the small tool subset it needs.
+MCP tool servers: `pip install -e '.[mcp]'`, then use the Settings wizard. It includes reviewed presets for the official filesystem server, Brave Search, Microsoft Playwright, and Google's official Gmail and Calendar endpoints, plus custom local/remote connections. Gmail and Calendar accept OAuth bearer tokens only—never mailbox or app passwords. MCP environment values and OAuth tokens are obfuscated at rest and masked over the config API. Use **Load tools** after saving; workflow steps then choose described tools grouped by MCP server, and agents call those tools directly rather than invoking a CLI.
 
 ### Optimizing the harness itself
 

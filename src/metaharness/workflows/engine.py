@@ -12,7 +12,7 @@ import asyncio
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -62,9 +62,11 @@ class RunState(BaseModel):
 
 
 class WorkflowEngine:
-    def __init__(self, executor: TaskExecutor, journal_dir: Optional[str | Path] = None) -> None:
+    def __init__(self, executor: TaskExecutor, journal_dir: Optional[str | Path] = None,
+                 tool_requires_approval: Optional[Callable[[str], bool]] = None) -> None:
         self.executor = executor
         self.journal_dir = Path(journal_dir) if journal_dir else None
+        self.tool_requires_approval = tool_requires_approval or (lambda _name: False)
         self._runs: dict[str, tuple[WorkflowSpec, RunState, Journal]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -163,8 +165,11 @@ class WorkflowEngine:
                                        payload={"reason": reason})
                         continue
 
-                if (step.hitl and step.hitl_timing == "before"
-                        and step.id not in state.approved):
+                tool_gate = any(self.tool_requires_approval(name) for name in step.tools)
+                if (
+                    ((step.hitl and step.hitl_timing == "before") or tool_gate)
+                    and step.id not in state.approved
+                ):
                     state.status = RunStatus.AWAITING_APPROVAL
                     state.awaiting = step.id
                     journal.append("hitl.requested", run_id, step_id=step.id)

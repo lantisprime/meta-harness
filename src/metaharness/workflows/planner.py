@@ -86,6 +86,12 @@ def _assign_tools(plan: dict[str, Any], registry) -> dict[str, Any]:
         )
         merged = valid + [t for t in detected if t not in valid]
         step["tools"] = merged[:DEFAULT_SUBSET_CAP]
+        if any((tool := registry.get(name)) and tool.source.startswith("mcp:")
+               for name in step["tools"]):
+            # MCP annotations are server-supplied hints, not authorization.
+            # Every external MCP delegation pauses before execution.
+            step["hitl"] = True
+            step["hitl_timing"] = "before"
     return plan
 
 

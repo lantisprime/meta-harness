@@ -38,13 +38,18 @@ def _session_cm(server: MCPServerConfig):
     async def _cm():
         if server.transport == "http":
             from mcp.client.streamable_http import streamablehttp_client
-            async with streamablehttp_client(server.url) as (read, write, _):
+            token = server.plain_oauth_token()
+            headers = {"Authorization": f"Bearer {token}"} if token else None
+            if server.oauth_project:
+                headers = dict(headers or {})
+                headers["x-goog-user-project"] = server.oauth_project
+            async with streamablehttp_client(server.url, headers=headers) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     yield session
         else:
             params = StdioServerParameters(
-                command=server.command, args=server.args, env=server.env or None)
+                command=server.command, args=server.args, env=server.plain_env() or None)
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
@@ -65,7 +70,7 @@ async def _call_mcp_tool(server: MCPServerConfig, tool: str,
     except TimeoutError:
         raise ToolError(f"MCP {server.name}.{tool}: timed out")
     except Exception as exc:  # connection/protocol failures are tool errors
-        raise ToolError(f"MCP {server.name}.{tool}: {exc}")
+        raise ToolError(f"MCP {server.name}.{tool}: {type(exc).__name__}: connection failed")
     parts = []
     for item in result.content or []:
         text = getattr(item, "text", None)
@@ -93,7 +98,7 @@ async def load_mcp_tools(registry: ToolRegistry, config: HarnessConfig) -> dict[
             async with _session_cm(server) as session:
                 listing = await session.list_tools()
         except Exception as exc:
-            report[name] = {"ok": False, "detail": str(exc)}
+            report[name] = {"ok": False, "detail": f"{type(exc).__name__}: connection failed"}
             continue
         count = 0
         for tool in listing.tools:
@@ -106,6 +111,9 @@ async def load_mcp_tools(registry: ToolRegistry, config: HarnessConfig) -> dict[
                 input_schema=tool.inputSchema or {"type": "object", "properties": {}},
                 handler=_handler,
                 source=source,
+                annotations=(tool.annotations.model_dump(
+                    by_alias=True, exclude_none=True
+                ) if tool.annotations else {}),
             ))
             count += 1
         report[name] = {"ok": True, "tools": count}

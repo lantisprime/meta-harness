@@ -20,8 +20,9 @@ import os
 import secrets
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 CONFIG_DIR = Path.home() / ".metaharness"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -122,7 +123,34 @@ class MCPServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     url: str = ""
+    oauth_token: str = ""                 # stored obfuscated (enc1:…)
+    oauth_project: str = ""               # Google quota/billing project id
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_remote_auth(self) -> "MCPServerConfig":
+        allowed_oauth_urls = {
+            "https://gmailmcp.googleapis.com/mcp/v1",
+            "https://calendarmcp.googleapis.com/mcp/v1",
+        }
+        if self.transport == "http":
+            parsed = urlparse(self.url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("HTTP MCP servers need a valid http(s) URL")
+        if self.oauth_token:
+            if self.url not in allowed_oauth_urls:
+                raise ValueError("OAuth tokens are only supported for pinned Google Workspace MCP endpoints")
+            if not self.oauth_project:
+                raise ValueError("Google Workspace OAuth needs a project id")
+        if self.oauth_project and self.url not in allowed_oauth_urls:
+            raise ValueError("OAuth project ids are only sent to pinned Google Workspace MCP endpoints")
+        return self
+
+    def plain_env(self, salt_path: Optional[Path] = None) -> dict[str, str]:
+        return {key: deobfuscate(value, salt_path) for key, value in self.env.items()}
+
+    def plain_oauth_token(self, salt_path: Optional[Path] = None) -> str:
+        return deobfuscate(self.oauth_token, salt_path)
 
 
 class HarnessConfig(BaseModel):
@@ -144,6 +172,11 @@ class HarnessConfig(BaseModel):
         path = path or CONFIG_PATH
         for provider in self.providers.values():
             provider.api_key = obfuscate(provider.api_key, salt_path)
+        for server in self.mcp_servers.values():
+            server.env = {
+                key: obfuscate(value, salt_path) for key, value in server.env.items()
+            }
+            server.oauth_token = obfuscate(server.oauth_token, salt_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.model_dump(), indent=2))
         os.chmod(path, 0o600)
@@ -184,6 +217,14 @@ class HarnessConfig(BaseModel):
             plain = self.providers[pid].plain_key(salt_path)
             provider["api_key"] = mask_key(plain)
             provider["configured"] = bool(plain) or self.providers[pid].keyless
+        for name, server in data["mcp_servers"].items():
+            model = self.mcp_servers[name]
+            server["env"] = {
+                key: mask_key(value) for key, value in model.plain_env(salt_path).items()
+            }
+            token = model.plain_oauth_token(salt_path)
+            server["oauth_token"] = mask_key(token)
+            server["authenticated"] = bool(token)
         return data
 
     def apply_provider_update(self, pid: str, patch: dict[str, Any],
