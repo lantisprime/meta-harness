@@ -984,7 +984,7 @@ async function renderPlanStep(){
       ${p.steps.map((st, i) => wiz.editingStep === i ? stepEditForm(st, i) : `
         <div class="planstep"><div class="n">${i + 1}</div>
           <div style="flex:1"><div class="pt">${esc(st.id)}
-            ${badge('dim', st.task_type)}${st.hitl ? badge('warn','HITL — waits for you') : ''}
+            ${badge('dim', st.task_type)}${st.hitl ? badge('warn', st.hitl_timing === 'after' ? 'HITL — approve output' : 'HITL — approve before run') : ''}
             ${st.success_check ? badge('ok','verifiable') : ''}${whenBadge(st)}
             ${(st.tools || []).map(t => badge('act','🔧 ' + t)).join('')}</div>
           <div class="pd">${esc(st.objective)}</div>
@@ -1291,9 +1291,9 @@ function stepStatus(s){
   const run = wiz.run || {completed:{}};
   if(run.skipped && run.skipped[s.id])
     return {cls:'', icon:'⤳', label:badge('dim', 'skipped — ' + run.skipped[s.id])};
-  if(run.completed[s.id]) return {cls:'done', icon:'✓', label:badge(run.completed[s.id].verdict === 'pass' ? 'ok' : 'dim', run.completed[s.id].verdict)};
   if(run.failed_step === s.id) return {cls:'fail', icon:'✕', label:badge('bad','failed')};
   if(run.awaiting === s.id) return {cls:'now', icon:'…', label:badge('warn','waiting for you')};
+  if(run.completed[s.id]) return {cls:'done', icon:'✓', label:badge(run.completed[s.id].verdict === 'pass' ? 'ok' : 'dim', run.completed[s.id].verdict)};
   const started = (wiz.journal || []).some(e => e.kind === 'step.started' && e.step_id === s.id);
   if(started && run.status === 'running') return {cls:'now', icon:'', label:'<span class="spin"></span> <span class="small dim">running…</span>'};
   return {cls:'', icon:'', label:badge('dim','queued')};
@@ -1357,9 +1357,13 @@ document.addEventListener('click', e => {
 
 function renderRunStep(){
   const p = wiz.plan; const run = wiz.run || {};
+  const gateStep = p.steps.find(s => s.id === run.awaiting);
+  const gateMessage = gateStep && gateStep.hitl_timing === 'after'
+    ? 'Review the completed artifact below. Approve to continue; reject to stop downstream work.'
+    : 'This step is gated — it runs only if you approve it.';
   const hitl = run.status === 'awaiting_approval'
     ? `<div class="guide"><div><b>Approval needed: ${esc(run.awaiting)}</b>
-        <p>This step is gated — it runs only if you approve it.</p>
+        <p>${gateMessage}</p>
         <div style="margin-top:10px;display:flex;gap:10px">
           <button class="btn" onclick="resolveHitl(true)">Approve ${esc(run.awaiting)}</button>
           <button class="btn reject" onclick="resolveHitl(false)">Reject</button></div></div></div>`

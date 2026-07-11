@@ -24,7 +24,7 @@ upstream step's verified output.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -43,7 +43,8 @@ class StepSpec(BaseModel):
     tier_hint: Optional[Tier] = None
     max_attempts: int = 3
     depends_on: list[str] = Field(default_factory=list)
-    hitl: bool = False    # require human approval before this step runs
+    hitl: bool = False    # require human approval at hitl_timing
+    hitl_timing: Literal["before", "after"] = "before"
     tools: list[str] = Field(default_factory=list)  # tool subset for this step
     # conditional execution: {"step": "<id>", "equals"|"contains"|"one_of": value,
     # "negate": bool} — evaluated deterministically against the referenced step's

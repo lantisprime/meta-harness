@@ -12,7 +12,7 @@ criteria, human gates at spec, plan and ship.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,7 @@ class PhaseSpec(BaseModel):
     output_schema: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
     hitl: bool = False
+    hitl_timing: Literal["before", "after"] = "before"
     depends_on: list[str] = Field(default_factory=list)
     feeds_from: list[str] = Field(default_factory=list)  # prior phases whose output is an input
 
@@ -60,6 +61,7 @@ class WorkflowTemplate(BaseModel):
                 "output_schema": phase.output_schema,
                 "tier_hint": phase.tier_hint.value if phase.tier_hint else None,
                 "hitl": phase.hitl,
+                "hitl_timing": phase.hitl_timing,
                 "depends_on": list(phase.depends_on),
             })
         short = goal[:40]
@@ -106,6 +108,7 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
                 "or observable state — reject vague criteria.",
             ],
             hitl=True,  # spec approval gate (Kiro/Spec Kit default)
+            hitl_timing="after",
         ),
         PhaseSpec(
             id="plan",
@@ -118,6 +121,7 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
             feeds_from=["explore", "specify"],
             depends_on=["specify"],
             hitl=True,  # plan approval gate
+            hitl_timing="after",
         ),
         PhaseSpec(
             id="implement",
@@ -176,6 +180,7 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
                 "check, not facts.",
             ],
             hitl=True,  # ship gate
+            hitl_timing="after",
         ),
     ],
 )
@@ -219,7 +224,8 @@ def get_template(template_id: str) -> Optional[WorkflowTemplate]:
 def list_templates() -> list[dict[str, Any]]:
     return [
         {"id": t.id, "label": t.label, "description": t.description,
-         "phases": [{"id": p.id, "hitl": p.hitl, "task_type": p.task_type.value,
+         "phases": [{"id": p.id, "hitl": p.hitl, "hitl_timing": p.hitl_timing,
+                     "task_type": p.task_type.value,
                      "tools": p.tools} for p in t.phases]}
         for t in TEMPLATES.values()
     ]

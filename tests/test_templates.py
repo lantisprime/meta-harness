@@ -28,6 +28,7 @@ def test_software_engineering_instantiates_deterministically():
     by_id = {s.id: s for s in spec.steps}
     # human gates exactly where the SDLC baseline puts them
     assert [s.id for s in spec.steps if s.hitl] == ["specify", "plan", "review"]
+    assert all(by_id[s].hitl_timing == "after" for s in ("specify", "plan", "review"))
     # phases chain outputs through $steps refs
     assert by_id["implement"].inputs["plan"] == "$steps.plan.output"
     assert by_id["implement"].task_type is TaskType.CODE_EDIT
@@ -54,8 +55,7 @@ def test_workflow_name_never_cuts_mid_word():
 
 
 async def test_template_run_end_to_end_with_gates(tmp_path):
-    """The SE template runs through the real engine: parks at the spec gate,
-    then the plan gate, then the review gate, then completes."""
+    """Each SE gate exposes its completed artifact before downstream work."""
     state = HarnessState()
     kp = KeyPair.generate()
     worker = ScriptedWorker(
@@ -67,15 +67,42 @@ async def test_template_run_end_to_end_with_gates(tmp_path):
 
     spec = get_template("software_engineering").instantiate("tiny goal")
     run = state.engine.start(spec, context={"goal": "tiny goal"})
-    for expected_gate in ("specify", "plan", "review"):
+    expected_completed = {
+        "specify": {"explore", "specify"},
+        "plan": {"explore", "specify", "plan"},
+        "review": {"explore", "specify", "plan", "implement", "verify", "review"},
+    }
+    for expected_gate, completed in expected_completed.items():
         run = await state.engine.advance(run.run_id)
         assert run.status is RunStatus.AWAITING_APPROVAL
         assert run.awaiting == expected_gate
+        assert set(run.completed) == completed
+        assert run.completed[expected_gate].output is not None
         state.engine.approve(run.run_id, expected_gate)
     run = await state.engine.advance(run.run_id)
     assert run.status is RunStatus.COMPLETED
     assert set(run.completed) == {"explore", "specify", "plan",
                                   "implement", "verify", "review"}
+
+
+async def test_rejecting_completed_template_artifact_blocks_downstream_work(tmp_path):
+    state = HarnessState()
+    kp = KeyPair.generate()
+    worker = ScriptedWorker("w", lambda task: f"artifact for {task.task_type.value}",
+                            tier=Tier.FRONTIER, keypair=kp)
+    state.register_worker(worker, kp, tiers=["frontier"])
+    state.wire({Tier.FRONTIER: worker}, journal_dir=tmp_path)
+
+    spec = get_template("software_engineering").instantiate("tiny goal")
+    run = state.engine.start(spec, context={"goal": "tiny goal"})
+    run = await state.engine.advance(run.run_id)
+    assert set(run.completed) == {"explore", "specify"}
+
+    state.engine.reject(run.run_id, "specify")
+    run = await state.engine.advance(run.run_id)
+    assert run.status is RunStatus.FAILED
+    assert run.failed_step == "specify"
+    assert not ({"plan", "implement", "verify", "review"} & set(run.completed))
 
 
 async def test_api_plan_from_workflow_type(tmp_path):
