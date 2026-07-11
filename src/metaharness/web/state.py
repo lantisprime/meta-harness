@@ -166,11 +166,24 @@ class HarnessState:
         self.engine = WorkflowEngine(self.executor, journal_dir=journal_dir)
 
     def attach_tools(self, runner: Runner) -> None:
-        """Point a runner (and whatever it wraps) at the shared tool registry."""
+        """Point a runner (and whatever it wraps) at the shared tool registry.
+
+        Subscription CLIs do not call the registry directly, but their read-only
+        CLI tools must inspect the same active workspace as registry-backed
+        workers and coding phases.
+        """
+        from pathlib import Path
+
+        from metaharness.harness import SubscriptionWorker
+
         target: Optional[object] = runner
         while target is not None:
             if hasattr(target, "tool_registry"):
                 target.tool_registry = self.tools
+            if isinstance(target, SubscriptionWorker):
+                target.workspace = (
+                    Path(self.tools.workspace_root) if self.tools.workspace_root else None
+                )
             target = getattr(target, "inner", None)
 
     def planner_runner(self) -> Runner:

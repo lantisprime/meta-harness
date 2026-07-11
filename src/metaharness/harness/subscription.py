@@ -7,9 +7,9 @@ no per-token bill. The CLI's own auth store is the credential; the harness
 never sees it.
 
 Mechanically these reuse the CodingAgentWorker adapters (same one-shot
-invocation, same parsers) with two differences: a shared scratch workspace
-(text tasks produce no artifacts worth keeping) and, for codex, a read-only
-sandbox — a subscription LLM worker must answer, not edit.
+invocation, same parsers) with two differences: the harness binds them to its
+active workspace during wiring, and their CLI tools are read-only — a
+subscription LLM worker must inspect and answer, not edit.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from metaharness.core.types import Tier
-from metaharness.harness.coding import WORKSPACES_DIR, CodingAgentWorker
+from metaharness.harness.coding import CodingAgentWorker
 from metaharness.identity.keys import KeyPair
 
 # model aliases the CLIs accept; "" = the CLI's configured default
@@ -75,6 +75,7 @@ class SubscriptionWorker(CodingAgentWorker):
         tier: Tier = Tier.FRONTIER,
         keypair: Optional[KeyPair] = None,
         system_prompt: str = "",
+        workspace: Optional[Path] = None,
         timeout_s: Optional[float] = None,  # None = task-type-aware default (issue #2)
         **kwargs: Any,
     ) -> None:
@@ -89,10 +90,10 @@ class SubscriptionWorker(CodingAgentWorker):
             tier=tier,
             keypair=keypair,
             system_prompt=system_prompt,
-            workspace=WORKSPACES_DIR / "subscription-scratch",
+            workspace=workspace,
             **timeout_kwargs,
             **kwargs,
         )
-        # answer, don't edit: codex gets a read-only sandbox (claude's builder
-        # adds no write flags, and the scratch cwd contains nothing anyway)
+        # answer, don't edit: Codex gets its read-only sandbox; Claude's adapter
+        # restricts it to plan mode with Read/Glob/Grep only.
         self.sandbox = "read-only"

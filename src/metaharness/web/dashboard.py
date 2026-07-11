@@ -2469,7 +2469,7 @@ function renderAgentWizard(){
       <div class="hint-panel">${{
         openai_compat: '<b>LLM endpoint</b>Any OpenAI-compatible API: a configured provider (Anthropic, OpenAI, …) or a local server (Ollama, LM Studio). Does text-work steps.',
         coding_cli: '<b>Coding CLI</b>A full coding harness (Pi, Codex, OpenCode, Claude Code) run headless per task in a workspace. Gives the harness hands: it can implement plans and write real code.',
-        subscription_cli: '<b>Subscription access</b>LLM completions through your signed-in Claude Code (Anthropic subscription) or Codex CLI (OpenAI subscription). No API key stored — the CLI login is the credential. Codex runs read-only; these agents answer, they do not edit.',
+        subscription_cli: '<b>Subscription access</b>LLM completions through your signed-in Claude Code (Anthropic subscription) or Codex CLI (OpenAI subscription). No API key stored — the CLI login is the credential. These agents inspect the active workspace with read-only tools; they cannot edit it.',
         mock: '<b>Mock</b>Deterministic offline worker for demos and tests.'}[w.kind]}</div>`;
   }else if(w.step === 1){
     if(w.kind === 'subscription_cli'){
