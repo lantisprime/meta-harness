@@ -227,32 +227,68 @@ class SelfCritique(_Wrapper):
 
 
 def check_schema(output: Any, schema: Optional[dict[str, Any]]) -> list[str]:
-    """Minimal JSON-schema-shaped check: required keys + primitive types.
-    Returns a list of violations (empty = conforming)."""
+    """Check the bounded JSON-schema subset used in task contracts."""
     if not schema:
         return []
-    problems: list[str] = []
-    if schema.get("type") == "object" or "required" in schema or "properties" in schema:
-        if not isinstance(output, dict):
-            return [f"expected object, got {type(output).__name__}"]
-        for key in schema.get("required", []):
-            if key not in output:
-                problems.append(f"missing required key {key!r}")
-        type_map = {
-            "string": str, "number": (int, float), "integer": int,
-            "boolean": bool, "array": list, "object": dict,
-        }
-        for key, spec in (schema.get("properties") or {}).items():
-            if key in output and spec.get("type") in type_map:
-                expected = type_map[spec["type"]]
-                value = output[key]
-                if isinstance(value, bool) and spec["type"] in ("number", "integer"):
-                    problems.append(f"key {key!r}: expected {spec['type']}, got boolean")
-                elif not isinstance(value, expected):
-                    problems.append(
-                        f"key {key!r}: expected {spec['type']}, got {type(value).__name__}"
-                    )
-    return problems
+
+    type_map = {
+        "string": str, "number": (int, float), "integer": int,
+        "boolean": bool, "array": list, "object": dict,
+    }
+
+    def inspect(value: Any, spec: dict[str, Any], path: str = "") -> list[str]:
+        problems: list[str] = []
+        expected_name = spec.get("type")
+        if expected_name is None and ("required" in spec or "properties" in spec):
+            expected_name = "object"
+        expected = type_map.get(expected_name)
+        prefix = f"key {path!r}: " if path else ""
+        if expected is not None:
+            if isinstance(value, bool) and expected_name in ("number", "integer"):
+                return [f"{prefix}expected {expected_name}, got boolean"]
+            if not isinstance(value, expected):
+                return [
+                    f"{prefix}expected {expected_name}, got {type(value).__name__}"
+                ]
+
+        allowed = spec.get("enum")
+        if isinstance(allowed, list) and value not in allowed:
+            problems.append(f"{prefix}{value!r} is not one of {allowed!r}")
+
+        if isinstance(value, dict):
+            required = spec.get("required", [])
+            for key in required if isinstance(required, list) else []:
+                if key not in value:
+                    problems.append(f"{prefix}missing required key {key!r}")
+            properties = spec.get("properties")
+            for key, child_spec in (
+                properties.items() if isinstance(properties, dict) else []
+            ):
+                if key in value and isinstance(child_spec, dict):
+                    child_path = f"{path}.{key}" if path else key
+                    problems.extend(inspect(value[key], child_spec, child_path))
+
+        if isinstance(value, list):
+            minimum = spec.get("minItems")
+            maximum = spec.get("maxItems")
+            if isinstance(minimum, int) and not isinstance(minimum, bool) \
+                    and len(value) < minimum:
+                problems.append(
+                    f"{prefix}expected at least {minimum} items, got {len(value)}"
+                )
+            if isinstance(maximum, int) and not isinstance(maximum, bool) \
+                    and len(value) > maximum:
+                problems.append(
+                    f"{prefix}expected at most {maximum} items, got {len(value)}"
+                )
+            item_spec = spec.get("items")
+            if isinstance(item_spec, dict):
+                for index, item in enumerate(value):
+                    item_path = f"{path}[{index}]" if path else f"[{index}]"
+                    problems.extend(inspect(item, item_spec, item_path))
+        return problems
+
+    return inspect(output, schema)
 
 
 class SchemaGuard(_Wrapper):

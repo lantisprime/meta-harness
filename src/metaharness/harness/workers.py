@@ -65,14 +65,25 @@ DEFAULT_SKILLS: dict[Tier, dict[TaskType, float]] = {
 
 
 def _conforming(schema: dict, task: Task) -> Any:
-    """Minimal instance of a JSON schema — required object keys, typed leaves."""
+    """Minimal instance of the bounded JSON-schema subset the harness checks."""
+    allowed = schema.get("enum")
+    if isinstance(allowed, list) and allowed:
+        return allowed[0]
     kind = schema.get("type")
+    if kind is None and ("required" in schema or "properties" in schema):
+        kind = "object"
     if kind == "object":
         props = schema.get("properties", {})
         required = schema.get("required", list(props))
         return {k: _conforming(props.get(k, {}), task) for k in required}
     if kind == "array":
-        return []
+        minimum = schema.get("minItems", 0)
+        if not isinstance(minimum, int) or isinstance(minimum, bool):
+            minimum = 0
+        return [
+            _conforming(schema.get("items", {}), task)
+            for _ in range(minimum)
+        ]
     if kind == "boolean":
         return True
     if kind in ("number", "integer"):
