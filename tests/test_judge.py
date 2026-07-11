@@ -42,6 +42,36 @@ async def test_judge_grades_against_the_contract():
     assert seen[0].output_schema is not None
 
 
+async def test_judge_receives_harness_execution_receipt_as_ground_truth():
+    seen = []
+
+    def handler(task):
+        seen.append(task)
+        return {"pass": True, "reason": "the sandboxed tests passed"}
+
+    task = Task(
+        objective="Verify every acceptance criterion.",
+        inputs={
+            "harness_execution_evidence": (
+                "Harness-owned execution receipt (not worker-authored):\n"
+                "command: python -m pytest -q\nstatus: passed\noutput:\n3 passed"
+            )
+        },
+    )
+    result = WorkerResult(
+        task_id=task.id, worker_id="w", tier=Tier.SMALL, model="m",
+        output={"all_met": True, "criteria": []},
+    )
+
+    verification = await make_judge(_judge_worker(handler))(task, result)
+
+    assert verification.verdict is Verdict.PASS
+    prompt = seen[0].objective
+    assert "command: python -m pytest -q" in prompt
+    assert "3 passed" in prompt
+    assert "harness evidence" in prompt.lower()
+
+
 async def test_unparseable_judgment_degrades_to_unverified():
     judge = make_judge(_judge_worker(lambda t: "hmm, looks fine I guess"))
     from metaharness.core.types import WorkerResult

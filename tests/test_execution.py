@@ -15,6 +15,7 @@ from metaharness.evals.execution import (
     _read_bounded,
     _seatbelt_command,
     discover_execution_check,
+    run_workspace_execution,
     verify_code_edit_execution,
 )
 
@@ -173,6 +174,21 @@ async def test_pytest_exit_zero_is_execution_pass_and_env_is_scrubbed(
     assert verification.verdict is Verdict.PASS
     assert verification.scorer == "execution"
     assert "pytest" in verification.detail
+    assert "1 passed" in verification.detail
+
+
+async def test_workspace_execution_reuses_safe_runner_without_code_edit_task(tmp_path):
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    (tmp_path / "test_demo.py").write_text("def test_ok(): pass\n")
+
+    verification = await run_workspace_execution(
+        tmp_path, sandbox_builder=_direct_sandbox,
+    )
+
+    assert verification is not None
+    assert verification.verdict is Verdict.PASS
+    assert "command:" in verification.detail
+    assert "1 passed" in verification.detail
 
 
 async def test_pytest_nonzero_is_execution_fail_with_diagnostic(tmp_path):

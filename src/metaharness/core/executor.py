@@ -28,7 +28,10 @@ from metaharness.core.types import (
     WorkerResult,
     now,
 )
-from metaharness.evals.execution import verify_code_edit_execution
+from metaharness.evals.execution import (
+    run_workspace_execution,
+    verify_code_edit_execution,
+)
 from metaharness.evals.verifiers import authenticity_failure, verify_output
 from metaharness.harness.runner import verify_result
 from metaharness.identity.keys import KeyPair
@@ -45,6 +48,7 @@ Judge = Callable[..., "object"]
 ExecutionVerifier = Callable[
     [Task, WorkerResult], Awaitable[Optional[VerificationResult]]
 ]
+WorkspaceVerifier = Callable[[str], Awaitable[Optional[VerificationResult]]]
 
 
 class TaskExecutor:
@@ -60,6 +64,8 @@ class TaskExecutor:
         observer: Optional[Callable[[TaskOutcome], None]] = None,
         judge: Optional[Judge] = None,
         execution_verifier: Optional[ExecutionVerifier] = verify_code_edit_execution,
+        workspace_root: str = "",
+        workspace_verifier: Optional[WorkspaceVerifier] = run_workspace_execution,
     ) -> None:
         self.router = router
         self.registry = registry
@@ -71,6 +77,8 @@ class TaskExecutor:
         self.observer = observer
         self.judge = judge
         self.execution_verifier = execution_verifier
+        self.workspace_root = workspace_root
+        self.workspace_verifier = workspace_verifier
         if provenance is not None and orchestrator_keypair is None:
             raise ValueError("provenance logging needs the orchestrator keypair")
 
@@ -101,6 +109,40 @@ class TaskExecutor:
         timeout_retry_used: set[Tier] = set()
         forced_retry_tier: Optional[Tier] = None
         advice: list[str] = []
+        execution_evidence_latency_s = 0.0
+        if task.requires_execution_evidence:
+            evidence_started = time.monotonic()
+            evidence = None
+            if self.workspace_root and self.workspace_verifier is not None:
+                try:
+                    evidence = await self.workspace_verifier(self.workspace_root)
+                except Exception as exc:  # infrastructure uncertainty is evidence too
+                    self._record("execution.evidence_error", {
+                        "task_id": task.id,
+                        "error": f"{type(exc).__name__}: {exc}"[:300],
+                    })
+            execution_evidence_latency_s = time.monotonic() - evidence_started
+            variant = task.model_copy(deep=True)
+            if evidence is None:
+                receipt = (
+                    "Harness-owned execution receipt: no approved runnable test "
+                    "command was discovered or no OS sandbox was available. Do not "
+                    "claim command-based acceptance criteria are met."
+                )
+            else:
+                receipt = (
+                    "Harness-owned execution receipt (not worker-authored):\n"
+                    f"{evidence.detail}"
+                )
+            variant.inputs["harness_execution_evidence"] = receipt
+            task_for_attempts = variant
+            self._record("execution.evidence_attached", {
+                "task_id": task.id,
+                "available": evidence is not None,
+                "verdict": evidence.verdict.value if evidence is not None else None,
+            })
+        else:
+            task_for_attempts = task
         if self.playbook_hints:
             advice.extend(self.playbook_hints(task))
 
@@ -128,7 +170,7 @@ class TaskExecutor:
                     self._record("task.aborted", {"task_id": task.id, "reason": str(exc)})
                     break
 
-                variant = self._attempt_task(task, advice)
+                variant = self._attempt_task(task_for_attempts, advice)
                 runner = self.router.runner_for(decision)
                 result = await runner.run(variant)
                 result.task_id = task.id
@@ -173,7 +215,9 @@ class TaskExecutor:
                         self.budget.charge(
                             cost_usd=result.cost_usd,
                             tokens=result.tokens_in + result.tokens_out,
-                            wall_s=result.latency_s,
+                            wall_s=result.latency_s + (
+                                execution_evidence_latency_s if n == 1 else 0.0
+                            ),
                         )
                 except BudgetExceeded as exc:
                     # a genuine worker malfunction (result.error or an

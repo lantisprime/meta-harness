@@ -29,6 +29,7 @@ class PhaseSpec(BaseModel):
     task_type: TaskType = TaskType.GENERAL
     boundaries: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
+    requires_execution_evidence: bool = False
     output_schema: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
     hitl: bool = False
@@ -58,6 +59,7 @@ class WorkflowTemplate(BaseModel):
                 "inputs": inputs,
                 "boundaries": list(phase.boundaries),
                 "tools": list(phase.tools),
+                "requires_execution_evidence": phase.requires_execution_evidence,
                 "output_schema": phase.output_schema,
                 "tier_hint": phase.tier_hint.value if phase.tier_hint else None,
                 "hitl": phase.hitl,
@@ -151,6 +153,7 @@ SOFTWARE_ENGINEERING = WorkflowTemplate(
             feeds_from=["specify", "implement"],
             depends_on=["implement"],
             tools=["read_file", "list_files", "grep"],
+            requires_execution_evidence=True,
             output_schema={
                 "type": "object",
                 "required": ["all_met", "criteria"],
