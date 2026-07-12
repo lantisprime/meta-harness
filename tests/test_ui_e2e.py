@@ -32,11 +32,17 @@ def server(tmp_path_factory):
     home = tmp_path_factory.mktemp("e2e-home")
     port = _free_port()
     env = {**os.environ, "HOME": str(home)}
+    # A module-scoped server can emit more than an OS pipe buffer over the full
+    # browser suite (especially with live run-event journals).  An undrained
+    # stdout=PIPE eventually blocks the server process itself, making otherwise
+    # unrelated late-suite HTTP calls time out.  Keep diagnostics in a regular
+    # file, which has no producer backpressure.
+    server_log = (home / "server.log").open("w", encoding="utf-8")
     proc = subprocess.Popen(
         [sys.executable, "-m", "metaharness.cli"] if False else
         [str(Path(sys.executable).parent / "metaharness"), "serve",
          "--port", str(port)],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        env=env, stdout=server_log, stderr=subprocess.STDOUT,
     )
     base = f"http://127.0.0.1:{port}"
     try:
@@ -54,6 +60,7 @@ def server(tmp_path_factory):
     finally:
         proc.kill()
         proc.wait()
+        server_log.close()
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +75,13 @@ def page(server):
         browser.close()
 
 
+def submit_fork(page, blueprint_id: str, name: str) -> None:
+    page.wait_for_selector("#fork-dialog[open]")
+    page.fill("#fork-id", blueprint_id)
+    page.fill("#fork-name", name)
+    page.click("#fork-dialog button:has-text('Create fork')")
+
+
 def test_run_wizard_loads_with_mock_tiers(page, server):
     base, _ = server
     page.goto(base); page.click("#nav-wizard")
@@ -78,6 +92,515 @@ def test_run_wizard_loads_with_mock_tiers(page, server):
     assert page.locator(".tierrow").count() == 3
     assert page.locator(".badge.ok", has_text="ready").count() == 3
     assert page.locator("button", has_text="Continue →").is_enabled()
+
+
+def test_guided_harness_fields_capability_bundle_and_agent_assignment_persist(page, server):
+    base, _ = server
+    page.goto(base)
+    page.click("button:has-text('Create a harness')")
+    page.fill("#harness-name", "Guided calculator")
+    page.fill("#harness-slug", "e2e-guided-calculator")
+    page.fill("#harness-description", "A reusable guided harness")
+    page.click("button:has-text('+ Add input')")
+    row = page.locator("[data-input-row]").first
+    row.locator("[data-part=name]").fill("amount")
+    row.locator("[data-part=type]").select_option("number")
+    row.locator("[data-part=required]").check()
+    page.click(".pill:has-text('Custom (build by hand)')")
+    page.fill("#goal", "Calculate the supplied amount.")
+    page.click("#planbtn")
+    page.fill("#sb-obj", "Calculate the supplied amount exactly.")
+    page.check('[data-map-prefix="sb"][data-map-source="amount"]')
+    page.click("button:has-text('Next →')")
+    page.click("button[data-tool-mode='builder']:has-text('Calculate')")
+    worker = page.locator("#sb-worker option").nth(1).get_attribute("value")
+    assert worker
+    page.select_option("#sb-worker", worker)
+    assert page.locator("#sb-role").count() == 1
+    assert page.locator("#sb-capabilities").count() == 1
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Add step to workflow')")
+    page.click("button:has-text('Done — review workflow')")
+    page.click("button:has-text('Save as harness')")
+    page.wait_for_timeout(600)
+    assert page.evaluate("wiz.dirty") is False, page.locator("#toast").inner_text()
+    saved = page.evaluate("fetch('/api/blueprint-drafts/e2e-guided-calculator').then(r => r.json())")
+    assert saved["description"] == "A reusable guided harness"
+    assert next(i for i in saved["inputs"] if i["name"] == "amount")["schema"]["type"] == "number"
+    stage = saved["workflow"]["steps"][0]
+    assert stage["inputs"]["amount"] == "$context.amount"
+    assert stage["worker_id"] == worker
+    assert not stage.get("role")
+    assert not stage.get("required_capabilities")
+    assert stage["tools"] == ["calculator"]
+
+
+def test_live_timeline_names_agent_and_accessible_tabs(page, server):
+    base, _ = server
+    page.goto(base)
+    page.evaluate("""() => {
+      wiz.plan={name:'timeline',steps:[{id:'work',task_type:'general',objective:'Work',tools:[]}]};
+      wiz.runId='run_demo'; wiz.run={status:'running',completed:{},skipped:{},awaiting:null};
+      wiz.journal=[
+        {kind:'step.ready',step_id:'work',payload:{}},
+        {kind:'attempt.assigned',step_id:'work',payload:{n:1,worker_id:'agent-a',model:'model-a',tier:'small'}},
+        {kind:'attempt.started',step_id:'work',payload:{n:1,worker_id:'agent-a'}},
+        {kind:'tool.requested',step_id:'work',payload:{tool:'calculator'}},
+        {kind:'verification.started',step_id:'work',payload:{worker_id:'agent-a'}},
+      ]; setStep(3);
+    }""")
+    assert "Assigned attempt 1 to agent-a" in page.locator(".timeline").inner_text()
+    assert "Using calculator" in page.locator(".timeline").inner_text()
+    assert page.locator("[role=tab]").get_attribute("aria-selected") == "true"
+    assert page.locator("[role=tabpanel]").count() == 1
+
+
+def test_run_with_new_inputs_returns_to_inputs_for_ad_hoc_plan(page, server):
+    base, _ = server
+    page.goto(base)
+    page.evaluate("""() => {
+      resetWizard(false,true); currentView='wizard'; wiz.step=4;
+      wiz.plan={name:'adhoc',steps:[{id:'one',task_type:'general',objective:'Use goal',inputs:{goal:'$context.goal'},tools:[],depends_on:[],hitl:false}]};
+      wiz.runId='run_done'; wiz.run={status:'completed',completed:{one:{verdict:'pass',output:'ok',attempts:1}},skipped:{}};
+      showView('wizard',true); renderStepper(); renderDoneStep();
+    }""")
+    page.click("button:has-text('Run with new inputs')")
+    page.wait_for_selector("#goal")
+    assert page.evaluate("wiz.step") == 1
+    assert "keeps the current stages" in page.locator("#wiz-body").inner_text()
+
+
+def test_readiness_repair_can_visit_settings_and_return_without_losing_stage(page, server):
+    base, _ = server
+    page.goto(base)
+    page.evaluate("""() => {
+      showView('wizard',true); wiz.step=2; wiz.dirty=true;
+      wiz.plan={name:'repair',steps:[{id:'send',task_type:'general',objective:'Send',tools:['mail.send'],depends_on:[],hitl:true}]};
+      wiz.readinessIssues=[{stage_id:'send',message:'Pinned worker is unavailable',repair:{action:'configure_agent',label:'Configure an agent',target:'missing'}}];
+      renderStepper(); renderPlanStep();
+    }""")
+    page.evaluate("repairReadiness(0)")
+    page.wait_for_selector("#settings-return")
+    assert page.locator("#view-settings").is_visible()
+    assert page.evaluate("wiz.dirty") is True
+    page.click("#settings-return button")
+    page.wait_for_selector(".planstep:has-text('send')")
+    assert page.evaluate("wiz.plan.steps[0].tools[0]") == "mail.send"
+
+
+def test_readiness_mcp_repair_honors_typed_load_failure(page, server):
+    base, _ = server
+    page.goto(base)
+    page.route(
+        "**/api/config/mcp/expired-mail/load",
+        lambda route: route.fulfill(json={
+            "ok": False, "status": "load_failed", "tools": 0,
+            "detail": "OAuth token expired",
+        }),
+    )
+    try:
+        page.evaluate("""() => {
+          wiz.readinessIssues=[{stage_id:'send',message:'Capability unavailable',
+            repair:{action:'load_mcp',label:'Load capability',target:'expired-mail'}}];
+          document.getElementById('wiz-body').innerHTML='<div id="planmsg"></div>';
+        }""")
+        page.evaluate("repairReadiness(0)")
+        page.wait_for_selector("#toast.on:has-text('OAuth token expired')")
+        assert "could not load" in page.locator("#planmsg").inner_text().lower()
+        assert page.evaluate("wiz.readinessIssues.length") == 1
+    finally:
+        page.unroute("**/api/config/mcp/expired-mail/load")
+
+
+def test_harness_library_lists_builtins_and_run_waits_for_confirmation(page, server):
+    base, _ = server
+    page.goto(base)
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="research"]')
+    assert page.locator('[data-harness-id="research"] .badge', has_text="builtin").count() == 1
+    assert page.locator('[data-harness-id="software-engineering"]').count() == 1
+
+    before = page.evaluate("fetch('/api/runs').then(r => r.json()).then(x => x.length)")
+    page.locator('[data-harness-id="research"] [data-action="run"]').click()
+    page.wait_for_selector("b:has-text('Run Research & report with new inputs.')")
+    assert page.evaluate("fetch('/api/runs').then(r => r.json()).then(x => x.length)") == before
+    page.fill("#goal", "Research the workspace and summarize the result.")
+    page.click("button:has-text('Review harness')")
+    page.wait_for_selector("button:has-text('Confirm and run v1')")
+    assert page.evaluate("fetch('/api/runs').then(r => r.json()).then(x => x.length)") == before
+
+
+def test_library_evaluate_tune_package_actions_are_real(page, server):
+    base, _ = server
+    page.goto(base); page.click("#nav-library")
+    card = page.locator('[data-harness-id="research"]')
+    card.wait_for()
+    for label in ("Evaluate", "Tune", "Package"):
+        assert card.locator("button", has_text=label).is_enabled()
+
+    package_calls = []
+    page.route(
+        "**/api/blueprints/research/versions/1/package",
+        lambda route: (package_calls.append(route.request.post_data_json),
+                       route.fulfill(status=200, body=b"PK-e2e-package",
+                                     headers={"Content-Type": "application/zip"})),
+    )
+    try:
+        with page.expect_download():
+            card.locator("button", has_text="Package").click()
+        assert package_calls == [{"targets": ["local"]}]
+    finally:
+        page.unroute("**/api/blueprints/research/versions/1/package")
+
+    card.locator("button", has_text="Evaluate").click()
+    page.wait_for_selector("#library-action-dialog[open]")
+    # Built-ins currently have no frozen eval suite; say what to do next.
+    assert "no evaluation suite attached" in page.locator("#library-action-body").inner_text().lower()
+    page.click("#library-action-body button:has-text('Close')")
+
+    tune_calls = []
+    page.route(
+        "**/api/blueprints/research/versions/1/tune",
+        lambda route: (tune_calls.append(route.request.post_data_json),
+                       route.fulfill(status=201, json={"proposal": {"id": "p"}, "applied_draft": None, "published": False})),
+    )
+    try:
+        card.locator("button", has_text="Tune").click()
+        page.fill("#la-report-refs", '[{"id":"report-1","content_digest":"' + "a" * 64 + '","split":"development"}]')
+        page.fill("#la-patches", '[{"op":"set_description","value":"Improved"}]')
+        page.fill("#la-rationale", "Evidence from the visible evaluation report.")
+        page.click("#library-action-body button:has-text('Create proposal')")
+        page.wait_for_selector("#library-action-dialog", state="hidden")
+        assert len(tune_calls) == 1
+        assert tune_calls[0]["human_approved"] is False
+    finally:
+        page.unroute("**/api/blueprints/research/versions/1/tune")
+
+
+def test_builtin_edit_forks_and_custom_draft_survives_refresh(page, server):
+    base, _ = server
+    page.goto(base); page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="research"]')
+    page.locator('[data-harness-id="research"] [data-action="edit"]').click()
+    submit_fork(page, "e2e-research-fork", "E2E research fork")
+    page.wait_for_selector("button:has-text('Save draft')")
+    assert page.evaluate("wiz.blueprintId") == "e2e-research-fork"
+    assert page.evaluate("wiz.blueprintSource") == {"id": "research", "version": 1}
+    page.reload(); page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-research-fork"]')
+    card = page.locator('[data-harness-id="e2e-research-fork"]')
+    assert card.locator(".badge", has_text="draft").count() >= 1
+    assert card.locator('[data-action="delete_draft"]').count() == 1
+
+
+def test_owned_harness_save_publish_version_archive_restore_and_dirty_guard(page, server):
+    base, _ = server
+    page.goto(base)
+    created = page.evaluate("""async () => {
+      const r = await fetch('/api/blueprints/research/fork', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          new_id:'e2e-versioned', source_version:1, display_name:'E2E versioned'})});
+      return {ok:r.ok, text:await r.text()};
+    }""")
+    assert created["ok"], created["text"]
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-versioned"]')
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="edit"]').click()
+    page.wait_for_selector("button:has-text('Save draft')")
+
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "Immutable version one objective.")
+    page.click("button:has-text('Save step')")
+    assert page.evaluate("wiz.dirty") is True
+
+    def stay_on_dirty(dialog):
+        assert "unsaved harness changes" in dialog.message
+        dialog.dismiss()
+    page.once("dialog", stay_on_dirty)
+    page.click("#nav-library")
+    assert page.locator("#view-wizard").is_visible()
+
+    page.click("button:has-text('Save draft')")
+    page.wait_for_function("wiz.dirty === false")
+    page.locator("#view-wizard button", has_text="Publish").click()
+    page.wait_for_function("wiz.blueprintVersion === 1 && wiz.blueprintMode === 'run'")
+    v1 = page.evaluate("fetch('/api/blueprints/e2e-versioned/versions/1').then(r => r.json())")
+    assert v1["workflow"]["steps"][0]["objective"] == "Immutable version one objective."
+
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-versioned"]')
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="versions"]').click()
+    page.wait_for_function("(LIB.versions['e2e-versioned'] || []).length === 1")
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="edit"]').click()
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "Immutable version two objective.")
+    page.click("button:has-text('Save step')")
+    page.click("button:has-text('Save draft')")
+    page.wait_for_function("wiz.dirty === false")
+    page.locator("#view-wizard button", has_text="Publish").click()
+    page.wait_for_function("wiz.blueprintVersion === 2")
+    assert page.evaluate("LIB.versions['e2e-versioned']") is None
+    versions = page.evaluate("fetch('/api/blueprints/e2e-versioned/versions').then(r => r.json())")
+    assert [v["version"] for v in versions] == [1, 2]
+    assert versions[0]["workflow"]["steps"][0]["objective"] == "Immutable version one objective."
+    assert versions[1]["workflow"]["steps"][0]["objective"] == "Immutable version two objective."
+
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-versioned"]')
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="archive"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-versioned"]', state="detached")
+    page.check("#library-archived")
+    page.wait_for_selector('[data-harness-id="e2e-versioned"] [data-action="restore"]')
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="versions"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-versioned"] .version-list .lrow')
+    archived_rows = page.locator('[data-harness-id="e2e-versioned"] .version-list')
+    assert archived_rows.locator("button", has_text="Run").count() == 0
+    assert archived_rows.locator("button", has_text="Edit").count() == 0
+    assert archived_rows.locator("button", has_text="Fork").count() == 0
+    page.locator('[data-harness-id="e2e-versioned"] [data-action="restore"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-versioned"] [data-action="archive"]')
+
+
+def test_delete_draft_is_distinct_from_archive_and_run_without_save_is_isolated(page, server):
+    base, _ = server
+    page.goto(base)
+    setup = page.evaluate("""async () => {
+      const make = async (id) => fetch('/api/blueprints/research/fork', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          new_id:id, source_version:1, display_name:id})});
+      const disposable = await make('e2e-disposable');
+      const editable = await make('e2e-run-unsaved');
+      const draft = await editable.json();
+      const published = await fetch('/api/blueprint-drafts/e2e-run-unsaved/publish', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:draft.revision})});
+      return disposable.ok && published.ok;
+    }""")
+    assert setup is True
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-disposable"] [data-action="delete_draft"]')
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator('[data-harness-id="e2e-disposable"] [data-action="delete_draft"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-disposable"]', state="detached")
+    missing = page.evaluate("fetch('/api/blueprint-drafts/e2e-disposable').then(r => r.status)")
+    assert missing == 404
+
+    page.locator('[data-harness-id="e2e-run-unsaved"] [data-action="edit"]').click()
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "This change must remain run-only.")
+    page.click("button:has-text('Save step')")
+    page.locator("#view-wizard button", has_text="Run without saving").click()
+    page.wait_for_function("wiz.runId !== null")
+    assert page.evaluate("wiz.run.blueprint_ref") is None
+    immutable = page.evaluate("fetch('/api/blueprints/e2e-run-unsaved/versions/1').then(r => r.json())")
+    assert immutable["workflow"]["steps"][0]["objective"] != "This change must remain run-only."
+
+
+def test_open_step_direct_actions_capture_tools_and_dirty_exact_fork_preserves_content(page, server):
+    base, _ = server
+    page.goto(base)
+    created = page.evaluate("""async () => {
+      const r = await fetch('/api/blueprints/research/fork', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          new_id:'e2e-direct-actions', source_version:1, display_name:'Direct actions'})});
+      return r.ok;
+    }""")
+    assert created is True
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-direct-actions"]')
+    page.locator('[data-harness-id="e2e-direct-actions"] [data-action="edit"]').click()
+
+    # A global save captures the still-open form; clicking Save step is not required.
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "Captured directly from the open editor.")
+    page.locator("#view-wizard button", has_text="Save draft").click()
+    page.wait_for_function("wiz.dirty === false && wiz.editingStep === null")
+    saved = page.evaluate("fetch('/api/blueprint-drafts/e2e-direct-actions').then(r => r.json())")
+    assert saved["workflow"]["steps"][0]["objective"] == "Captured directly from the open editor."
+
+    # Tool-only edits also mark the subeditor dirty and Publish captures them.
+    page.locator("button[title='edit']").first.click()
+    tool = page.locator('.step-edit [data-tool="calculator"]')
+    tool.click()
+    assert page.evaluate("wiz.stepEditorDirty") is True
+    page.locator("#view-wizard button", has_text="Publish").click()
+    page.wait_for_function("wiz.blueprintVersion === 1 && wiz.blueprintMode === 'run'")
+    v1 = page.evaluate("fetch('/api/blueprints/e2e-direct-actions/versions/1').then(r => r.json())")
+    assert "calculator" in v1["workflow"]["steps"][0]["tools"]
+
+    # Forking a modified exact version preserves the canonical open-form edit.
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "Preserve this exact unsaved edit in the fork.")
+    page.locator("#view-wizard button", has_text="Fork to edit").click()
+    submit_fork(page, "e2e-preserved-fork", "Preserved fork")
+    page.wait_for_function("wiz.blueprintId === 'e2e-preserved-fork'")
+    forked = page.evaluate("fetch('/api/blueprint-drafts/e2e-preserved-fork').then(r => r.json())")
+    assert forked["workflow"]["steps"][0]["objective"] == "Preserve this exact unsaved edit in the fork."
+    assert forked["source"] == {"id": "e2e-direct-actions", "version": 1}
+
+    # Invalid open forms block navigation with a clear message before any discard dialog.
+    page.locator("button[title='edit']").first.click()
+    page.fill("#se-obj", "")
+    page.click("#nav-library")
+    assert page.locator("#view-wizard").is_visible()
+    assert "needs an objective" in page.locator("#toast").inner_text()
+
+    page.fill("#se-obj", "Valid again")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-direct-actions"]')
+    page.locator('[data-harness-id="e2e-direct-actions"] [data-action="versions"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-direct-actions"] .version-list button')
+    row = page.locator('[data-harness-id="e2e-direct-actions"] .version-list .lrow').first
+    assert row.locator("button", has_text="Run").count() == 1
+    assert row.locator("button", has_text="Edit").count() == 1
+    assert row.locator("button", has_text="Fork").count() == 1
+
+
+def test_historical_edit_with_mismatched_draft_offers_exact_fork(page, server):
+    base, _ = server
+    page.goto(base)
+    setup = page.evaluate("""async () => {
+      const send = (url, body, method='POST') => fetch(url, {method,
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      let r = await send('/api/blueprints/research/fork', {new_id:'e2e-history', source_version:1, display_name:'History'});
+      let d = await r.json();
+      r = await send('/api/blueprint-drafts/e2e-history/publish', {expected_revision:d.revision});
+      await r.json();
+      r = await send('/api/blueprint-drafts', {blueprint_id:'e2e-history', base_version:1});
+      d = await r.json(); d.workflow.steps[0].objective = 'Version two only';
+      const content = {schema_version:d.schema_version, name:d.name, description:d.description,
+        workflow:d.workflow, inputs:d.inputs, default_context:d.default_context,
+        eval_suites:d.eval_suites, source:d.source};
+      r = await send('/api/blueprint-drafts/e2e-history', {content, expected_revision:d.revision}, 'PATCH');
+      d = await r.json();
+      await send('/api/blueprint-drafts/e2e-history/publish', {expected_revision:d.revision});
+      r = await send('/api/blueprint-drafts', {blueprint_id:'e2e-history', base_version:2});
+      return r.ok;
+    }""")
+    assert setup is True
+    page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="e2e-history"]')
+    page.locator('[data-harness-id="e2e-history"] [data-action="versions"]').click()
+    page.wait_for_selector('[data-harness-id="e2e-history"] .version-list .lrow')
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.locator('[data-harness-id="e2e-history"] .version-list .lrow').first.locator("button", has_text="Edit").click()
+    submit_fork(page, "e2e-history-v1-fork", "History v1 fork")
+    page.wait_for_function("wiz.blueprintId === 'e2e-history-v1-fork'")
+    forked = page.evaluate("fetch('/api/blueprint-drafts/e2e-history-v1-fork').then(r => r.json())")
+    existing = page.evaluate("fetch('/api/blueprint-drafts/e2e-history').then(r => r.json())")
+    assert forked["source"] == {"id": "e2e-history", "version": 1}
+    assert forked["base_version"] is None
+    assert forked["workflow"]["steps"][0]["objective"] != "Version two only"
+    assert existing["base_version"] == 2
+
+
+def test_cancel_step_edit_restores_prior_global_dirty_state(page, server):
+    base, _ = server
+    page.goto(base); page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="research"]')
+    page.locator('[data-harness-id="research"] [data-action="run"]').click()
+    page.fill("#goal", "cancel editor regression")
+    page.click("button:has-text('Review harness')")
+    before = page.evaluate("JSON.stringify(wiz.plan)")
+    page.locator("button[title='edit']").first.click()
+    assert page.evaluate("""() => [...document.querySelectorAll('.step-edit label[for]')]
+      .every(label => document.getElementById(label.htmlFor))""") is True
+    assert page.locator(".step-edit fieldset legend").count() >= 1
+    page.fill("#se-obj", "do not keep")
+    page.locator('.step-edit [data-tool="calculator"]').click()
+    assert page.evaluate("wiz.dirty && wiz.stepEditorDirty") is True
+    page.click("button:has-text('Cancel')")
+    assert page.evaluate("wiz.dirty") is False
+    assert page.evaluate("JSON.stringify(wiz.plan)") == before
+
+
+@pytest.mark.parametrize("transition", ["edit-other", "delete", "move", "add", "yaml"])
+def test_plan_surface_transition_preserves_open_step_values(page, server, transition):
+    base, _ = server
+    page.goto(base); page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="research"]')
+    page.locator('[data-harness-id="research"] [data-action="run"]').click()
+    page.fill("#goal", f"transition regression {transition}")
+    page.click("button:has-text('Review harness')")
+    page.locator("button[title='edit']").first.click()
+    marker = f"Uncommitted value preserved by {transition}."
+    page.fill("#se-obj", marker)
+
+    if transition == "edit-other":
+        page.locator("button[title='edit']").first.click()
+        page.wait_for_function("wiz.editingStep === 1")
+    elif transition == "delete":
+        page.locator("button[title='remove']").first.click()
+    elif transition == "move":
+        page.locator("button[title='move down']").first.click()
+    elif transition == "add":
+        page.click("button:has-text('+ Add step (wizard)')")
+        page.wait_for_function("wiz.builderMode === true")
+    else:
+        page.click("button:has-text('Edit as YAML')")
+        page.wait_for_function("wiz.yamlMode === true")
+
+    assert page.evaluate(
+        f"wiz.plan.steps.some(step => step.objective === {json.dumps(marker)})"
+    ) is True
+    if transition == "yaml":
+        assert marker in page.locator("#yaml-box").input_value()
+
+
+def test_untouched_step_transition_keeps_exact_blueprint_run_identity(page, server):
+    base, _ = server
+    page.goto(base); page.click("#nav-library")
+    page.wait_for_selector('[data-harness-id="research"]')
+    page.locator('[data-harness-id="research"] [data-action="run"]').click()
+    page.fill("#goal", "untouched editor exact-run regression")
+    page.click("button:has-text('Review harness')")
+
+    page.locator("button[title='edit']").first.click()
+    page.locator("button[title='edit']").first.click()  # transition to another untouched editor
+    assert page.evaluate("wiz.dirty") is False
+    page.locator("#view-wizard button", has_text="Confirm and run v1").click()
+    page.wait_for_function("wiz.runId !== null")
+
+    assert page.evaluate("wiz.run.blueprint_ref") == {"id": "research", "version": 1}
+
+
+def test_library_route_aborts_preserve_screen_and_announce_retry(page, server):
+    base, _ = server
+    page.goto(base)
+    assert page.evaluate("""async () => {
+      const send = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      let r = await send('/api/blueprints/research/fork', {new_id:'e2e-abort-draft', source_version:1});
+      let d = await r.json();
+      r = await send('/api/blueprints/research/fork', {new_id:'e2e-abort-published', source_version:1});
+      d = await r.json(); await send('/api/blueprint-drafts/e2e-abort-published/publish', {expected_revision:d.revision});
+      r = await send('/api/blueprints/research/fork', {new_id:'e2e-abort-restore', source_version:1});
+      d = await r.json(); await send('/api/blueprint-drafts/e2e-abort-restore/publish', {expected_revision:d.revision});
+      await send('/api/blueprints/e2e-abort-restore/archive', {}); return true;
+    }""") is True
+    page.click("#nav-library"); page.wait_for_selector('[data-harness-id="e2e-abort-draft"]')
+
+    def abort(path, expression, dialogs=()):
+        page.route(path, lambda route: route.abort())
+        page.evaluate("document.getElementById('toast').textContent = ''")
+        answers = list(dialogs)
+        def answer(dialog):
+            value = answers.pop(0)
+            dialog.accept(value) if value is not None else dialog.accept()
+            if not answers: page.remove_listener("dialog", answer)
+        if answers: page.on("dialog", answer)
+        page.evaluate(expression)
+        page.wait_for_function("document.getElementById('toast').textContent.includes('retry')")
+        assert page.locator("#view-library").is_visible()
+        assert page.locator("#toast").get_attribute("role") == "status"
+        page.unroute(path)
+
+    abort("**/api/blueprint-drafts/e2e-abort-draft", "libraryEdit('e2e-abort-draft', null, 'fork')")
+    abort("**/api/blueprints/research/fork", "libraryFork('research', 1, null, {id:'e2e-abort-fork',name:'Abort fork'})")
+    abort("**/api/blueprints/e2e-abort-published/archive", "libraryArchive('e2e-abort-published')", (None,))
+    abort("**/api/blueprints/e2e-abort-restore/restore", "libraryRestore('e2e-abort-restore')")
+    abort("**/api/blueprint-drafts/e2e-abort-draft", "libraryDeleteDraft('e2e-abort-draft')", (None,))
+    abort("**/api/blueprint-drafts/e2e-abort-draft/publish", "libraryPublish('e2e-abort-draft')")
 
 
 def test_agents_step_lists_pool_members_from_routing(page, server):
@@ -207,9 +730,31 @@ def test_mcp_wizard_offers_curated_oauth_only_presets(page, server):
     saved = json.loads((home / ".metaharness" / "config.json").read_text())
     assert "e2e-oauth-access-token" not in json.dumps(saved)
     assert saved["mcp_servers"]["gmail"]["oauth_token"].startswith("enc1:")
+    original_envelope = saved["mcp_servers"]["gmail"]["oauth_token"]
     assert page.locator(
         ".prov-item:has-text('gmail') button:has-text('Load tools')"
     ).count() == 1
+
+    # Editing round-trips the masked token without replacing the stored secret.
+    page.click(".prov-item:has-text('gmail') button:has-text('Re-authenticate / Edit')")
+    assert page.locator("#mw-name").is_disabled()
+    assert page.locator("#mw-oauth-token").input_value()
+    page.fill("#mw-oauth-project", "e2e-updated-project")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Update connection')")
+    page.wait_for_selector(".prov-item:has-text('gmail')")
+    preserved = json.loads((home / ".metaharness" / "config.json").read_text())
+    assert preserved["mcp_servers"]["gmail"]["oauth_token"] == original_envelope
+
+    # A real replacement token produces a new encrypted envelope.
+    page.click(".prov-item:has-text('gmail') button:has-text('Re-authenticate / Edit')")
+    page.fill("#mw-oauth-token", "e2e-replacement-oauth-token")
+    page.click("button:has-text('Next →')")
+    page.click("button:has-text('Update connection')")
+    page.wait_for_selector("#toast.on:has-text('Updated MCP server gmail')")
+    replaced = json.loads((home / ".metaharness" / "config.json").read_text())
+    assert replaced["mcp_servers"]["gmail"]["oauth_token"] != original_envelope
+    assert "e2e-replacement-oauth-token" not in json.dumps(replaced)
 
     page.route(
         "**/api/config/mcp/gmail/load",
@@ -296,6 +841,8 @@ def test_agent_wizard_with_archetype_prompt(page, server):
     # step 3: role & prompt — archetype fills the textarea with guidance visible
     page.fill("#aw-id", "e2e-reviewer")
     page.select_option("#aw-tier", "mid")
+    page.fill("#aw-roles", "reviewer, release-gate")
+    page.fill("#aw-capabilities", "workspace.read, tests.run")
     page.click(".pill:has-text('Reviewer')")
     prompt = page.locator("#aw-prompt").input_value()
     assert "adversarial reviewer" in prompt and "SHIP or NO-SHIP" in prompt
@@ -307,8 +854,12 @@ def test_agent_wizard_with_archetype_prompt(page, server):
     page.click("button:has-text('Register agent')")
 
     page.wait_for_selector(".prov-item:has-text('e2e-reviewer')")
-    cfg = (home / ".metaharness" / "config.json").read_text()
-    assert "e2e-reviewer" in cfg and "adversarial reviewer" in cfg
+    cfg = json.loads((home / ".metaharness" / "config.json").read_text())
+    saved_agent = next(a for a in cfg["agents"] if a["worker_id"] == "e2e-reviewer")
+    assert "adversarial reviewer" in saved_agent["system_prompt"]
+    assert saved_agent["roles"] == ["reviewer", "release-gate"]
+    assert saved_agent["capabilities"] == ["workspace.read", "tests.run"]
+    assert page.evaluate("ASSIGNMENT_WORKERS_LOADED") is False
     # registered identity is visible from the Run wizard tier rows too
     page.click("#nav-wizard")
     page.wait_for_selector(".tierrow:has-text('e2e-reviewer')")
@@ -617,6 +1168,8 @@ def test_sweep_every_action_button_is_wired(page, server):
         assert dead_handlers() == [], f"dead onclick handler(s) on {name}"
 
     check("run wizard / agents step")
+    page.click("#nav-library"); page.wait_for_selector('[data-harness-id="research"]')
+    check("harness library")
     page.click("#nav-settings"); page.wait_for_selector("h2:has-text('Where do completions come from?')")
     check("settings home")
     page.click("button:has-text('+ Add a provider')")

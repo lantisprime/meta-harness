@@ -23,7 +23,13 @@ from pydantic import BaseModel
 from metaharness.core.budget import Budget
 from metaharness.core.types import Task, TaskType, Tier
 from metaharness.harness.runner import Runner
+from metaharness.identity.registry import WorkerRecord, WorkerRegistry
 from metaharness.observability.tracing import tracer
+from metaharness.routing.eligibility import (
+    EligibilityResult,
+    WorkerProfile,
+    worker_eligibility,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -226,6 +232,7 @@ class Router:
         priors: Optional[dict[Tier, dict[TaskType, float]]] = None,
         explore_rate: float = 0.1,
         rng: Optional[random.Random] = None,
+        registry: Optional[WorkerRegistry] = None,
     ) -> None:
         # normalize each value to a list; drop empty pools so `tier in self.pools`
         # always means "serves traffic" (next_tier/decide rely on that invariant)
@@ -242,18 +249,56 @@ class Router:
         self.priors = priors or DEFAULT_PRIORS
         self.explore_rate = explore_rate
         self.rng = rng or random.Random()
+        self.registry = registry
         # in-memory routed-to evidence, keyed (tier, worker_id) — feeds the UI
         self.route_counts: dict[tuple[Tier, str], int] = {}
 
     def pool(self, tier: Tier) -> list[Runner]:
         return self.pools.get(tier, [])
 
-    def expected_pass_rate(self, tier: Tier, task_type: TaskType) -> float:
+    def _profile(self, runner: Runner, tier: Tier) -> WorkerProfile:
+        record: Optional[WorkerRecord] = (
+            self.registry.get(runner.worker_id) if self.registry is not None else None
+        )
+        # Standalone Router users historically have no registry; preserve that
+        # unrestricted mode. Once a registry is supplied, an absent record is a
+        # missing/inactive identity and must not be routed.
+        if record is None:
+            return WorkerProfile(
+                worker_id=runner.worker_id,
+                tier=tier,
+                active=self.registry is None,
+                host=str(getattr(runner, "cli", "") or ""),
+            )
+        return WorkerProfile(
+            worker_id=runner.worker_id,
+            tier=tier,
+            active=record.active,
+            roles=tuple(record.roles),
+            capabilities=tuple(record.capabilities),
+            task_types=tuple(record.task_types),
+            tiers=tuple(record.tiers),
+            host=record.host or str(getattr(runner, "cli", "") or ""),
+        )
+
+    def eligibility(self, runner: Runner, tier: Tier, task: Task) -> EligibilityResult:
+        return worker_eligibility(task, self._profile(runner, tier))
+
+    def eligible_members(self, tier: Tier, task: Task) -> list[Runner]:
+        """Pool members accepted by the shared readiness/routing predicate."""
+        return [
+            member for member in self.pools.get(tier, [])
+            if self.eligibility(member, tier, task).eligible
+        ]
+
+    def expected_pass_rate(self, tier: Tier, task_type: TaskType | Task) -> float:
         """The tier's ceiling: the best pass rate any member can offer — that is
         the member decide() would route to (absent exploration)."""
-        members = self.pools.get(tier, [])
+        task = task_type if isinstance(task_type, Task) else Task(task_type=task_type)
+        members = self.eligible_members(tier, task)
         if not members:
             return 0.0
+        task_type = task.task_type
         prior = self.priors.get(tier, {}).get(task_type, 0.5)
         return max(self.matrix.pass_rate(m.model, task_type, prior=prior) for m in members)
 
@@ -262,7 +307,9 @@ class Router:
         the task type (tie → earliest configured). With >1 member on a verifiable
         task, ε of the time route instead to the least-sampled other member so it
         earns evidence (returns explored=True)."""
-        members = self.pools[tier]
+        members = self.eligible_members(tier, task)
+        if not members:
+            raise ValueError(f"no eligible runner serves tier {tier.value}")
         prior = self.priors.get(tier, {}).get(task.task_type, 0.5)
         best = max(members, key=lambda m: self.matrix.pass_rate(m.model, task.task_type, prior=prior))
         # success_check only: the deterministic verifier can PASS solely through
@@ -278,16 +325,15 @@ class Router:
         return best, False
 
     def runner_for(self, decision: RoutingDecision) -> Runner:
-        """Resolve a decision back to the exact member it named; fall back to the
-        tier pool's first member if that worker_id is gone (e.g. retired mid-run).
-        A tier with no pool at all is a wiring error and raises."""
+        """Resolve the exact decided member; never silently substitute another."""
         members = self.pools.get(decision.tier, [])
         for member in members:
             if member.worker_id == decision.worker_id:
                 return member
-        if not members:
-            raise ValueError(f"no pool serves tier {decision.tier.value}")
-        return members[0]
+        raise ValueError(
+            f"decided worker {decision.worker_id!r} is no longer available in "
+            f"tier {decision.tier.value}"
+        )
 
     def next_tier(self, current: Tier) -> Optional[Tier]:
         """The next tier up whose pool actually serves, or None at the top."""
@@ -346,10 +392,50 @@ class Router:
         threshold; fall back to the most capable affordable tier otherwise. Then
         pick which member of that tier serves the task."""
         exclude = exclude or set()
+        if task.worker_id:
+            matches = [
+                (tier, member)
+                for tier, members in self.pools.items()
+                for member in members
+                if member.worker_id == task.worker_id and tier not in exclude
+            ]
+            if not matches:
+                raise ValueError(f"pinned worker {task.worker_id!r} is not available")
+            eligible = [
+                (tier, member)
+                for tier, member in matches
+                if self.eligibility(member, tier, task).eligible
+            ]
+            if not eligible:
+                tier, member = matches[0]
+                eligibility = self.eligibility(member, tier, task)
+                raise ValueError(
+                    f"pinned worker {task.worker_id!r} is not eligible: "
+                    f"{eligibility.code}: {eligibility.detail}"
+                )
+            if len(eligible) > 1:
+                raise ValueError(
+                    f"pinned worker {task.worker_id!r} appears in multiple eligible pools"
+                )
+            tier, member = eligible[0]
+            with tracer().start_as_current_span("router.decide") as span:
+                span.set_attribute("task.id", task.id)
+                span.set_attribute("task.type", task.task_type.value)
+                prior = self.priors.get(tier, {}).get(task.task_type, 0.5)
+                rate = self.matrix.pass_rate(member.model, task.task_type, prior=prior)
+                key = (tier, member.worker_id)
+                self.route_counts[key] = self.route_counts.get(key, 0) + 1
+                return RoutingDecision(
+                    tier=tier,
+                    worker_id=member.worker_id,
+                    model=member.model,
+                    expected_pass_rate=rate,
+                    reason=f"hard-pinned worker {member.worker_id}",
+                )
         floor_idx = TIER_ORDER.index(task.tier_hint) if task.tier_hint else 0
         candidates = [
             t for t in TIER_ORDER[floor_idx:]
-            if t in self.pools and t not in exclude
+            if t in self.pools and t not in exclude and self.eligible_members(t, task)
         ]
         if budget is not None:
             affordable = [t for t in candidates if TIER_EST_COST[t] <= budget.remaining_cost()]
@@ -362,7 +448,7 @@ class Router:
             span.set_attribute("task.type", task.task_type.value)
             for tier in candidates:
                 # tier selection keys on the tier's ceiling (best member's rate)
-                if self.expected_pass_rate(tier, task.task_type) >= self.threshold:
+                if self.expected_pass_rate(tier, task) >= self.threshold:
                     return self._build_decision(task, tier, span, cleared=True)
             # nothing clears the bar — send the most capable candidate
             return self._build_decision(task, candidates[-1], span, cleared=False)

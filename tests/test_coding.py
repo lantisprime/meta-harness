@@ -1,6 +1,7 @@
 """CodingAgentWorker: headless CLI invocation via stub scripts."""
 from __future__ import annotations
 
+import asyncio
 import json
 import stat
 from pathlib import Path
@@ -80,6 +81,46 @@ async def test_timeout_kills_process(tmp_path):
     assert "0.5s" in result.error
     verification = verify_output(_task(), result)
     assert verification.failure_mode == MASTMode.TIMEOUT
+
+
+async def test_timeout_kills_cli_descendants_that_ignore_term(tmp_path):
+    marker = tmp_path / "orphan-wrote"
+    binary = _stub(tmp_path, "opencode-tree", f'''(
+      trap '' TERM
+      sleep 0.7
+      echo orphan > "{marker}"
+    ) &
+    wait
+    ''')
+    worker = CodingAgentWorker(
+        "oc", cli="opencode", workspace=tmp_path / "ws",
+        binary=binary, timeout_s=0.1,
+    )
+    result = await worker.run(_task())
+    assert result.timed_out is True
+    await asyncio.sleep(0.8)
+    assert not marker.exists(), "timed-out CLI descendant kept mutating workspace"
+
+
+async def test_cancellation_kills_cli_descendants(tmp_path):
+    marker = tmp_path / "cancelled-orphan-wrote"
+    binary = _stub(tmp_path, "claude-tree", f'''(
+      trap '' TERM
+      sleep 0.7
+      echo orphan > "{marker}"
+    ) &
+    wait
+    ''')
+    worker = CodingAgentWorker(
+        "cc", cli="claude", workspace=tmp_path / "ws", binary=binary,
+    )
+    running = asyncio.create_task(worker.run(_task()))
+    await asyncio.sleep(0.1)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    await asyncio.sleep(0.8)
+    assert not marker.exists(), "cancelled CLI descendant kept mutating workspace"
 
 
 async def test_execute_applies_scaled_timeout_when_unset(tmp_path, monkeypatch):

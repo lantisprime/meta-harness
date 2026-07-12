@@ -12,7 +12,7 @@ import uuid
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _new_id(prefix: str) -> str:
@@ -93,12 +93,30 @@ class Task(BaseModel):
     # a checkable success signal, if one exists. Interpreted by the verifier.
     success_check: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
+    # Human-friendly assignment constraints. ``worker_id`` is a hard pin;
+    # role/capabilities are requirements that any selected worker must satisfy.
+    role: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
+    required_capabilities: list[str] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    worker_id: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     max_attempts: int = 3
     # tool names this task may call (small per-step subset, never the catalog)
     tools: list[str] = Field(default_factory=list)
     # Ask the orchestrator to attach a harness-owned, sandboxed test receipt.
     # This never grants the worker a command-execution tool.
     requires_execution_evidence: bool = False
+
+    @model_validator(mode="after")
+    def _assignment_is_unambiguous(self) -> "Task":
+        self.role = (self.role.strip() or None) if self.role else None
+        self.worker_id = (self.worker_id.strip() or None) if self.worker_id else None
+        self.required_capabilities = list(dict.fromkeys(
+            value.strip() for value in self.required_capabilities if value.strip()
+        ))
+        if self.worker_id and self.tier_hint is not None:
+            raise ValueError("worker_id and tier_hint cannot be combined")
+        return self
 
 
 class WorkerResult(BaseModel):

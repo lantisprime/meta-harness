@@ -195,8 +195,7 @@ async def test_hitl_resolution_rejects_a_non_pending_or_duplicate_step(tmp_path)
     assert engine.journal(state.run_id).entries("hitl.resolved") == []
 
     engine.approve(state.run_id, "notify")
-    with pytest.raises(ValueError, match="no approval is pending"):
-        engine.approve(state.run_id, "notify")
+    engine.approve(state.run_id, "notify")  # same decision is idempotent
     assert len(engine.journal(state.run_id).entries("hitl.resolved")) == 1
 
 
@@ -211,6 +210,51 @@ async def test_resume_remembers_prior_approval(tmp_path):
     engine2, resumed = WorkflowEngine.resume(journal_path, executor)
     final = await engine2.advance(resumed.run_id)
     assert final.status == RunStatus.COMPLETED  # no second approval needed
+
+
+async def test_no_eligible_route_can_never_complete_a_zero_attempt_step(tmp_path):
+    """A routing abort is FAIL, never a successful UNVERIFIED no-op."""
+    worker = ScriptedWorker("plain", lambda _task: "unused")
+    engine = WorkflowEngine(
+        TaskExecutor(Router({Tier.SMALL: worker})), journal_dir=tmp_path
+    )
+    spec = WorkflowSpec.model_validate({
+        "name": "no-route",
+        "steps": [{"id": "work", "objective": "work", "role": "missing-role"}],
+    })
+    run = engine.start(spec)
+    run = await engine.advance(run.run_id)
+
+    assert run.status is RunStatus.FAILED
+    assert run.failed_step == "work"
+    assert "work" not in run.completed
+    assert not engine.journal(run.run_id).events("attempt.started")
+
+
+async def test_required_tool_is_rechecked_immediately_before_stage(tmp_path):
+    available = {"needed"}
+    engine = WorkflowEngine(
+        perfect_executor(), journal_dir=tmp_path,
+        tool_available=lambda name: name in available,
+    )
+    spec = WorkflowSpec.model_validate({
+        "name": "tool-drift",
+        "steps": [
+            {"id": "gate", "objective": "gate", "hitl": True},
+            {"id": "use", "objective": "use", "depends_on": ["gate"],
+             "tools": ["needed"]},
+        ],
+    })
+    run = engine.start(spec)
+    run = await engine.advance(run.run_id)
+    assert run.awaiting == "gate"
+    available.clear()
+    engine.approve(run.run_id, "gate")
+    run = await engine.advance(run.run_id)
+
+    assert run.status is RunStatus.FAILED and run.failed_step == "use"
+    failed = engine.journal(run.run_id).events("step.failed")[-1]
+    assert failed.payload["missing_tools"] == ["needed"]
 
 
 async def test_resume_at_post_artifact_gate_keeps_output_without_rerunning(tmp_path):
@@ -508,3 +552,159 @@ async def test_step_attempt_journal_records_non_timeout_tool_error(tmp_path):
     payload = atts[0].payload
     assert payload["timed_out"] is False
     assert payload["failure_mode"] == "tool_error"
+
+
+def _valid_bp_snapshot(bp_id: str = "test-bp", version: int = 3, name: str = "Test BP"):
+    """A minimal valid BlueprintVersion-shaped snapshot for engine tests."""
+    return {
+        "schema_version": 1,
+        "name": name,
+        "description": "",
+        "workflow": {
+            "name": "wf",
+            "steps": [{"id": "s", "objective": "o"}],
+        },
+        "inputs": [],
+        "default_context": {},
+        "eval_suites": [],
+        "id": bp_id,
+        "version": version,
+        "published_at": 1.0,
+    }
+
+
+async def test_run_start_embeds_blueprint_ref_and_snapshot(tmp_path):
+    """Saved-harness runs record the exact blueprint reference and a full
+    snapshot in the RunState and the first journal entry."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    bp_ref = {"id": "test-bp", "version": 3}
+    bp_snapshot = _valid_bp_snapshot()
+    state = engine.start(
+        spec,
+        context={"ticket": "x"},
+        blueprint_ref=bp_ref,
+        blueprint_snapshot=bp_snapshot,
+    )
+    assert state.blueprint_ref == bp_ref
+    assert state.blueprint_snapshot == bp_snapshot
+    assert state.snapshot_digest is not None
+
+    started = engine.journal(state.run_id).entries("run.started")[0]
+    assert started.payload["blueprint_ref"] == bp_ref
+    assert started.payload["blueprint_snapshot"] == bp_snapshot
+    assert started.payload["snapshot_digest"] == state.snapshot_digest
+
+
+async def test_ad_hoc_run_has_null_blueprint_ref_and_snapshot(tmp_path):
+    """Legacy/ad-hoc runs keep blueprint fields null and journals unchanged."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    state = engine.start(spec, context={"ticket": "x"})
+    assert state.blueprint_ref is None
+    assert state.blueprint_snapshot is None
+    assert state.snapshot_digest is not None
+
+    started = engine.journal(state.run_id).entries("run.started")[0]
+    assert "blueprint_ref" not in started.payload
+    assert "blueprint_snapshot" not in started.payload
+    assert started.payload["snapshot_digest"] == state.snapshot_digest
+
+
+async def test_resume_restores_blueprint_ref_and_snapshot(tmp_path):
+    """Resuming a saved-harness run restores its exact blueprint ref and
+    snapshot from the journal without touching the catalog."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    bp_ref = {"id": "resume-bp", "version": 2}
+    bp_snapshot = _valid_bp_snapshot("resume-bp", 2, "Resume BP")
+    state = engine.start(
+        spec,
+        context={"ticket": "x"},
+        blueprint_ref=bp_ref,
+        blueprint_snapshot=bp_snapshot,
+    )
+    state = await engine.advance(state.run_id)
+    engine.approve(state.run_id, "notify")
+    journal_path = tmp_path / f"{state.run_id}.jsonl"
+
+    engine2, resumed = WorkflowEngine.resume(journal_path, perfect_executor())
+    assert resumed.blueprint_ref == bp_ref
+    assert resumed.blueprint_snapshot == bp_snapshot
+    assert resumed.snapshot_digest is not None
+    final = await engine2.advance(resumed.run_id)
+    assert final.status is RunStatus.COMPLETED
+
+
+async def test_resume_verifies_present_snapshot_digest(tmp_path):
+    """A journal whose embedded snapshot digest does not match the snapshot
+    fails resume with a clear error, not silent corruption."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    bp_snapshot = _valid_bp_snapshot("digest-bp", 1, "Digest BP")
+    state = engine.start(
+        spec,
+        context={"ticket": "x"},
+        blueprint_ref={"id": "digest-bp", "version": 1},
+        blueprint_snapshot=bp_snapshot,
+    )
+    journal_path = tmp_path / f"{state.run_id}.jsonl"
+
+    # tamper with the digest in the journal file
+    import json
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["payload"]["snapshot_digest"] = "0" * 64
+    lines[0] = json.dumps(first, sort_keys=True)
+    journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="snapshot digest mismatch"):
+        WorkflowEngine.resume(journal_path, perfect_executor())
+
+
+async def test_resume_tolerates_old_journals_without_digest(tmp_path):
+    """Journals created before snapshot_digest was introduced still resume
+    successfully and backfill the computed digest."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    state = engine.start(spec, context={"ticket": "x"})
+    state = await engine.advance(state.run_id)
+    journal_path = tmp_path / f"{state.run_id}.jsonl"
+
+    # strip the digest as if this were an old journal
+    import json
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["payload"].pop("snapshot_digest", None)
+    lines[0] = json.dumps(first, sort_keys=True)
+    journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    engine2, resumed = WorkflowEngine.resume(journal_path, perfect_executor())
+    assert resumed.snapshot_digest is not None
+    engine2.approve(resumed.run_id, "notify")
+    final = await engine2.advance(resumed.run_id)
+    assert final.status is RunStatus.COMPLETED
+
+
+async def test_start_rejects_mismatched_blueprint_provenance(tmp_path):
+    """Ref and snapshot must agree on id/version; one-sided values are rejected."""
+    engine = WorkflowEngine(perfect_executor(), journal_dir=tmp_path)
+    spec = load_workflow(TRIAGE_YAML)
+    bp_snapshot = _valid_bp_snapshot("right-bp", 1, "Right BP")
+
+    with pytest.raises(ValueError, match="both be present or both absent"):
+        engine.start(spec, blueprint_ref={"id": "right-bp", "version": 1})
+    with pytest.raises(ValueError, match="both be present or both absent"):
+        engine.start(spec, blueprint_snapshot=bp_snapshot)
+    with pytest.raises(ValueError, match="does not match ref"):
+        engine.start(
+            spec,
+            blueprint_ref={"id": "wrong-bp", "version": 1},
+            blueprint_snapshot=bp_snapshot,
+        )
+    with pytest.raises(ValueError, match="does not match ref"):
+        engine.start(
+            spec,
+            blueprint_ref={"id": "right-bp", "version": 2},
+            blueprint_snapshot=bp_snapshot,
+        )

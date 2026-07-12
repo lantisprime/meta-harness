@@ -102,6 +102,8 @@ class AgentConfig(BaseModel):
     model: str = ""
     system_prompt: str = ""
     task_types: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
     temperature: float = 0.2
     max_tokens: Optional[int] = 4000
     thinking: Optional[bool] = None
@@ -157,6 +159,9 @@ class HarnessConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     agents: list[AgentConfig] = Field(default_factory=list)
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    # Logical binding -> obfuscated local value. Public surfaces replace this
+    # whole mapping with configured-name status; values are write-only over HTTP.
+    secret_bindings: dict[str, str] = Field(default_factory=dict)
     settings: dict[str, Any] = Field(default_factory=dict)
 
     # ------------------------------------------------------------ persistence
@@ -177,6 +182,10 @@ class HarnessConfig(BaseModel):
                 key: obfuscate(value, salt_path) for key, value in server.env.items()
             }
             server.oauth_token = obfuscate(server.oauth_token, salt_path)
+        self.secret_bindings = {
+            name: obfuscate(value, salt_path)
+            for name, value in self.secret_bindings.items()
+        }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.model_dump(), indent=2))
         os.chmod(path, 0o600)
@@ -208,6 +217,25 @@ class HarnessConfig(BaseModel):
             return provider.base_url, provider.plain_key(salt_path)
         return agent.base_url, ""
 
+    def set_secret_binding(
+        self, name: str, plaintext: str, salt_path: Optional[Path] = None
+    ) -> None:
+        """Store one validated logical binding without retaining plaintext."""
+        from metaharness.blueprints.secrets import validate_secret_binding_name
+
+        binding = validate_secret_binding_name(name)
+        if not plaintext:
+            raise ValueError("secret binding value cannot be empty")
+        if plaintext.startswith(_ENC_PREFIX):
+            raise ValueError("secret binding values must be plaintext writes")
+        self.secret_bindings[binding] = obfuscate(plaintext, salt_path)
+
+    def hydrate_secret_bindings(self, registry: Any,
+                                salt_path: Optional[Path] = None) -> None:
+        """Load configured values into a callback-only runtime registry."""
+        for name, value in self.secret_bindings.items():
+            registry.configure(name, deobfuscate(value, salt_path))
+
     # ----------------------------------------------------------- API surface
 
     def public_dict(self, salt_path: Optional[Path] = None) -> dict[str, Any]:
@@ -225,6 +253,10 @@ class HarnessConfig(BaseModel):
             token = model.plain_oauth_token(salt_path)
             server["oauth_token"] = mask_key(token)
             server["authenticated"] = bool(token)
+        data["secret_bindings"] = {
+            name: {"configured": bool(deobfuscate(value, salt_path))}
+            for name, value in sorted(self.secret_bindings.items())
+        }
         return data
 
     def apply_provider_update(self, pid: str, patch: dict[str, Any],

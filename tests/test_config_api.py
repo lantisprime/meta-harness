@@ -52,6 +52,76 @@ async def test_config_roundtrip_masks_keys(harness):
     assert state.config.providers["groq"].default_model == "llama-5"
 
 
+async def test_secret_bindings_are_write_only_durable_and_restart_ready(harness):
+    state, client = harness
+    sentinel = "sk-live-runtime-only-value-7f31"
+
+    created = await client.post("/api/config/secret-bindings", json={
+        "name": "service-token", "value": sentinel,
+    })
+    assert created.status_code == 200
+    assert created.json() == {"name": "service-token", "configured": True}
+    assert sentinel not in created.text
+
+    public = await client.get("/api/config")
+    assert public.json()["secret_bindings"] == {
+        "service-token": {"configured": True}
+    }
+    assert sentinel not in public.text and "enc1:" not in public.text
+    persisted = state.config_path.read_text()
+    assert sentinel not in persisted and "enc1:" in persisted
+
+    # A fresh process loads the obfuscated config and hydrates only the private
+    # callback registry before readiness is served.
+    restarted = HarnessState()
+    restarted.config = config_mod.HarnessConfig.load(state.config_path)
+    restarted.config_path = state.config_path
+    create_app(restarted)
+    assert restarted.secret_bindings.is_configured("service-token")
+    assert restarted.secret_bindings.use(
+        "service-token", lambda value: value == sentinel
+    ) is True
+    from metaharness.blueprints import BlueprintVersion, InputSpec, prepare_blueprint_run
+    from metaharness.tools import default_registry
+    from metaharness.workflows.dsl import WorkflowSpec
+
+    restart_readiness = prepare_blueprint_run(
+        BlueprintVersion(
+            id="restart-binding", version=1, published_at=1.0,
+            name="Restart binding",
+            workflow=WorkflowSpec.model_validate({
+                "name": "restart-binding",
+                "steps": [{
+                    "id": "use", "objective": "Use configured binding.",
+                    "inputs": {"token": {"binding": "service-token"}},
+                }],
+            }),
+            inputs=[InputSpec(
+                name="token", schema={"type": "string"}, secret=True,
+                required=True, default={"binding": "service-token"},
+            )],
+        ),
+        {}, tools=default_registry(), mcp_servers={},
+        secret_bindings=restarted.secret_bindings,
+    )
+    assert restart_readiness.ready
+    assert restart_readiness.normalized_context == {}
+
+    rejected = await client.post("/api/config/secret-bindings", json={
+        "name": "other-token", "value": "enc1:do-not-accept-envelopes",
+    })
+    assert rejected.status_code == 422
+    assert "do-not-accept-envelopes" not in rejected.text
+
+    deleted = await client.delete("/api/config/secret-bindings/service-token")
+    assert deleted.json() == {"deleted": "service-token"}
+    assert not state.secret_bindings.is_configured("service-token")
+    assert "service-token" not in state.config.secret_bindings
+    assert (await client.delete(
+        "/api/config/secret-bindings/service-token"
+    )).status_code == 404
+
+
 async def test_add_persisted_mock_worker_and_retire(harness):
     state, client = harness
     resp = await client.post("/api/workers", json={
@@ -138,16 +208,12 @@ async def test_add_worker_timeout_upper_bounds(harness, monkeypatch):
 
     base = {"worker_id": "cx-bounds", "tier": "small", "kind": "coding_cli",
             "cli": "codex"}
-    # Infinity is rejected at the model boundary (pydantic finite_number). The
-    # wire response cannot be a clean 422 — starlette's JSONResponse
-    # (allow_nan=False) refuses to echo inf back in the error detail — but the
-    # property that matters holds: the request fails loudly and no worker is
-    # ever created or persisted.
-    with pytest.raises(Exception):
-        await client.post(
-            "/api/workers",
-            content=json.dumps({**base, "timeout_s": float("inf")}),
-            headers={"Content-Type": "application/json"})
+    invalid = await client.post(
+        "/api/workers",
+        content=json.dumps({**base, "timeout_s": float("inf")}),
+        headers={"Content-Type": "application/json"})
+    assert invalid.status_code == 422
+    assert set(invalid.json()["detail"][0]) == {"loc", "msg", "type"}
     assert state.config.agent("cx-bounds") is None
     resp = await client.post("/api/workers", json={**base, "timeout_s": 1e15})
     assert resp.status_code == 422
@@ -210,9 +276,34 @@ async def test_mcp_server_config_crud(harness):
     state.tools.register(ToolSpec(
         "files.search", "search files", {}, lambda: "ok", source="mcp:files",
     ))
+    state.mcp_load_status["files"] = {"status": "loaded", "fingerprint": "stale"}
+    updated = await client.post("/api/config/mcp", json={
+        "name": "files", "transport": "stdio", "command": "different",
+    })
+    assert updated.status_code == 200
+    assert state.tools.get("files.search") is None
+    assert "files" not in state.mcp_load_status
+    state.tools.register(ToolSpec(
+        "files.search", "search files", {}, lambda: "ok", source="mcp:files",
+    ))
+    state.mcp_load_status["files"] = {"status": "loaded", "fingerprint": "stale"}
     assert (await client.delete("/api/config/mcp/files")).status_code == 200
     assert state.tools.get("files.search") is None
+    assert "files" not in state.mcp_load_status
     assert (await client.delete("/api/config/mcp/files")).status_code == 404
+
+
+async def test_disabled_mcp_load_reports_typed_status(harness):
+    state, client = harness
+    configured = await client.post("/api/config/mcp", json={
+        "name": "disabled", "transport": "stdio",
+        "command": "unused", "enabled": False,
+    })
+    assert configured.status_code == 200
+    loaded = await client.post("/api/config/mcp/disabled/load")
+    assert loaded.status_code == 200
+    assert loaded.json()["status"] == "disabled"
+    assert state.mcp_load_status["disabled"]["status"] == "disabled"
 
 
 async def test_mcp_oauth_token_is_masked_and_server_loads_in_app(
@@ -231,6 +322,27 @@ async def test_mcp_oauth_token_is_masked_and_server_loads_in_app(
     assert public["oauth_token"] == "oau…ue"
     assert public["authenticated"] is True
 
+    preserved = await client.post("/api/config/mcp", json={
+        "name": "gmail", "transport": "http",
+        "url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "oauth_token": public["oauth_token"],
+        "oauth_project": "updated-project",
+    })
+    assert preserved.status_code == 200
+    assert state.config.mcp_servers["gmail"].plain_oauth_token() == (
+        "oauth-secret-token-value"
+    )
+    replacement = await client.post("/api/config/mcp", json={
+        "name": "gmail", "transport": "http",
+        "url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "oauth_token": "replacement-secret-token",
+        "oauth_project": "updated-project",
+    })
+    assert replacement.status_code == 200
+    assert state.config.mcp_servers["gmail"].plain_oauth_token() == (
+        "replacement-secret-token"
+    )
+
     seen = {}
 
     async def fake_load(registry, config):
@@ -243,7 +355,7 @@ async def test_mcp_oauth_token_is_masked_and_server_loads_in_app(
     loaded = await client.post("/api/config/mcp/gmail/load")
     assert loaded.status_code == 200
     assert loaded.json() == {"ok": True, "tools": 9}
-    assert seen == {"names": ["gmail"], "token": "oauth-secret-token-value"}
+    assert seen == {"names": ["gmail"], "token": "replacement-secret-token"}
 
     poisoned = await client.post("/api/config/mcp", json={
         "name": "bad", "command": "npx", "env": {"TOKEN": "enc1:not-ciphertext"},

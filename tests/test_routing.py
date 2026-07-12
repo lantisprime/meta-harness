@@ -326,9 +326,10 @@ def test_runner_for_resolves_decided_member():
     router = mid_pool_router()
     decision = router.decide(Task(task_type=TaskType.CLASSIFY))
     assert router.runner_for(decision).worker_id == decision.worker_id
-    # an unknown worker_id falls back to the tier pool's first member
+    # A vanished decision target must never silently run on another worker.
     decision.worker_id = "ghost"
-    assert router.runner_for(decision).worker_id == "mid-a"
+    with pytest.raises(ValueError, match="decided worker 'ghost'"):
+        router.runner_for(decision)
 
 
 def test_runner_for_empty_tier_raises():
@@ -337,7 +338,7 @@ def test_runner_for_empty_tier_raises():
     router = mid_pool_router()
     decision = RoutingDecision(tier=Tier.FRONTIER, worker_id="ghost", model="",
                                expected_pass_rate=0.0, reason="")
-    with pytest.raises(ValueError, match="no pool serves tier frontier"):
+    with pytest.raises(ValueError, match="no longer available in tier frontier"):
         router.runner_for(decision)
 
 

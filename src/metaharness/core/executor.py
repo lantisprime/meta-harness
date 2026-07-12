@@ -13,7 +13,7 @@ plateau detection across attempts, and step-repetition dedup.
 from __future__ import annotations
 
 import time
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from metaharness.core.budget import Budget, BudgetExceeded, PlateauDetector, action_signature
 from metaharness.core.types import (
@@ -38,6 +38,10 @@ from metaharness.identity.keys import KeyPair
 from metaharness.identity.provenance import ProvenanceLog
 from metaharness.identity.registry import WorkerRegistry
 from metaharness.observability.tracing import tracer
+from metaharness.observability.run_events import (
+    bind_run_event_sink,
+    reset_run_event_sink,
+)
 from metaharness.routing.router import TIER_ORDER, Router
 
 # a reflector turns a failed attempt into advice for the next one
@@ -49,6 +53,7 @@ ExecutionVerifier = Callable[
     [Task, WorkerResult], Awaitable[Optional[VerificationResult]]
 ]
 WorkspaceVerifier = Callable[[str], Awaitable[Optional[VerificationResult]]]
+TaskEventSink = Callable[[str, dict[str, Any]], None]
 
 
 class TaskExecutor:
@@ -97,7 +102,18 @@ class TaskExecutor:
         variant.boundaries = list(task.boundaries) + advice
         return variant
 
-    async def execute(self, task: Task) -> TaskOutcome:
+    async def execute(
+        self, task: Task, *, event_sink: Optional[TaskEventSink] = None
+    ) -> TaskOutcome:
+        """Execute one task, optionally emitting live attempt/verification events.
+
+        The callback is synchronous by design: the workflow journal fsyncs each
+        event before execution moves past the corresponding transition.
+        """
+        def emit(kind: str, payload: dict[str, Any]) -> None:
+            if event_sink is not None:
+                event_sink(kind, payload)
+
         outcome = TaskOutcome(task=task)
         plateau = PlateauDetector()
         seen_signatures: set[str] = set()
@@ -168,12 +184,41 @@ class TaskExecutor:
                     )
                 except ValueError as exc:
                     self._record("task.aborted", {"task_id": task.id, "reason": str(exc)})
+                    # Routing failure is a real execution failure.  Leaving the
+                    # default UNVERIFIED verdict here used to let WorkflowEngine
+                    # record a zero-attempt step as completed.
+                    outcome.final_verdict = Verdict.FAIL
                     break
 
                 variant = self._attempt_task(task_for_attempts, advice)
                 runner = self.router.runner_for(decision)
-                result = await runner.run(variant)
+                assignment = {
+                    "n": n,
+                    "worker_id": decision.worker_id,
+                    "model": decision.model,
+                    "tier": decision.tier.value,
+                    "requested_role": task.role,
+                    "requested_capabilities": list(task.required_capabilities),
+                    "requested_worker_id": task.worker_id,
+                }
+                emit("attempt.assigned", assignment)
+                emit("attempt.started", assignment)
+                tool_event_sink = (
+                    (lambda kind, payload: emit(kind, {"n": n, **payload}))
+                    if event_sink is not None else None
+                )
+                event_token = bind_run_event_sink(tool_event_sink)
+                try:
+                    result = await runner.run(variant)
+                finally:
+                    reset_run_event_sink(event_token)
                 result.task_id = task.id
+                emit("verification.started", {
+                    **assignment,
+                    "worker_id": result.worker_id,
+                    "model": result.model,
+                    "tier": result.tier.value,
+                })
 
                 # charge always, fail truthfully (issue #5): the deterministic
                 # verification (authenticity, then verify_output) is computed
@@ -230,6 +275,9 @@ class TaskExecutor:
                             verdict=Verdict.FAIL, score=0.0, detail=str(exc),
                             failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
                         )
+                    emit("verification.completed", self._verification_event(
+                        n, result, verification
+                    ))
                     outcome.attempts.append(Attempt(n=n, result=result, verification=verification))
                     self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
                     break
@@ -265,6 +313,9 @@ class TaskExecutor:
                             verdict=Verdict.FAIL, score=0.0, detail=str(exc),
                             failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
                         )
+                        emit("verification.completed", self._verification_event(
+                            n, result, verification
+                        ))
                         outcome.attempts.append(
                             Attempt(n=n, result=result, verification=verification)
                         )
@@ -302,6 +353,9 @@ class TaskExecutor:
                             verdict=Verdict.FAIL, score=0.0, detail=str(exc),
                             failure_mode=MASTMode.BUDGET_EXCEEDED, scorer="budget",
                         )
+                        emit("verification.completed", self._verification_event(
+                            n, result, verification
+                        ))
                         outcome.attempts.append(Attempt(n=n, result=result, verification=verification))
                         self._record("task.budget_exceeded", {"task_id": task.id, "detail": str(exc)})
                         break
@@ -333,6 +387,9 @@ class TaskExecutor:
                     )
 
                 attempt = Attempt(n=n, result=result, verification=verification)
+                emit("verification.completed", self._verification_event(
+                    n, result, verification
+                ))
                 outcome.attempts.append(attempt)
                 outcome.total_cost_usd += result.cost_usd
                 self._record(
@@ -387,7 +444,19 @@ class TaskExecutor:
                 # "failure evidence" rationale does not apply. After the retry
                 # is consumed, another timeout escalates for progress/cost
                 # control even if that second route happened to be exploratory.
-                if timeout_failure:
+                if task.worker_id:
+                    # A hard pin is an execution contract, not a routing hint:
+                    # every retry stays on that exact eligible identity. Never
+                    # exclude its tier or substitute an unrelated higher pool.
+                    if timeout_failure and n < task.max_attempts:
+                        self._record("task.timeout_retry", {
+                            "task_id": task.id,
+                            "after_attempt": n,
+                            "tier": decision.tier.value,
+                            "model": result.model,
+                            "worker_id": task.worker_id,
+                        })
+                elif timeout_failure:
                     if decision.tier not in timeout_retry_used:
                         timeout_retry_used.add(decision.tier)
                         if n < task.max_attempts:
@@ -443,3 +512,25 @@ class TaskExecutor:
                 except Exception:  # observation must never fail the task itself
                     pass
             return outcome
+
+    @staticmethod
+    def _verification_event(
+        n: int, result: WorkerResult, verification: VerificationResult
+    ) -> dict[str, Any]:
+        """Stable run-event payload shared by live and legacy projections."""
+        return {
+            "n": n,
+            "worker_id": result.worker_id,
+            "model": result.model,
+            "tier": result.tier.value,
+            "verdict": verification.verdict.value,
+            "scorer": verification.scorer,
+            "detail": verification.detail[:300],
+            "failure_mode": (
+                verification.failure_mode.value
+                if verification.failure_mode else None
+            ),
+            "latency_s": round(result.latency_s, 2),
+            "verification_latency_s": round(verification.latency_s, 2),
+            "timed_out": result.timed_out,
+        }

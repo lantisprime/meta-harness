@@ -41,6 +41,11 @@ class StepSpec(BaseModel):
     boundaries: list[str] = Field(default_factory=list)
     success_check: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
+    role: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
+    required_capabilities: list[str] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    worker_id: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     max_attempts: int = 3
     depends_on: list[str] = Field(default_factory=list)
     hitl: bool = False    # require human approval at hitl_timing
@@ -51,6 +56,17 @@ class StepSpec(BaseModel):
     # "negate": bool} — evaluated deterministically against the referenced step's
     # output at advance-time; unmet -> this step is journaled as skipped
     when: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _assignment_is_unambiguous(self) -> "StepSpec":
+        self.role = (self.role.strip() or None) if self.role else None
+        self.worker_id = (self.worker_id.strip() or None) if self.worker_id else None
+        self.required_capabilities = list(dict.fromkeys(
+            value.strip() for value in self.required_capabilities if value.strip()
+        ))
+        if self.worker_id and self.tier_hint is not None:
+            raise ValueError("worker_id and tier_hint cannot be combined")
+        return self
 
     def to_task(self, resolved_inputs: dict[str, Any]) -> Task:
         boundaries = list(self.boundaries)
@@ -69,6 +85,9 @@ class StepSpec(BaseModel):
             boundaries=boundaries,
             success_check=self.success_check,
             tier_hint=self.tier_hint,
+            role=self.role,
+            required_capabilities=list(self.required_capabilities),
+            worker_id=self.worker_id,
             max_attempts=self.max_attempts,
             tools=list(self.tools),
             requires_execution_evidence=self.requires_execution_evidence,

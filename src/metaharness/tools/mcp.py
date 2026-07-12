@@ -9,12 +9,23 @@ Requires the official `mcp` package (pip install 'metaharness[mcp]').
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from metaharness.config import HarnessConfig, MCPServerConfig
 from metaharness.tools.registry import ToolError, ToolRegistry, ToolSpec
 
 _CALL_TIMEOUT_S = 60.0
+
+
+def mcp_config_fingerprint(server: MCPServerConfig) -> str:
+    """A non-reversible identity for the exact config whose tools were loaded."""
+    payload = json.dumps(
+        server.model_dump(mode="json"), sort_keys=True,
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _require_mcp():
@@ -88,17 +99,27 @@ async def load_mcp_tools(registry: ToolRegistry, config: HarnessConfig) -> dict[
     in the report (and the server's tools stay absent), never silent."""
     report: dict[str, Any] = {}
     for name, server in config.mcp_servers.items():
-        if not server.enabled:
-            report[name] = {"ok": False, "detail": "disabled"}
-            continue
         source = f"mcp:{name}"
+        # Stale capabilities are more dangerous than temporary unavailability:
+        # clear them before every disabled/load/failure/zero-tools branch.
         registry.unregister_source(source)
+        fingerprint = mcp_config_fingerprint(server)
+        if not server.enabled:
+            report[name] = {
+                "ok": False, "status": "disabled", "detail": "disabled",
+                "tools": 0, "fingerprint": fingerprint,
+            }
+            continue
         try:
             _require_mcp()
             async with _session_cm(server) as session:
                 listing = await session.list_tools()
         except Exception as exc:
-            report[name] = {"ok": False, "detail": f"{type(exc).__name__}: connection failed"}
+            report[name] = {
+                "ok": False, "status": "load_failed",
+                "detail": f"{type(exc).__name__}: connection failed",
+                "tools": 0, "fingerprint": fingerprint,
+            }
             continue
         count = 0
         for tool in listing.tools:
@@ -116,5 +137,14 @@ async def load_mcp_tools(registry: ToolRegistry, config: HarnessConfig) -> dict[
                 ) if tool.annotations else {}),
             ))
             count += 1
-        report[name] = {"ok": True, "tools": count}
+        if count == 0:
+            report[name] = {
+                "ok": False, "status": "zero_tools", "detail": "zero tools",
+                "tools": 0, "fingerprint": fingerprint,
+            }
+        else:
+            report[name] = {
+                "ok": True, "status": "loaded", "tools": count,
+                "fingerprint": fingerprint,
+            }
     return report

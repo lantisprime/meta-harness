@@ -3,6 +3,11 @@ start a run over HTTP, pause at the HITL gate, approve over HTTP, watch it
 complete; provenance chain verified through the endpoint."""
 from __future__ import annotations
 
+import asyncio
+import io
+import json
+import zipfile
+
 import httpx
 import pytest
 
@@ -67,6 +72,8 @@ async def test_full_run_over_http(client):
     assert any(r["run_id"] == run_id for r in runs)
     detail = (await client.get(f"/api/runs/{run_id}")).json()
     assert any(e["kind"] == "hitl.requested" for e in detail["journal"])
+    assert any(e["kind"] == "attempt.assigned" for e in detail["events"])
+    assert any(e["kind"] == "verification.started" for e in detail["events"])
 
     # approving the wrong step conflicts
     conflict = await client.post(f"/api/runs/{run_id}/approval",
@@ -78,6 +85,66 @@ async def test_full_run_over_http(client):
                              json={"step_id": "notify", "approved": True})
     assert resp.status_code == 200
     assert resp.json()["status"] == "completed"
+
+    package = await client.get(f"/api/runs/{run_id}/package")
+    archive = zipfile.ZipFile(io.BytesIO(package.content))
+    canonical = [json.loads(line) for line in archive.read("journal.jsonl").splitlines()]
+    legacy = [json.loads(line) for line in archive.read("journal.legacy.jsonl").splitlines()]
+    assert any(event["kind"] == "attempt.assigned" for event in canonical)
+    assert any(event["kind"] == "step.attempt" for event in legacy)
+
+
+async def test_background_advance_exception_becomes_durable_run_failure(
+    wired_state, monkeypatch
+):
+    async def explode(_run_id):
+        raise RuntimeError("background exploded")
+
+    monkeypatch.setattr(wired_state.engine, "advance", explode)
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        response = await c.post("/api/runs", json={
+            "workflow_yaml": "name: x\nsteps:\n- id: work\n  objective: work\n",
+            "wait": False,
+        })
+        run_id = response.json()["run_id"]
+        await asyncio.sleep(0)
+        detail = (await c.get(f"/api/runs/{run_id}")).json()
+    assert detail["state"]["status"] == "failed"
+    terminal = [event for event in detail["events"] if event["kind"] == "run.failed"]
+    assert len(terminal) == 1 and "background exploded" in terminal[0]["payload"]["reason"]
+
+
+async def test_web_engine_rechecks_tool_registry_after_run_creation(wired_state):
+    app = create_app(wired_state)
+    transport = httpx.ASGITransport(app=app)
+    workflow = """
+name: tool-drift
+steps:
+  - id: gate
+    objective: wait
+    hitl: true
+  - id: calculate
+    objective: calculate
+    depends_on: [gate]
+    tools: [calculator]
+"""
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        run = (await c.post("/api/runs", json={"workflow_yaml": workflow})).json()
+        assert run["awaiting"] == "gate"
+        wired_state.tools.unregister_source("builtin")
+        response = await c.post(
+            f"/api/runs/{run['run_id']}/approval",
+            json={"step_id": "gate", "approved": True},
+        )
+        assert response.json()["status"] == "failed"
+        detail = (await c.get(f"/api/runs/{run['run_id']}")).json()
+    failed = next(
+        event for event in detail["events"]
+        if event["kind"] == "step.failed" and event["step_id"] == "calculate"
+    )
+    assert failed["payload"]["missing_tools"] == ["calculator"]
 
 
 async def test_post_artifact_gate_exposes_completed_output_over_http(client):
@@ -691,3 +758,413 @@ async def test_optimization_payload_carries_code_ref_for_code_candidates(wired_s
     cands = {x["id"]: x for x in suites[0]["candidates"]}
     assert cands["c0002"]["code_ref"] == "candidates/c0002/harness.py"
     assert "code_ref" not in cands["c0001"]
+
+
+# -- blueprint-dependent exact-version integration regressions -----------------
+
+
+@pytest.fixture
+def wired_state_with_store(tmp_path) -> HarnessState:
+    state = HarnessState()
+    state.enable_persistence(tmp_path / "store")
+    (tmp_path / "journals").mkdir(parents=True, exist_ok=True)
+    kp = KeyPair.generate()
+    perfect = {t: 1.0 for t in TaskType}
+    runner = MockLLMWorker("w-small", Tier.SMALL, keypair=kp, seed=1, skills=perfect)
+    state.register_worker(runner, kp, tiers=["small"])
+    state.wire({Tier.SMALL: runner}, journal_dir=tmp_path / "journals")
+    return state
+
+
+def _draft_content(name: str = "BP"):
+    from metaharness.blueprints import BlueprintContent, InputSpec
+    from metaharness.workflows.dsl import WorkflowSpec
+    return BlueprintContent(
+        name=name,
+        description="test blueprint",
+        workflow=WorkflowSpec.model_validate({
+            "name": "bp-run",
+            "steps": [{
+                "id": "classify",
+                "task_type": "classify",
+                "objective": "Classify severity.",
+                "inputs": {"labels": ["low", "high"]},
+                "success_check": {"equals": "high"},
+            }],
+        }),
+        inputs=[
+            InputSpec(name="labels", schema={"type": "array"}),
+            InputSpec(name="extra", schema={"type": "string"}),
+        ],
+        default_context={"labels": ["low", "high"]},
+    )
+
+
+async def test_blueprint_catalog_draft_version_fork_archive_restore(wired_state_with_store):
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        # create draft
+        resp = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "test-bp",
+            "content": _draft_content("v1").model_dump(mode="json"),
+        })
+        assert resp.status_code == 201
+        draft = resp.json()
+        assert draft["revision"] == 1
+
+        # get draft
+        assert (await c.get("/api/blueprint-drafts/test-bp")).json()["name"] == "v1"
+
+        # update draft
+        resp = await c.patch("/api/blueprint-drafts/test-bp", json={
+            "content": _draft_content("v1-updated").model_dump(mode="json"),
+            "expected_revision": 1,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["revision"] == 2
+
+        # publish
+        resp = await c.post("/api/blueprint-drafts/test-bp/publish", json={"expected_revision": 2})
+        assert resp.status_code == 200
+        v1 = resp.json()
+        assert v1["version"] == 1
+
+        # get catalog + version
+        assert (await c.get("/api/blueprints/test-bp")).json()["latest_version"] == 1
+        assert (await c.get("/api/blueprints/test-bp/versions/1")).json()["version"] == 1
+
+        # fork
+        resp = await c.post("/api/blueprints/test-bp/fork", json={
+            "new_id": "forked-bp", "source_version": 1,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["source"] == {"id": "test-bp", "version": 1}
+
+        # archive / restore
+        assert (await c.post("/api/blueprints/test-bp/archive")).json()["archived_at"] is not None
+        listed = (await c.get("/api/blueprints")).json()
+        assert all(e["id"] != "test-bp" for e in listed)
+        assert (await c.post("/api/blueprints/test-bp/restore")).json()["archived_at"] is None
+        assert any(e["id"] == "test-bp" for e in (await c.get("/api/blueprints")).json())
+
+        # metadata patch
+        assert (await c.patch("/api/blueprints/test-bp/metadata", json={
+            "display_name": "Renamed"})).json()["display_name"] == "Renamed"
+
+
+async def test_blueprint_http_catalog_unifies_builtins_owned_drafts_and_exact_versions(
+    wired_state_with_store,
+):
+    """The UI consumes the facade projection, never raw store catalog entries."""
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        listed = {item["id"]: item for item in (await c.get("/api/blueprints")).json()}
+        assert listed["research"] == {
+            "id": "research",
+            "display_name": "Research & report",
+            "origin": "builtin",
+            "archived": False,
+            "latest_version": 1,
+            "has_draft": False,
+            "source": None,
+            "edit_mode": "fork",
+            "stage_count": 3,
+            "tool_ids": ["grep", "list_files", "read_file", "web_fetch"],
+            "supported_actions": ["run", "edit", "fork", "versions"],
+        }
+        assert (await c.get("/api/blueprints/research")).json()["origin"] == "builtin"
+        assert [v["version"] for v in (
+            await c.get("/api/blueprints/research/versions")
+        ).json()] == [1]
+        assert (await c.get("/api/blueprints/research/versions/1")).json()["name"] == "Research & report"
+
+        # Local UI requests never need to know or submit an owner.
+        created = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "local-draft",
+            "content": _draft_content("Local draft").model_dump(mode="json"),
+        })
+        assert created.status_code == 201, created.text
+        assert created.json()["owner"] == "local-user"
+        assert [d["id"] for d in (await c.get("/api/blueprint-drafts")).json()] == [
+            "local-draft"
+        ]
+
+        fork = await c.post("/api/blueprints/research/fork", json={
+            "new_id": "my-research",
+            "source_version": 1,
+            "display_name": "My research",
+        })
+        assert fork.status_code == 200, fork.text
+        assert fork.json()["owner"] == "local-user"
+        assert fork.json()["source"] == {"id": "research", "version": 1}
+
+
+async def test_blueprint_http_boundary_reserves_builtins_owns_principal_and_is_strict(
+    wired_state_with_store,
+):
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    content = _draft_content().model_dump(mode="json")
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        reserved = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "research", "content": content,
+        })
+        assert reserved.status_code == 409
+        assert "reserved" in reserved.json()["detail"]
+        assert {item["id"] for item in (await c.get("/api/blueprints")).json()} >= {
+            "research", "software-engineering"
+        }
+
+        for body in [
+            {"blueprint_id": "owned-by-client", "content": content, "owner": "mallory"},
+            {"blueprint_id": "strict-base", "base_version": True},
+            {"blueprint_id": "strict-base", "base_version": "1"},
+            {"blueprint_id": "strict-base", "base_version": 1.0},
+        ]:
+            assert (await c.post("/api/blueprint-drafts", json=body)).status_code == 422
+
+        for value in (True, "1", 1.0, 0):
+            assert (await c.post("/api/blueprints/research/fork", json={
+                "new_id": "strict-fork", "source_version": value,
+            })).status_code == 422
+            assert (await c.post("/api/blueprint-drafts/missing/publish", json={
+                "expected_revision": value,
+            })).status_code == 422
+
+
+async def test_archived_blueprint_http_surface_only_allows_versions_and_restore(
+    wired_state_with_store,
+):
+    store = wired_state_with_store.blueprint_store
+    draft = store.create_draft("archived-api", _draft_content(), owner="local-user")
+    version = store.publish("archived-api", expected_revision=draft.revision)
+    pending = store.create_draft_from_version(version.ref, owner="local-user")
+    store.archive("archived-api")
+
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        item = (await c.get("/api/blueprints/archived-api")).json()
+        assert item["supported_actions"] == ["versions", "restore"]
+        assert (await c.patch("/api/blueprint-drafts/archived-api", json={
+            "content": _draft_content("blocked").model_dump(mode="json"),
+            "expected_revision": pending.revision,
+        })).status_code == 409
+        assert (await c.post("/api/blueprints/archived-api/fork", json={
+            "new_id": "blocked-fork", "source_version": 1,
+        })).status_code == 409
+        assert (await c.get("/api/blueprints/archived-api/versions/1")).status_code == 200
+        assert (await c.post("/api/blueprints/readiness", json={
+            "blueprint": {"id": "archived-api", "version": 1}, "context": {},
+        })).status_code == 409
+        before = len((await c.get("/api/runs")).json())
+        assert (await c.post("/api/runs", json={
+            "blueprint": {"id": "archived-api", "version": 1}, "context": {},
+        })).status_code == 409
+        assert len((await c.get("/api/runs")).json()) == before
+        builtin = await c.post("/api/blueprints/readiness", json={
+            "blueprint": {"id": "research", "version": 1},
+            "context": {"goal": "still runnable"},
+        })
+        assert builtin.status_code == 200
+        assert (await c.post("/api/blueprints/archived-api/restore")).status_code == 200
+        assert (await c.patch("/api/blueprint-drafts/archived-api", json={
+            "content": _draft_content("restored").model_dump(mode="json"),
+            "expected_revision": pending.revision,
+        })).status_code == 200
+
+
+async def test_run_from_exact_blueprint_version_merges_defaults(wired_state_with_store):
+    store = wired_state_with_store.blueprint_store
+    draft = store.create_draft("run-bp", _draft_content(), owner="alice")
+    version = store.publish("run-bp", expected_revision=draft.revision)
+
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/runs", json={
+            "blueprint": {"id": "run-bp", "version": 1},
+            "context": {"extra": "value"},
+            "wait": True,
+        })
+        assert resp.status_code == 200, resp.text
+        run = resp.json()
+        assert run["blueprint_ref"] == {"id": "run-bp", "version": 1}
+        assert run["blueprint_snapshot"]["name"] == "BP"
+        assert run["context"] == {"labels": ["low", "high"], "extra": "value"}
+        assert run["status"] == "completed"
+
+        # journal embeds blueprint ref and full snapshot
+        detail = (await c.get(f"/api/runs/{run['run_id']}")).json()
+        started = next(e for e in detail["journal"] if e["kind"] == "run.started")
+        assert started["payload"]["blueprint_ref"] == {"id": "run-bp", "version": 1}
+        assert started["payload"]["blueprint_snapshot"]["name"] == "BP"
+
+
+async def test_run_rejects_multiple_sources_and_no_source(wired_state_with_store):
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        for body in [
+            {"blueprint": {"id": "x", "version": 1}, "workflow_yaml": "name: x\nsteps: []"},
+            {"blueprint": {"id": "x", "version": 1}, "workflow": {"name": "x", "steps": []}},
+            {"workflow_yaml": "name: x\nsteps: []", "workflow": {"name": "x", "steps": []}},
+            {"context": {}},
+        ]:
+            resp = await c.post("/api/runs", json=body)
+            assert resp.status_code == 422, (body, resp.text)
+            assert "exactly one source" in resp.json()["detail"]
+
+
+async def test_legacy_yaml_and_json_runs_unchanged(wired_state_with_store):
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yaml_resp = await c.post("/api/runs", json={
+            "workflow_yaml": WORKFLOW_YAML, "context": {}, "wait": False})
+        assert yaml_resp.status_code == 200
+        assert yaml_resp.json()["blueprint_ref"] is None
+        assert yaml_resp.json()["blueprint_snapshot"] is None
+
+        json_resp = await c.post("/api/runs", json={
+            "workflow": {
+                "name": "legacy-json",
+                "steps": [{"id": "s", "objective": "o"}],
+            },
+            "context": {},
+            "wait": False,
+        })
+        assert json_resp.status_code == 200
+        assert json_resp.json()["blueprint_ref"] is None
+
+
+async def test_v1_run_still_works_after_v2_published(wired_state_with_store):
+    store = wired_state_with_store.blueprint_store
+    draft = store.create_draft("versioned-bp", _draft_content("v1"), owner="alice")
+    v1 = store.publish("versioned-bp", expected_revision=draft.revision)
+    draft2 = store.create_draft_from_version(v1.ref, owner="alice")
+    updated = store.update_draft(
+        "versioned-bp", _draft_content("v2"), expected_revision=draft2.revision)
+    store.publish("versioned-bp", expected_revision=updated.revision)
+
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/runs", json={
+            "blueprint": {"id": "versioned-bp", "version": 1},
+            "wait": True,
+        })
+        assert resp.status_code == 200
+        run = resp.json()
+        assert run["blueprint_ref"] == {"id": "versioned-bp", "version": 1}
+        assert run["blueprint_snapshot"]["name"] == "v1"
+        assert run["status"] == "completed"
+
+
+async def test_package_and_replay_after_catalog_removal(wired_state_with_store, tmp_path):
+    store = wired_state_with_store.blueprint_store
+    draft = store.create_draft("remove-bp", _draft_content("remove-me"), owner="alice")
+    version = store.publish("remove-bp", expected_revision=draft.revision)
+
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/api/runs", json={
+            "blueprint": {"id": "remove-bp", "version": 1},
+            "wait": True,
+        })
+        run_id = resp.json()["run_id"]
+
+    # remove catalog entry and immutable version, but keep the run journal
+    from metaharness.workflows import WorkflowEngine
+    journal_path = tmp_path / "journals" / f"{run_id}.jsonl"
+    catalog_path = store.catalog_root / "remove-bp.json"
+    if catalog_path.exists():
+        catalog_path.unlink()
+    version_path = store.versions_root / "remove-bp" / "versions" / "1.json"
+    if version_path.exists():
+        version_path.unlink()
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        # packaging still works because the snapshot is embedded in the run state
+        pkg_resp = await c.get(f"/api/runs/{run_id}/package")
+        assert pkg_resp.status_code == 200
+        import io, json, zipfile
+        zf = zipfile.ZipFile(io.BytesIO(pkg_resp.content))
+        assert "blueprint.json" in zf.namelist()
+        assert json.loads(zf.read("blueprint.json"))["name"] == "remove-me"
+        manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["blueprint_ref"] == {"id": "remove-bp", "version": 1}
+        assert manifest["snapshot_digest"] is not None
+
+    # resume from journal still works because snapshot is embedded
+    engine2, resumed = WorkflowEngine.resume(journal_path, wired_state_with_store.engine.executor)
+    assert resumed.blueprint_ref == {"id": "remove-bp", "version": 1}
+    assert resumed.blueprint_snapshot["name"] == "remove-me"
+    assert resumed.snapshot_digest is not None
+    final = await engine2.advance(resumed.run_id)
+    assert final.status.value == "completed"
+
+
+async def test_blueprint_api_error_mapping(tmp_path_factory):
+    """Centralized error mapping: disabled store -> 503, missing versions -> 404,
+    invalid slugs/versions/blank owner-display -> 422, conflicts -> 409."""
+    # disabled store
+    state = HarnessState()  # no blueprint_store enabled, engine not wired
+    app = create_app(state)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        assert (await c.get("/api/blueprints")).status_code == 503
+
+    # enabled store: shape errors
+    state2 = HarnessState()
+    state2.enable_persistence(tmp_path_factory.mktemp("errors"))
+    app2 = create_app(state2)
+    transport2 = httpx.ASGITransport(app=app2)
+    async with httpx.AsyncClient(transport=transport2, base_url="http://test") as c:
+        assert (await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "bad id", "content": _draft_content().model_dump(mode="json"),
+            "owner": "alice"})).status_code == 422
+        assert (await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "ok-id", "content": _draft_content().model_dump(mode="json"),
+            "owner": ""})).status_code == 422
+        assert (await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "ok-id", "base_version": 0})).status_code == 422
+        assert (await c.patch("/api/blueprints/ok-id/metadata", json={
+            "display_name": ""})).status_code == 422
+        assert (await c.get("/api/blueprints/missing/versions/1")).status_code == 404
+
+
+async def test_create_draft_from_base_version(wired_state_with_store):
+    """POST /api/blueprint-drafts accepts an exact base_version and creates a
+    draft seeded from that version."""
+    store = wired_state_with_store.blueprint_store
+    draft = store.create_draft("base-bp", _draft_content("v1"), owner="alice")
+    version = store.publish("base-bp", expected_revision=draft.revision)
+
+    app = create_app(wired_state_with_store)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        # both content and base_version -> 422
+        both = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "base-bp",
+            "content": _draft_content("v2").model_dump(mode="json"),
+            "base_version": 1,
+        })
+        assert both.status_code == 422
+
+        # neither -> 422
+        neither = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "base-bp"})
+        assert neither.status_code == 422
+
+        # base_version only -> draft from version
+        resp = await c.post("/api/blueprint-drafts", json={
+            "blueprint_id": "base-bp", "base_version": 1})
+        assert resp.status_code == 201
+        created = resp.json()
+        assert created["name"] == "v1"
+        assert created["base_version"] == 1
+        assert created["owner"] == "local-user"

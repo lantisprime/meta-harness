@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from typing import Callable, Optional
 from metaharness.core.types import Task, TaskType, Tier, WorkerResult
 from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
+from metaharness.routing.eligibility import child_host_environment
 
 WORKSPACES_DIR = Path.home() / ".metaharness" / "workspaces"
 
@@ -344,13 +346,23 @@ class CodingAgentWorker(BaseRunner):
         workspace = self._workspace_for(task)
         prompt = _render_prompt(task)
         argv, stdin_text = self.adapter.build(self, prompt, workspace)
-        env = {**os.environ, **self.extra_env}
+        # Carry the full outer-host chain into nested harnesses. This blocks
+        # direct recursion and cycles such as Codex -> Pi -> Codex before spawn.
+        env = {
+            **os.environ,
+            **self.extra_env,
+            **child_host_environment(self.cli),
+        }
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=workspace,
                 env=env,
+                # Coding CLIs routinely spawn shells, tests, and helper agents.
+                # Give the attempt its own group so timeout/cancellation cannot
+                # leave descendants mutating the workspace after escalation.
+                start_new_session=True,
                 stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -365,10 +377,12 @@ class CodingAgentWorker(BaseRunner):
                 timeout=eff,
             )
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await self._terminate_process_group(proc)
             # :g not :.0f — subsecond test timeouts (e.g. 0.5) must not render as "0s"
             raise WorkerTimeout(f"{self.cli}: timed out after {eff:g}s", timeout_s=eff)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._terminate_process_group(proc))
+            raise
 
         stdout = stdout_b.decode(errors="replace")
         stderr = stderr_b.decode(errors="replace")
@@ -397,3 +411,30 @@ class CodingAgentWorker(BaseRunner):
             cost_usd=cost,
             workspace_root=str(workspace),
         )
+
+    @staticmethod
+    async def _terminate_process_group(proc: asyncio.subprocess.Process) -> None:
+        """Terminate and reap an attempt's complete POSIX process group."""
+        if proc.returncode is not None:
+            await proc.wait()
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+        group_alive = True
+        try:
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            group_alive = False
+        if not group_alive:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.wait()
