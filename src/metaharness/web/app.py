@@ -83,6 +83,7 @@ from metaharness.portable import PortableDeploymentOptions, PortableTarget, buil
 from metaharness.web.dashboard import DASHBOARD_HTML
 from metaharness.web.state import HarnessState
 from metaharness.workflows.dsl import load_workflow
+from metaharness.workflows.engine import RunArchiveConflict
 from metaharness.workflows.planner import plan_workflow
 
 
@@ -914,7 +915,7 @@ def create_app(state: HarnessState) -> FastAPI:
             raise HTTPException(502, str(exc))
 
     @app.get("/api/runs")
-    async def runs() -> list[dict[str, Any]]:
+    async def runs(include_archived: bool = False) -> list[dict[str, Any]]:
         if state.engine is None:
             return []
         out = []
@@ -922,6 +923,8 @@ def create_app(state: HarnessState) -> FastAPI:
             try:
                 _spec, fresh, events, entries = await state.engine.inspect(r.run_id)
             except KeyError:
+                continue
+            if fresh.archived_at is not None and not include_archived:
                 continue
             rec = fresh.model_dump(mode="json")
             # The journal is the durable clock: first entry = run started,
@@ -931,6 +934,29 @@ def create_app(state: HarnessState) -> FastAPI:
             rec["updated_at"] = clock[-1].at if clock else None
             out.append(rec)
         return out
+
+    async def _set_run_archived(run_id: str, archived: bool) -> dict[str, Any]:
+        if state.engine is None:
+            raise HTTPException(404, f"unknown run {run_id}")
+        try:
+            result = await (
+                state.engine.archive(run_id)
+                if archived
+                else state.engine.restore(run_id)
+            )
+        except (KeyError, AttributeError):
+            raise HTTPException(404, f"unknown run {run_id}") from None
+        except RunArchiveConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        return result.model_dump(mode="json")
+
+    @app.post("/api/runs/{run_id}/archive")
+    async def archive_run(run_id: str) -> dict[str, Any]:
+        return await _set_run_archived(run_id, True)
+
+    @app.post("/api/runs/{run_id}/restore")
+    async def restore_run(run_id: str) -> dict[str, Any]:
+        return await _set_run_archived(run_id, False)
 
     @app.get("/api/runs/{run_id}")
     async def run_detail(run_id: str) -> dict[str, Any]:
@@ -1363,6 +1389,9 @@ def create_app(state: HarnessState) -> FastAPI:
         followup, source, fallback_reason = await plan_followup(
             goal, spec, run_state, state.planner_runner(),
             context=run_state.context, tools=state.tools)
+        prior_summary = summarize_run(self_spec, run_state)
+        followup_context = dict(run_state.context)
+        followup_context.setdefault("prior_run_summary", prior_summary)
         state.provenance.append(
             "orchestrator", "workflow.followup_planned",
             {"source_run": run_id, "plan_source": source,
@@ -1373,7 +1402,8 @@ def create_app(state: HarnessState) -> FastAPI:
         return {"workflow": followup.model_dump(mode="json"),
                 "plan_source": source,
                 "fallback_reason": fallback_reason,
-                "prior_summary": summarize_run(self_spec, run_state)}
+                "prior_summary": prior_summary,
+                "context": followup_context}
 
     def _value_hazard_problems(spec) -> list[str]:
         """Issue #10 intake-boundary gate: WorkflowSpec.model_validate only

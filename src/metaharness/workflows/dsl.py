@@ -23,6 +23,7 @@ upstream step's verified output.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -68,8 +69,14 @@ class StepSpec(BaseModel):
             raise ValueError("worker_id and tier_hint cannot be combined")
         return self
 
-    def to_task(self, resolved_inputs: dict[str, Any]) -> Task:
-        boundaries = list(self.boundaries)
+    def to_task(
+        self,
+        resolved_inputs: dict[str, Any],
+        *,
+        objective: str | None = None,
+        boundaries: list[str] | None = None,
+    ) -> Task:
+        boundaries = list(self.boundaries if boundaries is None else boundaries)
         # a one_of check is a format contract the worker deserves to see spelled
         # out — exact-match verification punishes prose around a right answer
         if self.success_check and "one_of" in self.success_check:
@@ -79,7 +86,7 @@ class StepSpec(BaseModel):
             )
         return Task(
             task_type=self.task_type,
-            objective=self.objective,
+            objective=self.objective if objective is None else objective,
             inputs=resolved_inputs,
             output_schema=self.output_schema,
             boundaries=boundaries,
@@ -192,6 +199,22 @@ def resolve_reference(value: Any, context: dict[str, Any], outputs: dict[str, An
         else:
             raise ValueError(f"reference {value!r}: {key!r} not found")
     return node
+
+
+_INLINE_REF_RE = re.compile(r"\$(context(?:\.[A-Za-z0-9_-]+)+|steps\.[A-Za-z0-9_-]+\.output(?:\.[A-Za-z0-9_-]+)*)")
+
+
+def resolve_text_references(text: str, context: dict[str, Any], outputs: dict[str, Any]) -> str:
+    """Render references embedded in human-facing delegation text.
+
+    Step inputs keep exact-reference semantics so structured values stay
+    structured. Objectives and boundaries are prompt text, so embedded values
+    are stringified loudly before the task reaches a worker.
+    """
+    def substitute(match: re.Match[str]) -> str:
+        return str(resolve_reference("$" + match.group(1), context, outputs))
+
+    return _INLINE_REF_RE.sub(substitute, text)
 
 
 def when_satisfied(when: dict[str, Any], outputs: dict[str, Any]) -> bool:

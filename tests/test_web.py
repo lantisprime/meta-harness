@@ -109,8 +109,16 @@ async def test_background_advance_exception_becomes_durable_run_failure(
             "wait": False,
         })
         run_id = response.json()["run_id"]
-        await asyncio.sleep(0)
-        detail = (await c.get(f"/api/runs/{run_id}")).json()
+        # The background advance task is scheduled on the same event loop as the
+        # ASGI transport, so a single yield may not let it run to completion.
+        # Poll the detail endpoint with a bounded deadline instead of sleeping
+        # unconditionally — keeps the assertion deterministic without padding.
+        deadline = asyncio.get_event_loop().time() + 2.0
+        while asyncio.get_event_loop().time() < deadline:
+            detail = (await c.get(f"/api/runs/{run_id}")).json()
+            if detail["state"]["status"] == "failed":
+                break
+            await asyncio.sleep(0.01)
     assert detail["state"]["status"] == "failed"
     terminal = [event for event in detail["events"] if event["kind"] == "run.failed"]
     assert len(terminal) == 1 and "background exploded" in terminal[0]["payload"]["reason"]
@@ -247,6 +255,59 @@ async def test_routing_endpoint_exposes_pools_skills_and_tallies(tmp_path):
 
 async def test_unknown_run_404(client):
     assert (await client.get("/api/runs/run_nope")).status_code == 404
+    assert (await client.post("/api/runs/run_nope/archive")).status_code == 404
+    assert (await client.post("/api/runs/run_nope/restore")).status_code == 404
+
+
+async def test_run_archive_filters_metadata_and_keeps_detail_package(client):
+    started = await client.post(
+        "/api/runs", json={"workflow_yaml": WORKFLOW_YAML, "context": {}}
+    )
+    run_id = started.json()["run_id"]
+    conflict = await client.post(f"/api/runs/{run_id}/archive")
+    assert conflict.status_code == 409
+    assert "completed or failed" in conflict.text
+
+    approved = await client.post(
+        f"/api/runs/{run_id}/approval",
+        json={"step_id": "notify", "approved": True},
+    )
+    assert approved.json()["status"] == "completed"
+    detail_before = (await client.get(f"/api/runs/{run_id}")).json()
+    package_before = await client.get(f"/api/runs/{run_id}/package")
+    before_zip = zipfile.ZipFile(io.BytesIO(package_before.content))
+    journal_before = before_zip.read("journal.jsonl")
+
+    archived = await client.post(f"/api/runs/{run_id}/archive")
+    assert archived.status_code == 200
+    assert archived.json()["archived_at"] is not None
+    assert run_id not in {run["run_id"] for run in (await client.get("/api/runs")).json()}
+    all_runs = (await client.get("/api/runs?include_archived=true")).json()
+    archived_record = next(run for run in all_runs if run["run_id"] == run_id)
+    assert archived_record["archived_at"] == archived.json()["archived_at"]
+    assert (await client.get(f"/api/runs/{run_id}")).json()["journal"] == detail_before["journal"]
+    package_after = await client.get(f"/api/runs/{run_id}/package")
+    assert package_after.status_code == 200
+    after_zip = zipfile.ZipFile(io.BytesIO(package_after.content))
+    assert after_zip.read("journal.jsonl") == journal_before
+    assert (await client.post(f"/api/runs/{run_id}/archive")).status_code == 409
+
+    restored = await client.post(f"/api/runs/{run_id}/restore")
+    assert restored.status_code == 200 and restored.json()["archived_at"] is None
+    assert run_id in {run["run_id"] for run in (await client.get("/api/runs")).json()}
+    assert (await client.post(f"/api/runs/{run_id}/restore")).status_code == 409
+
+
+async def test_failed_run_archive_restore_over_http(client, wired_state):
+    started = await client.post("/api/runs", json={"workflow_yaml": WORKFLOW_YAML})
+    assert started.status_code == 200 and started.json()["status"] == "awaiting_approval"
+    run_id = started.json()["run_id"]
+    failed = await wired_state.engine.fail(run_id, "forced terminal failure")
+    assert failed.status.value == "failed"
+    assert (await client.post(f"/api/runs/{run_id}/archive")).status_code == 200
+    restored = await client.post(f"/api/runs/{run_id}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "failed"
 
 
 async def test_runs_carry_journal_timestamps(client):

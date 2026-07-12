@@ -13,6 +13,9 @@ import functools
 import hashlib
 import inspect
 import json
+import os
+import tempfile
+import time
 import uuid
 from enum import Enum
 from pathlib import Path
@@ -27,6 +30,7 @@ from metaharness.workflows.dsl import (
     WorkflowSpec,
     describe_when,
     resolve_reference,
+    resolve_text_references,
     when_satisfied,
 )
 from metaharness.workflows.journal import Journal
@@ -37,6 +41,10 @@ class RunStatus(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class RunArchiveConflict(ValueError):
+    """The requested archive transition is invalid for the run's current state."""
 
 
 class StepRecord(BaseModel):
@@ -84,6 +92,7 @@ class RunState(BaseModel):
     blueprint_ref: Optional[dict[str, Any]] = None
     blueprint_snapshot: Optional[dict[str, Any]] = None
     snapshot_digest: Optional[str] = None
+    archived_at: Optional[float] = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -98,6 +107,7 @@ class WorkflowEngine:
         self.tool_available = tool_available or (lambda _name: True)
         self._runs: dict[str, tuple[WorkflowSpec, RunState, Journal]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._archived_at: dict[str, float] = {}
 
     def _lock_for(self, run_id: str) -> asyncio.Lock:
         return self._locks.setdefault(run_id, asyncio.Lock())
@@ -158,6 +168,101 @@ class WorkflowEngine:
 
     def runs(self) -> list[RunState]:
         return [state for _, state, _ in self._runs.values()]
+
+    @staticmethod
+    def _archive_path(journal: Journal) -> Optional[Path]:
+        return (
+            journal._path.with_name(journal._path.stem + ".archive.json")
+            if journal._path is not None
+            else None
+        )
+
+    @classmethod
+    def _read_archive_metadata(cls, journal: Journal) -> Optional[float]:
+        path = cls._archive_path(journal)
+        if path is None or not path.exists():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        archived_at = value.get("archived_at") if isinstance(value, dict) else None
+        if not isinstance(archived_at, (int, float)) or isinstance(archived_at, bool):
+            raise ValueError("invalid run archive metadata")
+        return float(archived_at)
+
+    @classmethod
+    def _write_archive_metadata(
+        cls, journal: Journal, archived_at: Optional[float]
+    ) -> None:
+        path = cls._archive_path(journal)
+        if path is None:
+            return
+        if archived_at is None:
+            path.unlink(missing_ok=True)
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"archived_at": archived_at}, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, path)
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    async def archive(self, run_id: str) -> RunState:
+        """Hide a terminal run from active listings without changing its journal."""
+        if run_id not in self._runs:
+            raise KeyError(run_id)
+        async with self._lock_for(run_id):
+            _, state, journal = self._runs[run_id]
+            await asyncio.to_thread(functools.partial(journal.acquire, refresh=True))
+            try:
+                self._refresh_state(run_id)
+                if state.status not in {RunStatus.COMPLETED, RunStatus.FAILED}:
+                    raise RunArchiveConflict("only completed or failed runs can be archived")
+                if state.archived_at is not None:
+                    raise RunArchiveConflict("run is already archived")
+                archived_at = time.time()
+                await asyncio.to_thread(
+                    self._write_archive_metadata, journal, archived_at
+                )
+                self._archived_at[run_id] = archived_at
+                state.archived_at = archived_at
+                return state.model_copy(deep=True)
+            finally:
+                journal.release()
+
+    async def restore(self, run_id: str) -> RunState:
+        """Return an archived run to active listings without changing its journal."""
+        if run_id not in self._runs:
+            raise KeyError(run_id)
+        async with self._lock_for(run_id):
+            _, state, journal = self._runs[run_id]
+            await asyncio.to_thread(functools.partial(journal.acquire, refresh=True))
+            try:
+                self._refresh_state(run_id)
+                if state.archived_at is None:
+                    raise RunArchiveConflict("run is not archived")
+                await asyncio.to_thread(self._write_archive_metadata, journal, None)
+                self._archived_at.pop(run_id, None)
+                state.archived_at = None
+                return state.model_copy(deep=True)
+            finally:
+                journal.release()
 
     # -- execution -----------------------------------------------------------------
 
@@ -301,7 +406,18 @@ class WorkflowEngine:
                 try:
                     outputs = {sid: rec.output for sid, rec in state.completed.items()}
                     resolved = resolve_reference(step.inputs, state.context, outputs)
-                    task = step.to_task(resolved)
+                    resolved_objective = resolve_text_references(
+                        step.objective, state.context, outputs
+                    )
+                    resolved_boundaries = [
+                        resolve_text_references(boundary, state.context, outputs)
+                        for boundary in step.boundaries
+                    ]
+                    task = step.to_task(
+                        resolved,
+                        objective=resolved_objective,
+                        boundaries=resolved_boundaries,
+                    )
                 except ValueError as exc:
                     # a bad input reference must FAIL the run visibly — a stuck
                     # "running" state with no journal trail is the worst outcome
@@ -591,6 +707,14 @@ class WorkflowEngine:
         fresh = self._state_from_entries(
             spec, journal, digest=state.snapshot_digest
         )
+        if self._archive_path(journal) is not None:
+            fresh.archived_at = self._read_archive_metadata(journal)
+            if fresh.archived_at is None:
+                self._archived_at.pop(run_id, None)
+            else:
+                self._archived_at[run_id] = fresh.archived_at
+        else:
+            fresh.archived_at = self._archived_at.get(run_id)
         for field in RunState.model_fields:
             setattr(state, field, getattr(fresh, field))
 
@@ -598,6 +722,10 @@ class WorkflowEngine:
         """Load one journaled run into THIS engine (resume() builds a new one)."""
         other, state = WorkflowEngine.resume(journal_path, self.executor)
         self._runs[state.run_id] = other._runs[state.run_id]
+        archived_at = self._read_archive_metadata(self._runs[state.run_id][2])
+        if archived_at is not None:
+            self._archived_at[state.run_id] = archived_at
+            state.archived_at = archived_at
         return state
 
     def adopt_all(self, journal_dir: str | Path) -> list[RunState]:
