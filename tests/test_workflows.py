@@ -12,6 +12,7 @@ from metaharness.harness import CodingAgentWorker, MockLLMWorker, ScriptedWorker
 from metaharness.routing import Router
 from metaharness.workflows import (
     Journal,
+    RunArchiveConflict,
     RunStatus,
     WorkflowEngine,
     WorkflowSpec,
@@ -98,6 +99,54 @@ def test_resolve_reference():
 
 
 # -- engine -------------------------------------------------------------------------
+
+
+async def test_engine_resolves_inline_context_and_step_refs_before_execution(tmp_path):
+    seen: list[Task] = []
+
+    def handler(task: Task):
+        seen.append(task)
+        if task.objective.startswith("Gather"):
+            return {"facts": "gathered context"}
+        return "analysis complete"
+
+    spec = WorkflowSpec.model_validate({
+        "name": "inline-refs",
+        "steps": [
+            {
+                "id": "gather",
+                "task_type": "general",
+                "objective": "Gather source material for $context.goal.",
+                "inputs": {"goal": "$context.goal"},
+            },
+            {
+                "id": "analyze",
+                "task_type": "reasoning",
+                "objective": (
+                    "Analyze $context.goal using $steps.gather.output.facts."
+                ),
+                "boundaries": [
+                    "Do not ignore prior output: $steps.gather.output.facts."
+                ],
+                "depends_on": ["gather"],
+                "inputs": {"prior": "$steps.gather.output"},
+            },
+        ],
+    })
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("w", handler)}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+
+    state = engine.start(spec, context={"goal": "explain MCP setup"})
+    state = await engine.advance(state.run_id)
+
+    assert state.status == RunStatus.COMPLETED
+    assert len(seen) == 2
+    assert seen[0].objective == "Gather source material for explain MCP setup."
+    assert seen[1].objective == "Analyze explain MCP setup using gathered context."
+    assert seen[1].boundaries == ["Do not ignore prior output: gathered context."]
+    assert seen[1].inputs["prior"] == {"facts": "gathered context"}
+    assert "$context" not in seen[1].objective
+    assert "$steps" not in seen[1].objective
 
 
 async def test_run_to_completion_with_hitl(tmp_path):
@@ -500,6 +549,61 @@ async def test_failed_step_attempts_journaled(tmp_path):
     assert all(e.payload["verdict"] == "fail" for e in atts)
     assert all(e.payload["detail"] for e in atts), "verifier reason is never empty"
     assert kinds.index("step.attempt") < kinds.index("step.failed")
+
+
+async def test_run_archive_metadata_survives_adopt_and_preserves_journal(tmp_path):
+    spec = WorkflowSpec.model_validate({
+        "name": "archive-demo",
+        "steps": [{"id": "work", "objective": "Do the durable work."}],
+    })
+    executor = perfect_executor()
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    running = engine.start(spec)
+    with pytest.raises(RunArchiveConflict, match="completed or failed"):
+        await engine.archive(running.run_id)
+    completed = await engine.advance(running.run_id)
+    journal_path = tmp_path / f"{completed.run_id}.jsonl"
+    journal_before = journal_path.read_bytes()
+    output_before = completed.completed["work"].output
+
+    archived = await engine.archive(completed.run_id)
+    assert archived.archived_at is not None
+    assert journal_path.read_bytes() == journal_before
+    assert (await engine.inspect(completed.run_id))[1].completed["work"].output == output_before
+    with pytest.raises(RunArchiveConflict, match="already archived"):
+        await engine.archive(completed.run_id)
+
+    restarted = WorkflowEngine(executor, journal_dir=tmp_path)
+    adopted = restarted.adopt_all(tmp_path)
+    restored_run = next(run for run in adopted if run.run_id == completed.run_id)
+    assert restored_run.archived_at == archived.archived_at
+    assert restored_run.completed["work"].output == output_before
+    restored = await restarted.restore(completed.run_id)
+    assert restored.archived_at is None
+    with pytest.raises(RunArchiveConflict, match="not archived"):
+        await restarted.restore(completed.run_id)
+
+    restarted_again = WorkflowEngine(executor, journal_dir=tmp_path)
+    adopted_again = restarted_again.adopt_all(tmp_path)
+    assert next(run for run in adopted_again if run.run_id == completed.run_id).archived_at is None
+
+
+async def test_failed_run_can_be_archived_and_restored(tmp_path):
+    def wrong(_task: Task):
+        return "wrong"
+
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("wrong", wrong)}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    spec = WorkflowSpec.model_validate({
+        "name": "failed-archive",
+        "steps": [{"id": "work", "objective": "Return right.",
+                   "success_check": {"equals": "right"}, "max_attempts": 1}],
+    })
+    failed = await engine.advance(engine.start(spec).run_id)
+    assert failed.status is RunStatus.FAILED
+    assert (await engine.archive(failed.run_id)).archived_at is not None
+    restored = await engine.restore(failed.run_id)
+    assert restored.status is RunStatus.FAILED and restored.archived_at is None
 
 
 async def test_step_attempt_journal_records_timeout(tmp_path):

@@ -261,6 +261,10 @@ tr:last-child td{border-bottom:0}
 .attempts .att b{font-family:var(--mono);font-weight:600}
 .attempts .att.fail b{color:var(--red)}
 .attempts .att.pass b{color:var(--green)}
+.evidence-panel{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
+.evidence-panel h3{font-size:13px;margin:0 0 4px}
+.evidence-item{border-top:1px solid var(--hair);padding-top:8px;margin-top:8px}
+.evidence-item summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink2)}
 /* humanized step output: .out is plain-pre by default; .md/.json variants flow */
 .out{font-size:12.5px;white-space:pre-wrap;background:var(--hair);
   border-radius:10px;padding:10px 12px;margin-top:8px;overflow-x:auto}
@@ -318,6 +322,12 @@ details.jt details.jt,.jrow{margin-left:16px}
   font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.22);opacity:0;pointer-events:none;
   transition:opacity .2s,transform .2s;z-index:90;max-width:80vw;text-align:center}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--card);
+  box-shadow:0 24px 80px rgba(22,25,32,.28);max-width:calc(100vw - 32px)}
+dialog::backdrop{background:rgba(20,24,34,.28)}
+.modal-body{width:min(520px,calc(100vw - 48px));padding:24px 26px}
+.modal-body h2{margin-top:0}
+.modal-actions{display:flex;justify-content:space-between;gap:12px;margin-top:20px}
 @media(max-width:820px){.wiz-grid{grid-template-columns:1fr}
   .stepper{position:static;flex-direction:row;overflow-x:auto;gap:6px}
   .stepper .s .l{display:none}}
@@ -403,6 +413,8 @@ details.jt details.jt,.jrow{margin-left:16px}
   <div class="grid">
     <div class="card"><h2>Runs</h2>
       <div class="sub">Newest first — click one to see what each step produced</div>
+      <label class="small" style="display:flex;gap:8px;align-items:center;margin:10px 0">
+        <input id="runs-show-archived" type="checkbox" style="width:auto"> Show archived</label>
       <div id="runs" class="empty">loading…</div></div>
     <div class="card"><h2>Agents</h2>
       <div class="sub">Everyone allowed to work here proved who they are first</div>
@@ -502,12 +514,12 @@ details.jt details.jt,.jrow{margin-left:16px}
 </div>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<dialog id="fork-dialog"><form method="dialog" style="min-width:min(480px,90vw)"><h2>Fork this harness</h2>
+<dialog id="fork-dialog"><form method="dialog" class="modal-body"><h2>Fork this harness</h2>
   <div class="field"><label for="fork-id">Harness id</label><input id="fork-id"></div>
   <div class="field"><label for="fork-name">Harness name</label><input id="fork-name"></div>
-  <div class="small red" id="fork-msg"></div><div class="wiz-nav"><button class="btn ghost" value="cancel">Cancel</button>
+  <div class="small red" id="fork-msg"></div><div class="modal-actions"><button class="btn ghost" value="cancel">Cancel</button>
   <button class="btn" type="button" onclick="submitForkDialog()">Create fork</button></div></form></dialog>
-<dialog id="library-action-dialog"><div style="min-width:min(560px,90vw)" id="library-action-body"></div></dialog>
+<dialog id="library-action-dialog"><div class="modal-body" id="library-action-body"></div></dialog>
 
 <script>
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1490,7 +1502,7 @@ async function renderPlanStep(){
     ? `<button class="btn ghost" onclick="saveHarnessDraft()">Save draft</button>
        <button class="btn ghost" onclick="publishHarness()">Publish</button>`
     : wiz.blueprintMode === 'run'
-    ? `<button class="btn ghost" onclick="forkCurrentHarness()">Fork to edit</button>`
+    ? `<button class="btn ghost" onclick="forkCurrentHarness()">Save as harness</button>`
     : `<button class="btn ghost" onclick="saveHarnessDraft()">Save as harness</button>`;
   document.getElementById('wiz-body').innerHTML = `
     <div class="guide"><div><b>Nothing has run yet — and every step is editable.</b>
@@ -2017,6 +2029,39 @@ function stageTimeline(stepId){
   }).join('')}</ol>`;
 }
 
+function stepInputRefs(value, out = new Set()){
+  if(Array.isArray(value)){ value.forEach(v => stepInputRefs(v, out)); return out; }
+  if(value && typeof value === 'object'){ Object.values(value).forEach(v => stepInputRefs(v, out)); return out; }
+  if(typeof value !== 'string') return out;
+  for(const m of value.matchAll(/\\$steps\\.([^.]+)\\.output/g)) out.add(m[1]);
+  return out;
+}
+
+function upstreamEvidence(s){
+  const run = wiz.run || {completed: {}};
+  const completed = run.completed || {};
+  const explicit = new Set([...(s.depends_on || []), ...stepInputRefs(s.inputs || {})]);
+  let ids = [...explicit].filter(id => completed[id]);
+  if(!ids.length && !completed[s.id]){
+    const prior = [];
+    for(const step of (wiz.plan?.steps || [])){
+      if(step.id === s.id) break;
+      if(completed[step.id]) prior.push(step.id);
+    }
+    ids = prior;
+  }
+  ids = [...new Set(ids)];
+  if(!ids.length) return '';
+  return `<div class="evidence-panel"><h3>Evidence available for ${esc(s.id)}</h3>
+    <div class="small dim">Review these completed upstream outputs before approving or judging this stage.</div>
+    ${ids.map(id => {
+      const rec = completed[id];
+      return `<details class="evidence-item" open><summary>${esc(stepName(id))} ${verdictBadge(rec.verdict)}</summary>
+        ${humanizeOutput(rec.output)}
+        ${attemptRows(id)}</details>`;
+    }).join('')}</div>`;
+}
+
 /* ---------- tabbed step display (Run + Done screens) ----------
    Step names sit in a tab strip on top; one step's detail shows at a time.
    The selected tab auto-follows the running/awaiting/failed step until the
@@ -2050,6 +2095,7 @@ function stepPanel(s){
     <div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
     <div class="pd">${esc(s.objective)}</div>
     ${rec ? humanizeOutput(rec.output) : ''}
+    ${upstreamEvidence(s)}
     ${stageTimeline(s.id)}
     ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
   </div>`;
@@ -2125,7 +2171,7 @@ function renderDoneStep(){
       <div class="sub">Save it once, edit it, or run the same stages with new inputs.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         ${wiz.blueprintMode === 'draft' ? '<button class="btn ghost" onclick="saveHarnessDraft()">Save draft</button><button class="btn ghost" onclick="publishHarness()">Publish</button>'
-          : wiz.blueprintMode === 'run' ? '<button class="btn ghost" onclick="forkCurrentHarness()">Fork to edit</button>'
+          : wiz.blueprintMode === 'run' ? '<button class="btn ghost" onclick="forkCurrentHarness()">Save as harness</button>'
           : '<button class="btn ghost" onclick="saveHarnessDraft()">Save as harness</button>'}
         <button class="btn ghost" onclick="editAfterRun()">Edit stages</button>
         <button class="btn ghost" onclick="runWithNewInputs()">Run with new inputs</button></div></div>
@@ -2160,6 +2206,8 @@ async function planFollowup(){
   if(!r.ok){ msg.textContent = 'follow-up planning failed: ' + (await r.text()).slice(0, 140); return; }
   const data = await r.json();
   wiz.plan = data.workflow;
+  wiz.context = data.context || {};
+  wiz.goal = wiz.context.goal || wiz.goal || '';
   wiz.planSource = data.plan_source;
   wiz.fallbackReason = data.fallback_reason || '';
   wiz.edited = false; wiz.editingStep = null;
@@ -2185,6 +2233,7 @@ function startFreshHarness(){ if(resetWizard(true)) showView('wizard', true); }
 
 /* ---------- console view ---------- */
 const openRuns = new Set();
+let showArchivedRuns = false;
 function toggleRun(runId){ openRuns.has(runId) ? openRuns.delete(runId) : openRuns.add(runId); refreshConsole(); }
 
 /* Pagination, shared by every console card. Page state survives the 3s live
@@ -2233,7 +2282,9 @@ const verdictBadge = v => badge(v === 'pass' ? 'ok' : v === 'fail' ? 'bad' : 'di
   v === 'pass' ? 'verified' : v === 'fail' ? 'failed its check' : 'couldn’t be checked');
 
 function renderRuns(runs){
-  if(!runs.length) return '<div class="empty">no runs yet — start one from the Run tab</div>';
+  if(!runs.length) return showArchivedRuns
+    ? '<div class="empty">no runs to show — archived runs will appear here after you archive a finished run</div>'
+    : '<div class="empty">no active runs — start one from the Run tab, or show archived runs</div>';
   return paginate('runs', runs.slice().reverse(), rows => rows.map(r => {
     const open = openRuns.has(r.run_id);
     const kind = runKind(r);
@@ -2241,6 +2292,10 @@ function renderRuns(runs){
       ? `<button class="btn" data-approve="1" data-run="${esc(r.run_id)}" data-step="${esc(r.awaiting)}">Approve</button>
          <button class="btn reject" data-approve="0" data-run="${esc(r.run_id)}" data-step="${esc(r.awaiting)}">Reject</button>`
       : '';
+    const archiveAction = r.archived_at
+      ? `<button class="pill" data-run-action="restore" data-run="${esc(r.run_id)}">Restore</button>`
+      : ['completed','failed'].includes(r.status)
+        ? `<button class="pill" data-run-action="archive" data-run="${esc(r.run_id)}">Archive</button>` : '';
     const detail = !open ? '' : `<div class="rr-detail">` +
       (Object.entries(r.completed).map(([id, rec]) =>
         `<div class="rr-out"><div class="rr-out-h">${esc(stepName(id))} ${verdictBadge(rec.verdict)}</div>
@@ -2251,18 +2306,32 @@ function renderRuns(runs){
         <div class="rr-title">${open ? '▾' : '▸'} ${esc(runTitle(r))}</div>
         <div class="rr-meta">${esc(r.run_id)}${kind ? ' · ' + esc(kind) : ''}${r.updated_at ? ' · ' + esc(ago(r.updated_at)) : ''}</div></div>
       <div class="rr-story">${esc(runStory(r))}</div>
-      ${statusBadge(r.status)}${hitl}</div>${detail}`;
+      ${r.archived_at ? badge('dim','archived') : ''}${statusBadge(r.status)}${hitl}${archiveAction}</div>${detail}`;
   }).join(''), {timeOrdered: true});
 }
 
 /* Delegated clicks: step ids are user-authored, so they ride in data-* attributes
    (HTML-escaped) instead of being spliced into inline JS strings. */
 document.getElementById('runs').addEventListener('click', ev => {
+  const action = ev.target.closest('button[data-run-action]');
+  if(action){ setRunArchived(action.dataset.run, action.dataset.runAction === 'archive'); return; }
   const b = ev.target.closest('button[data-approve]');
   if(b){ resolveApproval(b.dataset.run, b.dataset.step, b.dataset.approve === '1'); return; }
   const row = ev.target.closest('.runrow');
   if(row) toggleRun(row.dataset.run);
 });
+document.getElementById('runs-show-archived').addEventListener('change', ev => {
+  showArchivedRuns = ev.target.checked; pages.runs = 0; refreshConsole();
+});
+
+async function setRunArchived(runId, archived){
+  const action=archived ? 'archive' : 'restore';
+  const r=await post(`/api/runs/${encodeURIComponent(runId)}/${action}`,{});
+  if(!r.ok){ toast(`${archived ? 'Archive' : 'Restore'} failed: ${humanApiError(await r.text())}`); return; }
+  openRuns.delete(runId);
+  toast(archived ? 'Run archived — its outputs and package are still available' : 'Run restored to the active list');
+  refreshConsole();
+}
 
 /* Pager buttons, anywhere in the console */
 document.getElementById('view-console').addEventListener('click', ev => {
@@ -2767,7 +2836,7 @@ function renderSpans(spans){
 async function refreshConsole(){
   try{
     const [runs, workers, prov, matrix, playbook, failures, spans, tuning, routing] = await Promise.all([
-      get('/api/runs'), get('/api/workers'), get('/api/provenance'),
+      get('/api/runs' + (showArchivedRuns ? '?include_archived=true' : '')), get('/api/workers'), get('/api/provenance'),
       get('/api/matrix'), get('/api/playbook'), get('/api/failures'), get('/api/spans'),
       get('/api/optimization'), get('/api/routing'),
     ]);

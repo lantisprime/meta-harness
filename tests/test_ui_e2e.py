@@ -155,6 +155,56 @@ def test_live_timeline_names_agent_and_accessible_tabs(page, server):
     assert page.locator("[role=tabpanel]").count() == 1
 
 
+def test_run_stage_shows_upstream_evidence_before_approval(page, server):
+    base, _ = server
+    page.goto(base)
+    rendered = page.evaluate("""() => {
+      resetWizard(false,true); currentView='wizard';
+      wiz.plan={name:'research',steps:[
+        {id:'gather',task_type:'general',objective:'Gather source material',inputs:{},tools:[],depends_on:[],hitl:false},
+        {id:'analyze',task_type:'reasoning',objective:'Analyze the gathered material',inputs:{gather:'$steps.gather.output'},tools:[],depends_on:['gather'],hitl:false},
+        {id:'report',task_type:'general',objective:'Write the report',inputs:{gather:'$steps.gather.output',analysis:'$steps.analyze.output'},tools:[],depends_on:['analyze'],hitl:true}
+      ]};
+      wiz.runId='run_demo'; wiz.run={
+        status:'awaiting_approval', awaiting:'report', skipped:{},
+        completed:{
+          gather:{verdict:'pass',output:'GATHERED SOURCE MATERIAL',attempts:1},
+          analyze:{verdict:'pass',output:'ANALYSIS FINDINGS',attempts:1}
+        }
+      };
+      wiz.journal=[
+        {kind:'step.completed',step_id:'gather',payload:{verdict:'pass'}},
+        {kind:'step.completed',step_id:'analyze',payload:{verdict:'pass'}},
+        {kind:'hitl.requested',step_id:'report',payload:{}}
+      ];
+      showView('wizard',true); renderStepper(); setStep(3);
+      return {
+        panels: document.querySelectorAll('.evidence-panel').length,
+        text: document.getElementById('wiz-body').innerText,
+      };
+    }""")
+    assert rendered["panels"] == 1
+    text = rendered["text"]
+    assert "Evidence available for report" in text
+    assert "GATHERED SOURCE MATERIAL" in text
+    assert "ANALYSIS FINDINGS" in text
+
+
+def test_exact_version_run_exposes_save_as_harness_action(page, server):
+    base, _ = server
+    page.goto(base)
+    rendered = page.evaluate("""() => {
+      resetWizard(false,true); currentView='wizard';
+      wiz.blueprintMode='run'; wiz.blueprintId='research'; wiz.blueprintVersion=1;
+      wiz.plan={name:'research',steps:[{id:'report',task_type:'general',objective:'Report',inputs:{},tools:[],depends_on:[],hitl:false}]};
+      wiz.runId='run_done'; wiz.run={status:'completed',completed:{report:{verdict:'pass',output:'done',attempts:1}},skipped:{}};
+      showView('wizard',true); renderStepper(); renderDoneStep();
+      return document.getElementById('wiz-body').innerText;
+    }""")
+    assert "Save as harness" in rendered
+    assert "Fork to edit" not in rendered
+
+
 def test_run_with_new_inputs_returns_to_inputs_for_ad_hoc_plan(page, server):
     base, _ = server
     page.goto(base)
@@ -431,7 +481,7 @@ def test_open_step_direct_actions_capture_tools_and_dirty_exact_fork_preserves_c
     # Forking a modified exact version preserves the canonical open-form edit.
     page.locator("button[title='edit']").first.click()
     page.fill("#se-obj", "Preserve this exact unsaved edit in the fork.")
-    page.locator("#view-wizard button", has_text="Fork to edit").click()
+    page.locator("#view-wizard button", has_text="Save as harness").click()
     submit_fork(page, "e2e-preserved-fork", "Preserved fork")
     page.wait_for_function("wiz.blueprintId === 'e2e-preserved-fork'")
     forked = page.evaluate("fetch('/api/blueprint-drafts/e2e-preserved-fork').then(r => r.json())")
@@ -888,12 +938,26 @@ def test_goal_step_template_plan_and_full_run(page, server):
     # run it: mock workers answer instantly; approve all three gates in the UI,
     # waiting for EACH gate's banner (the Approve button is re-rendered per gate)
     page.click("button:has-text('Run this plan →')")
+    gate_phrase = {
+        # specify/plan mock outputs read from the objective; review is a
+        # schema-conforming artifact whose required key is recommendation.
+        "specify": "specification",
+        "plan": "technical plan",
+        "review": "recommendation",
+    }
     for gate in ("specify", "plan", "review"):
         page.wait_for_selector(f".guide b:has-text('Approval needed: {gate}')",
                                timeout=30_000)
         gate_guide = page.locator("#wiz-body .guide", has_text=f"Approval needed: {gate}")
         assert "Review the completed artifact below" in gate_guide.inner_text()
-        assert page.locator(".steppanel .out").count() == 1
+        # Tightened selector: the artifact is the direct-child .out of the step
+        # panel. Upstream evidence (a separate feature) renders its own .out
+        # divs nested inside .evidence-panel, so a loose ".steppanel .out"
+        # count is no longer meaningful. Verify the artifact itself by content
+        # rather than by counting output elements.
+        artifact = page.locator(".steppanel > div.out").first
+        artifact.wait_for(state="visible")
+        assert gate_phrase[gate] in artifact.inner_text()
         page.click(f"button:has-text('Approve {gate}')")
     page.wait_for_selector(".guide b:has-text('Run completed.')", timeout=30_000)
     # done screen: one tab per step, all six done
@@ -1280,6 +1344,44 @@ def test_console_run_ledger_reads_plain_language(page, server):
     assert "draft reply" in head          # step id prettified
     assert "unverified" not in head       # enum value never shown raw
     assert row.locator(".badge", has_text="done").count() >= 1
+
+
+def test_console_archives_hides_and_restores_terminal_run_without_row_toggle(page, server):
+    import httpx
+
+    base, _ = server
+    workflow = (
+        "name: archive-ui\n"
+        "steps:\n"
+        "  - id: work\n"
+        "    objective: Finish this run for the archive UI.\n"
+    )
+    response = httpx.post(base + "/api/runs", json={
+        "workflow_yaml": workflow,
+        "context": {"goal": "archive this completed console run"},
+    })
+    assert response.status_code == 200 and response.json()["status"] == "completed"
+    run_id = response.json()["run_id"]
+
+    page.goto(base); page.click("#nav-wizard"); page.click("#nav-console")
+    checkbox = page.locator("#runs-show-archived")
+    assert not checkbox.is_checked()
+    row = page.locator(f'.runrow[data-run="{run_id}"]')
+    row.wait_for()
+    row.locator('button[data-run-action="archive"]').click()
+    page.wait_for_selector(f'.runrow[data-run="{run_id}"]', state="detached")
+    assert page.evaluate("id => openRuns.has(id)", run_id) is False
+    assert "outputs and package are still available" in page.locator("#toast").inner_text()
+
+    checkbox.check()
+    row = page.locator(f'.runrow[data-run="{run_id}"]')
+    row.wait_for()
+    assert row.locator(".badge", has_text="archived").count() == 1
+    row.locator('button[data-run-action="restore"]').click()
+    page.wait_for_selector("#toast.on:has-text('Run restored to the active list')")
+    assert page.evaluate("id => openRuns.has(id)", run_id) is False
+    checkbox.uncheck()
+    page.locator(f'.runrow[data-run="{run_id}"]').wait_for()
 
 
 def test_settings_reads_as_numbered_questions(page, server):

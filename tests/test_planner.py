@@ -342,6 +342,8 @@ async def test_followup_endpoint_feeds_run_outputs_to_planner(tmp_path):
         assert data["plan_source"] == "followup"
         assert [s["id"] for s in data["workflow"]["steps"]] == ["fix-tests", "re-review"]
         assert "NO-SHIP" in data["prior_summary"]
+        assert data["context"]["goal"] == "ship the flag"
+        assert data["context"]["prior_run_summary"] == data["prior_summary"]
 
         # the planner actually saw what happened, not just the goal
         prompt = seen_tasks[0].objective
