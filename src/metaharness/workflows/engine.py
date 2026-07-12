@@ -9,6 +9,10 @@ journal entry like everything else.
 from __future__ import annotations
 
 import asyncio
+import functools
+import hashlib
+import inspect
+import json
 import uuid
 from enum import Enum
 from pathlib import Path
@@ -46,6 +50,26 @@ class StepRecord(BaseModel):
     workspace_root: str = ""
 
 
+def _canonical_json_bytes(value: Any) -> bytes:
+    """Deterministic JSON serialization for digest computation."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+def _snapshot_digest(spec: WorkflowSpec, blueprint_snapshot: Optional[dict[str, Any]]) -> str:
+    """SHA-256 digest of the canonical run snapshot.
+
+    Saved-harness runs commit to both the immutable authored BlueprintVersion
+    and the exact security-normalized workflow that executed.  Ad-hoc legacy
+    runs retain their workflow-only identity.
+    """
+    workflow = spec.model_dump(mode="json")
+    source = (
+        {"blueprint_snapshot": blueprint_snapshot, "effective_workflow": workflow}
+        if blueprint_snapshot is not None else workflow
+    )
+    return hashlib.sha256(_canonical_json_bytes(source)).hexdigest()
+
+
 class RunState(BaseModel):
     run_id: str
     workflow: str
@@ -57,16 +81,21 @@ class RunState(BaseModel):
     failed_step: Optional[str] = None
     skipped: dict[str, str] = Field(default_factory=dict)  # step id -> reason
     context: dict[str, Any] = Field(default_factory=dict)
+    blueprint_ref: Optional[dict[str, Any]] = None
+    blueprint_snapshot: Optional[dict[str, Any]] = None
+    snapshot_digest: Optional[str] = None
 
     model_config = {"arbitrary_types_allowed": True}
 
 
 class WorkflowEngine:
     def __init__(self, executor: TaskExecutor, journal_dir: Optional[str | Path] = None,
-                 tool_requires_approval: Optional[Callable[[str], bool]] = None) -> None:
+                 tool_requires_approval: Optional[Callable[[str], bool]] = None,
+                 tool_available: Optional[Callable[[str], bool]] = None) -> None:
         self.executor = executor
         self.journal_dir = Path(journal_dir) if journal_dir else None
         self.tool_requires_approval = tool_requires_approval or (lambda _name: False)
+        self.tool_available = tool_available or (lambda _name: True)
         self._runs: dict[str, tuple[WorkflowSpec, RunState, Journal]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -75,15 +104,49 @@ class WorkflowEngine:
 
     # -- lifecycle -----------------------------------------------------------------
 
-    def start(self, spec: WorkflowSpec, context: Optional[dict[str, Any]] = None) -> RunState:
+    def start(
+        self,
+        spec: WorkflowSpec,
+        context: Optional[dict[str, Any]] = None,
+        *,
+        blueprint_ref: Optional[dict[str, Any]] = None,
+        blueprint_snapshot: Optional[dict[str, Any]] = None,
+    ) -> RunState:
+        if (blueprint_ref is None) != (blueprint_snapshot is None):
+            raise ValueError(
+                "blueprint_ref and blueprint_snapshot must both be present or both absent"
+            )
+        if blueprint_snapshot is not None:
+            from metaharness.blueprints.models import ArtifactRef, BlueprintVersion
+            bp = BlueprintVersion.model_validate(blueprint_snapshot)
+            ref = ArtifactRef.model_validate(blueprint_ref)
+            if bp.id != ref.id or bp.version != ref.version:
+                raise ValueError(
+                    f"blueprint snapshot identity {bp.id!r} v{bp.version} "
+                    f"does not match ref {ref.id!r} v{ref.version}"
+                )
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         journal_path = self.journal_dir / f"{run_id}.jsonl" if self.journal_dir else None
-        journal = Journal(path=journal_path)
-        state = RunState(run_id=run_id, workflow=spec.name, context=context or {})
-        journal.append(
-            "run.started", run_id,
-            payload={"workflow": spec.model_dump(mode="json"), "context": state.context},
+        journal = Journal(path=journal_path, canonical=True)
+        digest = _snapshot_digest(spec, blueprint_snapshot)
+        state = RunState(
+            run_id=run_id,
+            workflow=spec.name,
+            context=context or {},
+            blueprint_ref=blueprint_ref,
+            blueprint_snapshot=blueprint_snapshot,
+            snapshot_digest=digest,
         )
+        payload: dict[str, Any] = {
+            "workflow": spec.model_dump(mode="json"),
+            "context": state.context,
+            "snapshot_digest": digest,
+        }
+        if state.blueprint_ref is not None:
+            payload["blueprint_ref"] = state.blueprint_ref
+        if state.blueprint_snapshot is not None:
+            payload["blueprint_snapshot"] = state.blueprint_snapshot
+        journal.initialize(run_id, payload, snapshot_digest=digest)
         self._runs[run_id] = (spec, state, journal)
         return state
 
@@ -104,11 +167,37 @@ class WorkflowEngine:
         Serialized per run — a second concurrent advance waits, then no-ops on
         the steps the first one already completed."""
         async with self._lock_for(run_id):
-            return await self._advance_locked(run_id)
+            _, state, journal = self._runs[run_id]
+            await asyncio.to_thread(
+                functools.partial(journal.acquire, refresh=True)
+            )
+            try:
+                self._refresh_state(run_id)
+                return await self._advance_locked(run_id)
+            finally:
+                journal.release()
 
     async def _advance_locked(self, run_id: str) -> RunState:
         spec, state, journal = self._runs[run_id]
-        if state.status in (RunStatus.COMPLETED, RunStatus.FAILED):
+        if state.status == RunStatus.COMPLETED:
+            return state
+        if state.status == RunStatus.FAILED:
+            # A crash can land after the durable step.failed transition but
+            # before run.failed.  Replay derives FAILED from the former; finish
+            # the canonical stream exactly once instead of returning forever
+            # with no run terminal.
+            if not journal.entries("run.finished"):
+                journal.append_event(
+                    "run.failed", run_id,
+                    payload={
+                        "status": "failed",
+                        "failed_step": state.failed_step,
+                        "reason": (
+                            f"step {state.failed_step} failed"
+                            if state.failed_step else "run failed"
+                        ),
+                    },
+                )
             return state
         if state.status == RunStatus.AWAITING_APPROVAL:
             return state
@@ -123,14 +212,18 @@ class WorkflowEngine:
                 if step.id in state.rejected:
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
-                    journal.append("run.finished", run_id, payload={"status": "failed", "reason": f"step {step.id} rejected"})
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "reason": f"step {step.id} rejected",
+                                 "failed_step": step.id},
+                    )
                     return state
                 if step.id in state.completed:
                     if (step.hitl and step.hitl_timing == "after"
                             and step.id not in state.approved):
                         state.status = RunStatus.AWAITING_APPROVAL
                         state.awaiting = step.id
-                        journal.append("hitl.requested", run_id, step_id=step.id)
+                        journal.append_event("approval.required", run_id, step_id=step.id)
                         return state
                     continue
                 if step.id in state.skipped:
@@ -140,16 +233,17 @@ class WorkflowEngine:
                     # cascade: a step whose dependency never ran cannot run either
                     reason = f"dependency {skipped_deps[0]!r} was skipped"
                     state.skipped[step.id] = reason
-                    journal.append("step.skipped", run_id, step_id=step.id,
-                                   payload={"reason": reason})
+                    journal.append_event("step.skipped", run_id, step_id=step.id,
+                                         payload={"reason": reason})
                     continue
                 unmet = [d for d in step.depends_on if d not in state.completed]
                 if unmet:  # safety net; topological order + fail-fast make this unreachable
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
-                    journal.append(
-                        "run.finished", run_id,
-                        payload={"status": "failed", "reason": f"step {step.id} blocked by unmet deps {unmet}"},
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "failed_step": step.id,
+                                 "reason": f"step {step.id} blocked by unmet deps {unmet}"},
                     )
                     return state
 
@@ -161,9 +255,18 @@ class WorkflowEngine:
                         # that was never going to run
                         reason = f"condition not met: {describe_when(step.when)}"
                         state.skipped[step.id] = reason
-                        journal.append("step.skipped", run_id, step_id=step.id,
-                                       payload={"reason": reason})
+                        journal.append_event("step.skipped", run_id, step_id=step.id,
+                                             payload={"reason": reason})
                         continue
+
+                journal.append_event(
+                    "step.ready", run_id, step_id=step.id,
+                    payload={
+                        "role": step.role,
+                        "required_capabilities": list(step.required_capabilities),
+                        "worker_id": step.worker_id,
+                    },
+                )
 
                 tool_gate = any(self.tool_requires_approval(name) for name in step.tools)
                 if (
@@ -172,7 +275,27 @@ class WorkflowEngine:
                 ):
                     state.status = RunStatus.AWAITING_APPROVAL
                     state.awaiting = step.id
-                    journal.append("hitl.requested", run_id, step_id=step.id)
+                    journal.append_event("approval.required", run_id, step_id=step.id)
+                    return state
+
+                # Preserve the existing safety UX: an external/MCP step first
+                # parks at its mandatory human gate even when currently unloaded.
+                # Once approved (or for ungated built-ins), recheck immediately
+                # before task construction so a stale capability is never dropped.
+                missing_tools = [name for name in step.tools if not self.tool_available(name)]
+                if missing_tools:
+                    reason = "required tools became unavailable: " + ", ".join(missing_tools)
+                    state.status = RunStatus.FAILED
+                    state.failed_step = step.id
+                    journal.append_event(
+                        "step.failed", run_id, step_id=step.id,
+                        payload={"reason": reason, "missing_tools": missing_tools},
+                    )
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "failed_step": step.id,
+                                 "reason": reason},
+                    )
                     return state
 
                 try:
@@ -184,47 +307,52 @@ class WorkflowEngine:
                     # "running" state with no journal trail is the worst outcome
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
-                    journal.append("step.failed", run_id, step_id=step.id,
-                                   payload={"reason": str(exc)})
-                    journal.append("run.finished", run_id,
-                                   payload={"status": "failed", "reason": f"step {step.id}: {exc}"})
+                    journal.append_event("step.failed", run_id, step_id=step.id,
+                                         payload={"reason": str(exc)})
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "failed_step": step.id,
+                                 "reason": f"step {step.id}: {exc}"},
+                    )
                     return state
-                journal.append("step.started", run_id, step_id=step.id, payload={"task_id": task.id})
+                journal.append_event(
+                    "step.started", run_id, step_id=step.id,
+                    payload={"task_id": task.id},
+                )
 
                 try:
-                    outcome = await self.executor.execute(task)
+                    prior_attempts = sum(
+                        event.kind == "attempt.assigned" and event.step_id == step.id
+                        for event in journal.events()
+                    )
+                    def event_sink(kind: str, payload: dict[str, Any]) -> None:
+                        attempt = payload.get("n")
+                        journal.append_event(
+                            kind, run_id, step_id=step.id, payload=payload,
+                            attempt_id=(
+                                f"{step.id}-attempt-{prior_attempts + int(attempt)}"
+                                if attempt is not None else None
+                            ),
+                        )
+
+                    params = inspect.signature(self.executor.execute).parameters
+                    if "event_sink" in params:
+                        outcome = await self.executor.execute(task, event_sink=event_sink)
+                    else:  # compatibility with small test/custom executors
+                        outcome = await self.executor.execute(task)
                 except Exception as exc:  # noqa: BLE001 — same visibility rule
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
-                    journal.append("step.failed", run_id, step_id=step.id,
-                                   payload={"reason": f"{type(exc).__name__}: {exc}"})
-                    journal.append("run.finished", run_id,
-                                   payload={"status": "failed", "reason": f"step {step.id} crashed: {exc}"})
-                    return state
-                for att in outcome.attempts:
-                    # every attempt is journaled with its verdict + verifier
-                    # reason, so "failed after 3 attempts" is diagnosable from
-                    # the run journal alone (judge reasons included)
-                    journal.append(
-                        "step.attempt", run_id, step_id=step.id,
-                        payload={
-                            "n": att.n,
-                            "model": att.result.model,
-                            "tier": att.result.tier.value,
-                            "verdict": att.verification.verdict.value,
-                            "scorer": att.verification.scorer,
-                            "detail": att.verification.detail[:300],
-                            # issue #2: a timeout is now structurally identifiable
-                            # from the journal alone, not just free-text detail
-                            "failure_mode": (att.verification.failure_mode.value
-                                             if att.verification.failure_mode else None),
-                            "latency_s": round(att.result.latency_s, 2),
-                            "verification_latency_s": round(
-                                att.verification.latency_s, 2
-                            ),
-                            "timed_out": att.result.timed_out,
-                        },
+                    journal.append_event(
+                        "step.failed", run_id, step_id=step.id,
+                        payload={"reason": f"{type(exc).__name__}: {exc}"},
                     )
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "failed_step": step.id,
+                                 "reason": f"step {step.id} crashed: {exc}"},
+                    )
+                    return state
                 record = StepRecord(
                     step_id=step.id,
                     verdict=outcome.final_verdict,
@@ -235,19 +363,20 @@ class WorkflowEngine:
                                     if outcome.attempts else ""),
                 )
                 if outcome.final_verdict == Verdict.FAIL:
-                    journal.append(
+                    journal.append_event(
                         "step.failed", run_id, step_id=step.id,
                         payload=record.model_dump(mode="json"),
                     )
                     state.status = RunStatus.FAILED
                     state.failed_step = step.id
-                    journal.append(
-                        "run.finished", run_id,
-                        payload={"status": "failed", "reason": f"step {step.id} failed after {record.attempts} attempts"},
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={"status": "failed", "failed_step": step.id,
+                                 "reason": f"step {step.id} failed after {record.attempts} attempts"},
                     )
                     return state
                 state.completed[step.id] = record
-                journal.append(
+                journal.append_event(
                     "step.completed", run_id, step_id=step.id,
                     payload=record.model_dump(mode="json"),
                 )
@@ -255,11 +384,11 @@ class WorkflowEngine:
                         and step.id not in state.approved):
                     state.status = RunStatus.AWAITING_APPROVAL
                     state.awaiting = step.id
-                    journal.append("hitl.requested", run_id, step_id=step.id)
+                    journal.append_event("approval.required", run_id, step_id=step.id)
                     return state
 
             state.status = RunStatus.COMPLETED
-            journal.append("run.finished", run_id, payload={"status": "completed"})
+            journal.append_event("run.completed", run_id, payload={"status": "completed"})
             return state
 
     # -- HITL ------------------------------------------------------------------------
@@ -272,18 +401,98 @@ class WorkflowEngine:
 
     def _resolve_hitl(self, run_id: str, step_id: str, *, approved: bool) -> None:
         _, state, journal = self._runs[run_id]
-        if state.status != RunStatus.AWAITING_APPROVAL or state.awaiting != step_id:
-            if state.awaiting:
-                detail = f"; awaiting approval on {state.awaiting!r}"
-            else:
-                detail = "; no approval is pending"
-            raise ValueError(f"cannot resolve HITL step {step_id!r}{detail}")
-        journal.append(
-            "hitl.resolved", run_id, step_id=step_id, payload={"approved": approved}
-        )
-        (state.approved if approved else state.rejected).add(step_id)
-        state.awaiting = None
-        state.status = RunStatus.RUNNING
+        with journal.transaction(refresh=True):
+            self._refresh_state(run_id)
+            decided = state.approved if approved else state.rejected
+            opposite = state.rejected if approved else state.approved
+            if step_id in decided:
+                return  # idempotent retry of the same human decision
+            if step_id in opposite:
+                prior = "rejected" if approved else "approved"
+                raise ValueError(
+                    f"cannot {'approve' if approved else 'reject'} {step_id!r}; "
+                    f"it was already {prior}"
+                )
+            if state.status != RunStatus.AWAITING_APPROVAL or state.awaiting != step_id:
+                if state.awaiting:
+                    detail = f"; awaiting approval on {state.awaiting!r}"
+                else:
+                    detail = "; no approval is pending"
+                raise ValueError(f"cannot resolve HITL step {step_id!r}{detail}")
+            journal.append_event(
+                "approval.resolved", run_id, step_id=step_id,
+                payload={"approved": approved},
+            )
+            decided.add(step_id)
+            state.awaiting = None
+            state.status = RunStatus.RUNNING
+
+    async def resolve_hitl(self, run_id: str, step_id: str, *, approved: bool) -> RunState:
+        """Cross-process-safe, non-event-loop-blocking approval resolution."""
+        async with self._lock_for(run_id):
+            _, state, journal = self._runs[run_id]
+            await asyncio.to_thread(
+                functools.partial(journal.acquire, refresh=True)
+            )
+            try:
+                self._refresh_state(run_id)
+                self._resolve_hitl(run_id, step_id, approved=approved)
+                return state
+            finally:
+                journal.release()
+
+    async def inspect(
+        self, run_id: str
+    ) -> tuple[WorkflowSpec, RunState, list[Any], list[Any]]:
+        """Return one consistent state + canonical/legacy journal snapshot.
+
+        An advance in this process already owns the journal and updates these
+        objects synchronously between awaits, so it can be sampled live without
+        recursively waiting on its own run lock.  Otherwise refresh under the
+        cross-process sidecar lock.
+        """
+        spec, state, journal = self._runs[run_id]
+        if journal._lock_fd is not None:  # live writer in this process
+            return (
+                spec.model_copy(deep=True), state.model_copy(deep=True),
+                list(journal.events()), list(journal.entries()),
+            )
+        async with self._lock_for(run_id):
+            await asyncio.to_thread(
+                functools.partial(journal.acquire, refresh=True)
+            )
+            try:
+                self._refresh_state(run_id)
+                return (
+                    spec.model_copy(deep=True), state.model_copy(deep=True),
+                    list(journal.events()), list(journal.entries()),
+                )
+            finally:
+                journal.release()
+
+    async def fail(self, run_id: str, reason: str) -> RunState:
+        """Durably terminate a run after an unexpected outer advance failure."""
+        async with self._lock_for(run_id):
+            _, state, journal = self._runs[run_id]
+            await asyncio.to_thread(
+                functools.partial(journal.acquire, refresh=True)
+            )
+            try:
+                self._refresh_state(run_id)
+                if state.status == RunStatus.COMPLETED:
+                    return state
+                if not journal.entries("run.finished"):
+                    journal.append_event(
+                        "run.failed", run_id,
+                        payload={
+                            "status": "failed", "failed_step": state.failed_step,
+                            "reason": reason,
+                        },
+                    )
+                state.status = RunStatus.FAILED
+                return state
+            finally:
+                journal.release()
 
     # -- durability --------------------------------------------------------------------
 
@@ -291,27 +500,78 @@ class WorkflowEngine:
     def resume(cls, journal_path: str | Path, executor: TaskExecutor) -> tuple["WorkflowEngine", RunState]:
         """Rebuild a run from its journal: completed steps keep their outputs,
         HITL approvals are remembered, and `advance` continues from the first
-        unfinished step."""
+        unfinished step.
+
+        Completed steps are at-most-once because their terminal event is fsynced
+        before the lock is released. An attempt interrupted before its step
+        terminal is intentionally re-executed after a crash; workers that cause
+        external side effects must provide their own idempotency key.
+        """
         journal = Journal.load(journal_path)
         started = journal.entries("run.started")
         if not started:
             raise ValueError(f"journal {journal_path} has no run.started entry")
         head = started[0]
         spec = WorkflowSpec.model_validate(head.payload["workflow"])
-        state = RunState(
-            run_id=head.run_id, workflow=spec.name, context=head.payload.get("context", {})
+        bp_ref = head.payload.get("blueprint_ref")
+        bp_snapshot = head.payload.get("blueprint_snapshot")
+        if (bp_ref is None) != (bp_snapshot is None):
+            raise ValueError(
+                "journal blueprint_ref and blueprint_snapshot must both be present or both absent"
+            )
+        if bp_snapshot is not None:
+            from metaharness.blueprints.models import ArtifactRef, BlueprintVersion
+            bp = BlueprintVersion.model_validate(bp_snapshot)
+            ref = ArtifactRef.model_validate(bp_ref)
+            if bp.id != ref.id or bp.version != ref.version:
+                raise ValueError(
+                    f"journal blueprint snapshot identity {bp.id!r} v{bp.version} "
+                    f"does not match ref {ref.id!r} v{ref.version}"
+                )
+        digest = head.payload.get("snapshot_digest")
+        expected_digest = _snapshot_digest(spec, bp_snapshot)
+        if digest is not None and digest != expected_digest:
+            raise ValueError(
+                f"snapshot digest mismatch: journal {digest}, computed {expected_digest}"
+            )
+        state = cls._state_from_entries(
+            spec, journal, digest=digest if digest is not None else expected_digest,
         )
-        for entry in journal.entries():
-            if entry.kind == "step.completed":
-                record = StepRecord.model_validate(entry.payload)
-                state.completed[entry.step_id] = record
+        engine = cls(executor, journal_dir=Path(journal_path).parent)
+        engine._runs[state.run_id] = (spec, state, journal)
+        return engine, state
+
+    @staticmethod
+    def _state_from_entries(
+        spec: WorkflowSpec, journal: Journal, *, digest: Optional[str] = None
+    ) -> RunState:
+        entries = journal.entries()
+        started = [entry for entry in entries if entry.kind == "run.started"]
+        if not started:
+            raise ValueError("journal has no run.started entry")
+        head = started[0]
+        state = RunState(
+            run_id=head.run_id,
+            workflow=spec.name,
+            context=head.payload.get("context", {}),
+            blueprint_ref=head.payload.get("blueprint_ref"),
+            blueprint_snapshot=head.payload.get("blueprint_snapshot"),
+            snapshot_digest=digest or head.payload.get("snapshot_digest"),
+        )
+        for entry in entries:
+            if entry.kind == "step.completed" and entry.step_id:
+                state.completed[entry.step_id] = StepRecord.model_validate(entry.payload)
+            elif entry.kind == "step.failed" and entry.step_id:
+                state.failed_step = entry.step_id
+                state.status = RunStatus.FAILED
             elif entry.kind == "step.skipped" and entry.step_id:
                 state.skipped[entry.step_id] = entry.payload.get("reason", "")
             elif entry.kind == "hitl.requested" and entry.step_id:
                 state.status = RunStatus.AWAITING_APPROVAL
                 state.awaiting = entry.step_id
             elif entry.kind == "hitl.resolved" and entry.step_id:
-                (state.approved if entry.payload.get("approved") else state.rejected).add(entry.step_id)
+                target = state.approved if entry.payload.get("approved") else state.rejected
+                target.add(entry.step_id)
                 if state.awaiting == entry.step_id:
                     state.awaiting = None
                     state.status = RunStatus.RUNNING
@@ -321,9 +581,18 @@ class WorkflowEngine:
                     if entry.payload.get("status") == "completed"
                     else RunStatus.FAILED
                 )
-        engine = cls(executor, journal_dir=Path(journal_path).parent)
-        engine._runs[state.run_id] = (spec, state, journal)
-        return engine, state
+                if entry.payload.get("failed_step"):
+                    state.failed_step = entry.payload["failed_step"]
+        return state
+
+    def _refresh_state(self, run_id: str) -> None:
+        """Refresh an adopted run after acquiring its cross-process lock."""
+        spec, state, journal = self._runs[run_id]
+        fresh = self._state_from_entries(
+            spec, journal, digest=state.snapshot_digest
+        )
+        for field in RunState.model_fields:
+            setattr(state, field, getattr(fresh, field))
 
     def adopt(self, journal_path: str | Path) -> RunState:
         """Load one journaled run into THIS engine (resume() builds a new one)."""

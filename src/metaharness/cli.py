@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import re
+import sys
 from pathlib import Path
 
 JOURNAL_DIR = Path.home() / ".metaharness" / "journals"
@@ -71,7 +73,10 @@ def _load_configured_runners(state) -> dict:
         kp = KeyPair.generate()
         runner = build_agent_runner(agent, state.config, keypair=kp)
         state.register_worker(runner, kp, tiers=[agent.tier],
-                              task_types=agent.task_types or None)
+                              task_types=agent.task_types or None,
+                              roles=agent.roles or None,
+                              capabilities=agent.capabilities or None,
+                              host=agent.cli)
         runners.setdefault(Tier(agent.tier), []).append(runner)
         print(f"  {agent.tier:9s} ← {runner.model}  [configured: {agent.worker_id}]")
     return runners
@@ -351,7 +356,7 @@ def _run_harvest(args) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="metaharness")
     sub = parser.add_subparsers(dest="command", required=True)
-    serve = sub.add_parser("serve", help="serve the WebUI over a wired harness")
+    serve = sub.add_parser("serve", help="serve the WebUI over a wired harness, or a packaged blueprint")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8321)
     serve.add_argument("--local", action="store_true",
@@ -368,6 +373,15 @@ def main(argv: list[str] | None = None) -> None:
                        help="hard token ceiling on the served harness's shared budget (default: unbounded accounting)")
     serve.add_argument("--max-wall-s", type=float, default=None,
                        help="hard wall-clock ceiling (sum of worker latency_s) on the served harness's shared budget (default: unbounded accounting)")
+    serve.add_argument("--package", type=Path, default=None,
+                       help="serve a portable package instead of the WebUI")
+    serve.add_argument("--package-workspace", type=Path, default=None,
+                       help="workspace root for the package service")
+    serve.add_argument("--package-journal-dir", type=Path, default=None,
+                       help="journal directory for the package service")
+
+    health = sub.add_parser("healthcheck", help="probe a package service health endpoint")
+    health.add_argument("--url", default="http://127.0.0.1:8000/health")
 
     from metaharness.optimization.suites import SUITE_NAMES
 
@@ -410,7 +424,184 @@ def main(argv: list[str] | None = None) -> None:
     harvest.add_argument("--max-task-chars", type=int, default=16000,
                          help="skip a resolved task whose JSON exceeds this many chars (default 16000)")
 
+    blueprint = sub.add_parser("blueprint", help="validate and package Harness Blueprints")
+    blueprint_sub = blueprint.add_subparsers(dest="blueprint_command", required=True)
+    validate = blueprint_sub.add_parser("validate", help="validate a Blueprint or portable package")
+    validate.add_argument("file", type=Path)
+    validate.add_argument("--format", choices=["json"], default="json")
+    validate.add_argument("--allow-draft", action="store_true")
+    package = blueprint_sub.add_parser("package", help="build a deterministic portable package")
+    package.add_argument("file", type=Path)
+    package.add_argument("--target", action="append", required=True, dest="targets")
+    package.add_argument("--output", type=Path, required=True)
+    package.add_argument(
+        "--output-format", choices=["zip", "directory"], default="zip"
+    )
+    package.add_argument("--force", action="store_true")
+
+    run = blueprint_sub.add_parser("run", help="run an exact BlueprintVersion or portable package")
+    run.add_argument("file", type=Path)
+    run.add_argument("--context-file", default="-")
+    run.add_argument("--workspace", type=Path, required=True)
+    run.add_argument("--journal-dir", type=Path, default=None)
+    run.add_argument("--format", choices=["jsonl"], default="jsonl")
+    run.add_argument("--approval", choices=["stop"], default="stop")
+    run.add_argument("--shim", action="store_true", help=argparse.SUPPRESS)
+
+    run_cmd = sub.add_parser("run", help="inspect, approve, reject, or resume a run")
+    run_sub = run_cmd.add_subparsers(dest="run_command", required=True)
+
+    inspect = run_sub.add_parser("inspect", help="inspect a run journal")
+    inspect.add_argument("run_id")
+    inspect.add_argument("--journal-dir", type=Path, default=None)
+    inspect.add_argument("--workspace", type=Path, default=None)
+    inspect.add_argument("--format", choices=["json"], default="json")
+    inspect.add_argument("--shim", action="store_true", help=argparse.SUPPRESS)
+
+    approve = run_sub.add_parser("approve", help="approve a HITL step")
+    approve.add_argument("run_id")
+    approve.add_argument("step_id")
+    approve.add_argument("--journal-dir", type=Path, default=None)
+    approve.add_argument("--workspace", type=Path, default=None)
+    approve.add_argument("--shim", action="store_true", help=argparse.SUPPRESS)
+
+    reject = run_sub.add_parser("reject", help="reject a HITL step")
+    reject.add_argument("run_id")
+    reject.add_argument("step_id")
+    reject.add_argument("--journal-dir", type=Path, default=None)
+    reject.add_argument("--workspace", type=Path, default=None)
+    reject.add_argument("--shim", action="store_true", help=argparse.SUPPRESS)
+
+    resume = run_sub.add_parser("resume", help="resume a run after approval")
+    resume.add_argument("run_id")
+    resume.add_argument("--journal-dir", type=Path, default=None)
+    resume.add_argument("--workspace", type=Path, default=None)
+    resume.add_argument("--format", choices=["jsonl"], default="jsonl")
+    resume.add_argument("--shim", action="store_true", help=argparse.SUPPRESS)
+
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        package_only = (args.package_workspace, args.package_journal_dir)
+        if args.package is None and any(value is not None for value in package_only):
+            parser.error("--package-workspace and --package-journal-dir require --package")
+        if args.package is not None and args.local:
+            parser.error("--package cannot be combined with --local")
+
+    if args.command == "blueprint":
+        from metaharness.portable.cli import (
+            PortableCLIError,
+            approve_run,
+            inspect_run,
+            package_blueprint,
+            reject_run,
+            resume_run,
+            run_blueprint,
+            validation_report,
+        )
+
+        journal_dir = (
+            args.journal_dir
+            if getattr(args, "journal_dir", None) is not None
+            else JOURNAL_DIR
+        )
+
+        try:
+            if args.blueprint_command == "validate":
+                report = validation_report(args.file, allow_draft=args.allow_draft)
+            elif args.blueprint_command == "package":
+                report = package_blueprint(
+                    args.file,
+                    targets=args.targets,
+                    output=args.output,
+                    output_format=args.output_format,
+                    force=args.force,
+                )
+            elif args.blueprint_command == "run":
+                report = run_blueprint(
+                    args.file,
+                    context_file=args.context_file,
+                    workspace=args.workspace,
+                    journal_dir=journal_dir,
+                    approval=args.approval,
+                    shim=args.shim,
+                )
+            else:
+                parser.error(f"unknown blueprint subcommand: {args.blueprint_command}")
+                return  # pragma: no cover
+        except PortableCLIError as exc:
+            report = {"error": str(exc), "valid": False}
+            if exc.details:
+                report["details"] = exc.details
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            print(f"metaharness blueprint: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+        if args.blueprint_command in {"run"}:
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")), file=sys.stderr)
+        else:
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        if "exit_code" in report:
+            raise SystemExit(report["exit_code"])
+        return
+
+    if args.command == "run":
+        from metaharness.portable.cli import (
+            PortableCLIError,
+            approve_run,
+            inspect_run,
+            reject_run,
+            resume_run,
+        )
+
+        journal_dir = args.journal_dir if args.journal_dir is not None else JOURNAL_DIR
+        workspace = args.workspace if getattr(args, "workspace", None) else None
+
+        try:
+            if args.run_command == "inspect":
+                report = inspect_run(
+                    args.run_id,
+                    journal_dir=journal_dir,
+                    workspace=workspace,
+                    shim=args.shim,
+                )
+            elif args.run_command == "approve":
+                report = approve_run(
+                    args.run_id,
+                    args.step_id,
+                    journal_dir=journal_dir,
+                    workspace=workspace,
+                    shim=args.shim,
+                )
+            elif args.run_command == "reject":
+                report = reject_run(
+                    args.run_id,
+                    args.step_id,
+                    journal_dir=journal_dir,
+                    workspace=workspace,
+                    shim=args.shim,
+                )
+            elif args.run_command == "resume":
+                report = resume_run(
+                    args.run_id,
+                    journal_dir=journal_dir,
+                    workspace=workspace,
+                    shim=args.shim,
+                )
+            else:
+                parser.error(f"unknown run subcommand: {args.run_command}")
+                return  # pragma: no cover
+        except PortableCLIError as exc:
+            report = {"error": str(exc)}
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            print(f"metaharness run: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+        if args.run_command == "resume":
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")), file=sys.stderr)
+        else:
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        if "exit_code" in report:
+            raise SystemExit(report["exit_code"])
+        return
 
     if args.command == "optimize":
         _run_optimize(args)
@@ -422,6 +613,26 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "serve":
         import uvicorn
+
+        if args.package is not None:
+            from metaharness.portable.cli import PortableCLIError
+            from metaharness.portable.runtime import PortableRuntimeError
+            from metaharness.portable.service import create_package_app
+
+            try:
+                app = create_package_app(
+                    args.package,
+                    workspace=args.package_workspace,
+                    journal_dir=args.package_journal_dir,
+                )
+            except (PortableCLIError, PortableRuntimeError, OSError, ValueError) as exc:
+                print(
+                    json.dumps({"status": "invalid-package", "error": str(exc)}),
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            uvicorn.run(app, host=args.host, port=args.port)
+            return
 
         from metaharness.web import create_app
 
@@ -445,6 +656,33 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  budget cap: max_cost_usd={args.max_cost_usd} max_tokens={args.max_tokens} "
                   f"max_wall_s={args.max_wall_s}")
         uvicorn.run(create_app(state), host=args.host, port=args.port)
+
+    if args.command == "healthcheck":
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        parsed = urllib.parse.urlsplit(args.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            print(json.dumps({"status": "unhealthy", "error": "URL must use HTTP or HTTPS"}))
+            raise SystemExit(2)
+
+        try:
+            with urllib.request.urlopen(args.url, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            print(json.dumps({"status": "unhealthy", "error": f"HTTP {exc.code}"}))
+            raise SystemExit(1)
+        except Exception:  # connection and response details may contain URL credentials
+            print(json.dumps({"status": "unhealthy", "error": "health probe failed"}))
+            raise SystemExit(1)
+        if not isinstance(data, dict):
+            print(json.dumps({"status": "unhealthy", "error": "invalid health response"}))
+            raise SystemExit(1)
+        print(json.dumps(data, sort_keys=True))
+        if data.get("status") != "healthy":
+            raise SystemExit(1)
+        return
 
 
 if __name__ == "__main__":

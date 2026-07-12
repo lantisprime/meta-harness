@@ -28,6 +28,9 @@ class WorkerRecord(BaseModel):
     public_key_b64: str
     tiers: list[str] = Field(default_factory=list)
     task_types: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    host: str = ""
     active: bool = True
     registered_at: float = 0.0
     key_rotations: int = 0
@@ -95,6 +98,9 @@ class WorkerRegistry:
         display_name: str = "",
         tiers: Optional[list[str]] = None,
         task_types: Optional[list[str]] = None,
+        roles: Optional[list[str]] = None,
+        capabilities: Optional[list[str]] = None,
+        host: str = "",
         metadata: Optional[dict[str, Any]] = None,
         now: Optional[float] = None,
     ) -> WorkerRecord:
@@ -118,6 +124,9 @@ class WorkerRegistry:
             public_key_b64=public_key_b64,
             tiers=tiers or [],
             task_types=task_types or [],
+            roles=roles or [],
+            capabilities=capabilities or [],
+            host=host,
             registered_at=at,
             key_rotations=(previous.key_rotations + 1) if previous else 0,
             metadata=metadata or {},

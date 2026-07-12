@@ -92,6 +92,27 @@ async def test_file_tools_roundtrip_and_jail(registry, tmp_path):
         assert "escapes the workspace" in result or "no such file" in result
 
 
+async def test_tool_events_carry_stable_redacted_request_identity(registry):
+    from metaharness.observability.run_events import (
+        bind_run_event_sink,
+        reset_run_event_sink,
+    )
+
+    events = []
+    token = bind_run_event_sink(lambda kind, payload: events.append((kind, payload)))
+    try:
+        await registry.call("calculator", {"expression": "21 * 2"})
+    finally:
+        reset_run_event_sink(token)
+
+    requested, completed = events
+    assert requested[0] == "tool.requested" and completed[0] == "tool.completed"
+    assert requested[1]["request_id"] == completed[1]["request_id"]
+    assert requested[1]["idempotency_key"] == requested[1]["request_id"]
+    assert requested[1]["argument_keys"] == ["expression"]
+    assert "21 * 2" not in str(events)
+
+
 # ----------------------------------------------------------- context fitting
 
 def test_fit_messages_prunes_middle_keeps_edges():
@@ -242,6 +263,50 @@ async def test_mcp_stdio_server_tools_load_and_call(tmp_path):
     assert registry.get("testsrv.shout") is not None
     result = await registry.call("testsrv.shout", {"text": "quiet"})
     assert "QUIET" in result
+
+
+async def test_mcp_reload_clears_stale_tools_for_disabled_failure_and_zero(
+    monkeypatch,
+):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    import metaharness.tools.mcp as mcp_mod
+
+    registry = ToolRegistry()
+    for name in ("disabled", "failed", "empty"):
+        registry.register(ToolSpec(
+            f"{name}.stale", "stale", {}, lambda: "stale", source=f"mcp:{name}"
+        ))
+    config = HarnessConfig(mcp_servers={
+        "disabled": MCPServerConfig(
+            name="disabled", command="unused", enabled=False
+        ),
+        "failed": MCPServerConfig(name="failed", command="unused"),
+        "empty": MCPServerConfig(name="empty", command="unused"),
+    })
+
+    class EmptySession:
+        async def list_tools(self):
+            return SimpleNamespace(tools=[])
+
+    def fake_session(server):
+        @asynccontextmanager
+        async def session():
+            if server.name == "failed":
+                raise RuntimeError("offline")
+            yield EmptySession()
+        return session()
+
+    monkeypatch.setattr(mcp_mod, "_require_mcp", lambda: None)
+    monkeypatch.setattr(mcp_mod, "_session_cm", fake_session)
+    report = await load_mcp_tools(registry, config)
+
+    assert {name: report[name]["status"] for name in report} == {
+        "disabled": "disabled", "failed": "load_failed", "empty": "zero_tools"
+    }
+    assert all(registry.get(f"{name}.stale") is None for name in report)
+    assert all(len(report[name]["fingerprint"]) == 64 for name in report)
 
 
 async def test_mcp_http_sends_oauth_token_as_bearer_header(monkeypatch):

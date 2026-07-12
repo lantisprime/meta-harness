@@ -28,6 +28,7 @@ from metaharness.core.types import Task, TaskType, WorkerResult
 from metaharness.harness.runner import Runner, sign_result
 from metaharness.harness.sandbox import SandboxError, eval_arithmetic
 from metaharness.observability.tracing import tracer
+from metaharness.observability.run_events import emit_run_event
 
 
 class _Wrapper(Runner):
@@ -92,6 +93,7 @@ class ToolOffload(_Wrapper):
             )
             result = await self.inner.run(subtask)
             result.task_id = task.id
+            emit_run_event("tool.requested", {"tool": "python.eval_arithmetic"})
             program, value, last_exc = None, None, None
             for candidate in _program_candidates(result):
                 try:
@@ -101,11 +103,19 @@ class ToolOffload(_Wrapper):
                 except SandboxError as exc:
                     last_exc = exc
             if program is None:
+                emit_run_event(
+                    "tool.completed",
+                    {"tool": "python.eval_arithmetic", "status": "error"},
+                )
                 result.error = result.error or (
                     f"tool_offload: {last_exc}" if last_exc
                     else "tool_offload: worker did not emit a program"
                 )
                 return self._resign(result)
+            emit_run_event(
+                "tool.completed",
+                {"tool": "python.eval_arithmetic", "status": "completed"},
+            )
             result.tool_calls.append(
                 {"tool": "python.eval_arithmetic", "input": str(program), "output": value}
             )

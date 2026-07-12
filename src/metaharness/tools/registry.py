@@ -14,10 +14,13 @@ Design per memory/knowledge_base/context-engineering-agent-harnesses.md:
 from __future__ import annotations
 
 import inspect
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+from metaharness.observability.run_events import emit_run_event
 
 MAX_RESULT_CHARS = 4_000
 DEFAULT_SUBSET_CAP = 7
@@ -162,14 +165,36 @@ class ToolRegistry:
         if resolved is None:
             raise ToolError(f"unknown tool {name!r}")
         tool = self._tools[resolved]
+        # Stable, non-secret request identity: enough for approval/audit layers
+        # to correlate retries without copying argument values into journals.
+        request_bytes = json.dumps(
+            {"tool": resolved, "arguments": arguments}, sort_keys=True,
+            ensure_ascii=False, separators=(",", ":"), default=str,
+        ).encode("utf-8")
+        request_id = hashlib.sha256(request_bytes).hexdigest()
+        request_event = {
+            "tool": resolved,
+            "request_id": request_id,
+            "idempotency_key": request_id,
+            "argument_keys": sorted(str(key) for key in arguments),
+        }
+        emit_run_event("tool.requested", request_event)
         try:
             result = tool.handler(**arguments)
             if inspect.isawaitable(result):
                 result = await result
         except ToolError as exc:
-            return f"tool error: {exc}"
+            result = f"tool error: {exc}"
+            emit_run_event("tool.completed", {**request_event, "status": "error"})
+            return result
         except TypeError as exc:  # bad/missing arguments — worker can retry
-            return f"tool error: bad arguments for {resolved}: {exc}"
+            result = f"tool error: bad arguments for {resolved}: {exc}"
+            emit_run_event("tool.completed", {**request_event, "status": "error"})
+            return result
+        except Exception:
+            emit_run_event("tool.completed", {**request_event, "status": "error"})
+            raise
         if not isinstance(result, str):
             result = json.dumps(result, ensure_ascii=False, default=str, sort_keys=True)
+        emit_run_event("tool.completed", {**request_event, "status": "completed"})
         return digest_text(result, MAX_RESULT_CHARS, _terms(focus))

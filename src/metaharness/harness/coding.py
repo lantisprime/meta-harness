@@ -19,7 +19,9 @@ import asyncio
 import json
 import os
 import re
+import signal
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +30,7 @@ from typing import Callable, Optional
 from metaharness.core.types import Task, TaskType, Tier, WorkerResult
 from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
+from metaharness.routing.eligibility import child_host_environment
 
 WORKSPACES_DIR = Path.home() / ".metaharness" / "workspaces"
 
@@ -344,13 +347,23 @@ class CodingAgentWorker(BaseRunner):
         workspace = self._workspace_for(task)
         prompt = _render_prompt(task)
         argv, stdin_text = self.adapter.build(self, prompt, workspace)
-        env = {**os.environ, **self.extra_env}
+        # Carry the full outer-host chain into nested harnesses. This blocks
+        # direct recursion and cycles such as Codex -> Pi -> Codex before spawn.
+        env = {
+            **os.environ,
+            **self.extra_env,
+            **child_host_environment(self.cli),
+        }
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=workspace,
                 env=env,
+                # Coding CLIs routinely spawn shells, tests, and helper agents.
+                # Give the attempt its own group so timeout/cancellation cannot
+                # leave descendants mutating the workspace after escalation.
+                start_new_session=True,
                 stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -365,10 +378,12 @@ class CodingAgentWorker(BaseRunner):
                 timeout=eff,
             )
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await self._terminate_process_group(proc)
             # :g not :.0f — subsecond test timeouts (e.g. 0.5) must not render as "0s"
             raise WorkerTimeout(f"{self.cli}: timed out after {eff:g}s", timeout_s=eff)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._terminate_process_group(proc))
+            raise
 
         stdout = stdout_b.decode(errors="replace")
         stderr = stderr_b.decode(errors="replace")
@@ -397,3 +412,114 @@ class CodingAgentWorker(BaseRunner):
             cost_usd=cost,
             workspace_root=str(workspace),
         )
+
+    @staticmethod
+    async def _terminate_process_group(proc: asyncio.subprocess.Process) -> None:
+        """Terminate and reap an attempt's complete POSIX process group."""
+        if proc.returncode is not None:
+            await proc.wait()
+            return
+        pgid = CodingAgentWorker._process_group_id(proc)
+        tracked = CodingAgentWorker._linux_descendant_pids(proc.pid)
+        CodingAgentWorker._signal_process_tree(proc, signal.SIGTERM, pgid, tracked)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
+        await asyncio.sleep(0.05)
+        tracked.update(CodingAgentWorker._linux_descendant_pids(proc.pid))
+        if (
+            proc.returncode is not None
+            and not CodingAgentWorker._group_alive(pgid)
+            and not CodingAgentWorker._any_pid_alive(tracked)
+        ):
+            return
+        CodingAgentWorker._signal_process_tree(proc, signal.SIGKILL, pgid, tracked)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+    @staticmethod
+    def _process_group_id(proc: asyncio.subprocess.Process) -> int | None:
+        try:
+            return os.getpgid(proc.pid)
+        except (ProcessLookupError, PermissionError, OSError):
+            return proc.pid
+
+    @staticmethod
+    def _group_alive(pgid: int | None) -> bool:
+        if pgid is None:
+            return False
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    @staticmethod
+    def _any_pid_alive(pids: set[int]) -> bool:
+        return any(CodingAgentWorker._pid_alive(pid) for pid in pids)
+
+    @staticmethod
+    def _signal_process_tree(
+        proc: asyncio.subprocess.Process,
+        sig: signal.Signals,
+        pgid: int | None,
+        pids: set[int],
+    ) -> None:
+        if pgid is not None:
+            try:
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        for pid in sorted(pids | {proc.pid}, reverse=True):
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    @staticmethod
+    def _linux_descendant_pids(root_pid: int) -> set[int]:
+        """Return descendants visible in /proc, including session-escaped ones."""
+        if not sys.platform.startswith("linux"):
+            return set()
+        parents: dict[int, int] = {}
+        proc_root = Path("/proc")
+        try:
+            entries = list(proc_root.iterdir())
+        except OSError:
+            return set()
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                text = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+                fields = text.rsplit(")", 1)[1].strip().split()
+                pid = int(entry.name)
+                ppid = int(fields[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            parents[pid] = ppid
+        descendants: set[int] = set()
+        frontier = [root_pid]
+        while frontier:
+            parent = frontier.pop()
+            children = [pid for pid, ppid in parents.items() if ppid == parent]
+            for child in children:
+                if child not in descendants:
+                    descendants.add(child)
+                    frontier.append(child)
+        return descendants

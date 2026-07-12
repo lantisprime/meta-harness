@@ -7,12 +7,34 @@ capability matrix the router routes with, the playbook the learning loop curates
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+import re
+from contextlib import contextmanager
+from typing import Iterator
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from metaharness.blueprints import (
+    ArtifactRef,
+    BlueprintAlreadyExistsError,
+    BlueprintContent,
+    BlueprintCatalog,
+    BlueprintCatalogConflictError,
+    BlueprintCorruptionError,
+    BlueprintNotFoundError,
+    BlueprintStoreError,
+    InvalidRevisionError,
+    RevisionConflictError,
+    is_builtin_id,
+    prepare_blueprint_run,
+    resolve_blueprint_workflow,
+    workflow_assignment_issues,
+)
+from metaharness.blueprints.models import StrictModel
 from metaharness.config import (
     PROVIDER_CATALOG,
     AgentConfig,
@@ -21,6 +43,35 @@ from metaharness.config import (
     is_masked,
 )
 from metaharness.core.types import Task, TaskType, Tier
+from metaharness.evals.artifact_store import (
+    EvalArtifactAlreadyExistsError,
+    EvalArtifactCorruptionError,
+    EvalArtifactNotFoundError,
+    EvalArtifactStoreError,
+)
+from metaharness.evals.artifacts import EvaluationReportRef, SafeBlueprintPatch
+from metaharness.evals.evaluator import (
+    EvalReferenceMismatchError,
+    EvaluationError,
+    ExactSuiteEvaluator,
+    SandboxedCaseRunner,
+    UnsafeEvalRunnerError,
+)
+from metaharness.evals.models import EvalSuiteContent
+from metaharness.evals.store import (
+    EvalSuiteAlreadyExistsError,
+    EvalSuiteArchivedError,
+    EvalSuiteCorruptionError,
+    EvalSuiteNotFoundError,
+    EvalSuiteRevisionConflictError,
+    EvalSuiteStoreError,
+    InvalidEvalSuiteRevisionError,
+)
+from metaharness.evals.tuning import (
+    TuningError,
+    apply_tuning_proposal_to_draft,
+    create_tuning_proposal,
+)
 from metaharness.factory import build_agent_runner
 from metaharness.harness.coding import CLI_KEY_HINTS, available_clis, list_cli_models
 from metaharness.harness.subscription import SUBSCRIPTION_CLIS, SubscriptionWorker, subscription_status
@@ -28,6 +79,7 @@ from metaharness.harness.local import OpenAICompatWorker, probe_endpoint
 from metaharness.harness.workers import MockLLMWorker
 from metaharness.identity.registry import RegistryError
 from metaharness.observability.tracing import store
+from metaharness.portable import PortableDeploymentOptions, PortableTarget, build_portable_package
 from metaharness.web.dashboard import DASHBOARD_HTML
 from metaharness.web.state import HarnessState
 from metaharness.workflows.dsl import load_workflow
@@ -64,8 +116,85 @@ class AdviseRequest(BaseModel):
 class StartRunRequest(BaseModel):
     workflow_yaml: str = ""
     workflow: Optional[dict[str, Any]] = None    # a reviewed plan, as JSON
+    blueprint: Optional[ArtifactRef] = None      # exact blueprint version
     context: dict[str, Any] = {}
     wait: bool = True                             # False → run in background, poll
+
+
+class BlueprintReadinessRequest(BaseModel):
+    blueprint: ArtifactRef
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class SecretBindingWriteRequest(StrictModel):
+    name: str
+    value: str
+
+
+LOCAL_BLUEPRINT_OWNER = "local-user"
+
+
+class CreateDraftRequest(StrictModel):
+    blueprint_id: str
+    content: Optional[BlueprintContent] = None
+    base_version: Optional[int] = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "CreateDraftRequest":
+        if (self.content is None) == (self.base_version is None):
+            raise ValueError("provide exactly one of content or base_version")
+        return self
+
+
+class UpdateDraftRequest(StrictModel):
+    content: BlueprintContent
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class PublishRequest(StrictModel):
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class CreateEvalSuiteRequest(StrictModel):
+    suite_id: str
+    content: EvalSuiteContent
+
+
+class UpdateEvalSuiteRequest(StrictModel):
+    content: EvalSuiteContent
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class EvaluateBlueprintRequest(StrictModel):
+    report_id: str
+    eval_ref: ArtifactRef
+    split: Literal["development", "validation"]
+    runner: SandboxedCaseRunner
+
+
+class TuneBlueprintRequest(StrictModel):
+    proposal_id: str
+    report_refs: list[EvaluationReportRef]
+    patches: list[SafeBlueprintPatch]
+    rationale: str
+    human_approved: bool = False
+    expected_revision: Optional[int] = Field(default=None, ge=1, strict=True)
+
+
+class PortablePackageRequest(StrictModel):
+    targets: list[PortableTarget] = Field(default_factory=lambda: ["local"])
+    deployment_options: Optional[PortableDeploymentOptions] = None
+    generated_at: Optional[int] = Field(default=None, ge=0, strict=True)
+
+
+class ForkRequest(StrictModel):
+    new_id: str
+    source_version: int = Field(ge=1, strict=True)
+    display_name: str = ""
+
+
+class MetadataPatchRequest(BaseModel):
+    display_name: str
 
 
 class GoalRequest(BaseModel):
@@ -84,6 +213,8 @@ class AddWorkerRequest(BaseModel):
     model: str = ""
     system_prompt: str = ""
     task_types: list[str] = []
+    roles: list[str] = []
+    capabilities: list[str] = []
     temperature: float = 0.2
     thinking: Optional[bool] = None
     max_tokens: Optional[int] = 4000
@@ -114,9 +245,153 @@ class TestWorkerRequest(BaseModel):
     cli: str = ""
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _validate_slug(value: str, field: str) -> str:
+    if not value or len(value) > 80 or not _SLUG_RE.fullmatch(value):
+        raise HTTPException(
+            422,
+            f"{field} must be a lowercase slug of at most 80 characters"
+        )
+    return value
+
+
+def _validate_display_name(value: str) -> str:
+    if not value or not value.strip():
+        raise HTTPException(422, "display name cannot be blank")
+    return value
+
+
+@contextmanager
+def _blueprint_api(state: HarnessState) -> Iterator[None]:
+    """Centralized error mapping for blueprint catalog endpoints."""
+    if state.blueprint_store is None:
+        raise HTTPException(503, "blueprint store not enabled")
+    if state.blueprint_catalog is None:
+        state.blueprint_catalog = BlueprintCatalog(state.blueprint_store)
+    try:
+        yield
+    except BlueprintNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (
+        BlueprintAlreadyExistsError,
+        BlueprintCatalogConflictError,
+        RevisionConflictError,
+    ) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(422, {
+            "errors": [
+                {key: error[key] for key in ("loc", "msg", "type")}
+                for error in exc.errors(
+                    include_url=False, include_context=False, include_input=False
+                )
+            ]
+        }) from exc
+    except (InvalidRevisionError, ValueError) as exc:
+        # These domain errors are produced by trusted server-side validation and
+        # never interpolate the submitted payload.
+        raise HTTPException(422, str(exc)) from exc
+    except BlueprintCorruptionError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except BlueprintStoreError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@contextmanager
+def _eval_api(state: HarnessState) -> Iterator[None]:
+    """Fail-closed, sanitized mapping for eval and tuning artifact APIs."""
+    if (
+        state.eval_suite_store is None
+        or state.evaluation_report_store is None
+        or state.tuning_proposal_store is None
+    ):
+        raise HTTPException(503, "evaluation persistence is not enabled")
+    try:
+        yield
+    except (EvalSuiteNotFoundError, EvalArtifactNotFoundError) as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (
+        EvalSuiteAlreadyExistsError,
+        EvalSuiteArchivedError,
+        EvalSuiteRevisionConflictError,
+        EvalArtifactAlreadyExistsError,
+    ) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(422, {
+            "errors": [
+                {key: error[key] for key in ("loc", "msg", "type")}
+                for error in exc.errors(
+                    include_url=False, include_context=False, include_input=False
+                )
+            ]
+        }) from exc
+    except (
+        InvalidEvalSuiteRevisionError,
+        EvalReferenceMismatchError,
+        UnsafeEvalRunnerError,
+        EvaluationError,
+        TuningError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (EvalSuiteCorruptionError, EvalArtifactCorruptionError) as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except (EvalSuiteStoreError, EvalArtifactStoreError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _load_runnable_blueprint_version(state: HarnessState, ref: ArtifactRef) -> dict[str, Any]:
+    """Capture a built-in or active-owned exact version for new execution.
+
+    Historical GETs deliberately use the catalog's unrestricted exact resolver;
+    readiness and run intake use this active gate before any journal is created.
+    """
+    if is_builtin_id(ref.id):
+        catalog = state.blueprint_catalog or BlueprintCatalog(state.blueprint_store)
+        version = catalog.get_version(ref)
+    else:
+        version = state.blueprint_store.get_active_version(ref)
+    return version.model_dump(mode="json")
+
+
 def create_app(state: HarnessState) -> FastAPI:
+    # Config may be assigned after HarnessState construction (serve/portable
+    # boot). Hydrate before any readiness request can observe binding state.
+    state.hydrate_secret_bindings()
     app = FastAPI(title="metaharness", version="0.1.0")
     app.state.harness = state
+
+    if state.engine is not None:
+        def _tool_is_current(name: str) -> bool:
+            tool = state.tools.get(name)
+            if tool is None:
+                return False
+            if not tool.source.startswith("mcp:"):
+                return True
+            from metaharness.tools.mcp import mcp_config_fingerprint
+
+            server_name = tool.source[len("mcp:"):]
+            server = state.config.mcp_servers.get(server_name)
+            status = state.mcp_load_status.get(server_name)
+            return bool(
+                server is not None and server.enabled and status is not None
+                and status.get("status") == "loaded"
+                and status.get("fingerprint") == mcp_config_fingerprint(server)
+            )
+
+        state.engine.tool_available = _tool_is_current
+
+    @app.exception_handler(RequestValidationError)
+    async def _sanitized_request_validation(_request, exc: RequestValidationError):
+        """Never let Pydantic's input/ctx fields reflect credentials or values."""
+        errors = [
+            {key: error[key] for key in ("loc", "msg", "type")}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.on_event("startup")
     async def _load_mcp_tools() -> None:
@@ -131,6 +406,7 @@ def create_app(state: HarnessState) -> FastAPI:
         except RuntimeError as exc:  # mcp package missing
             print(f"  MCP: {exc}")
             return
+        state.mcp_load_status.update(report)
         for name, entry in report.items():
             status = f"{entry['tools']} tool(s)" if entry.get("ok") else f"FAILED: {entry['detail']}"
             print(f"  MCP {name}: {status}")
@@ -643,28 +919,30 @@ def create_app(state: HarnessState) -> FastAPI:
             return []
         out = []
         for r in state.engine.runs():
-            rec = r.model_dump(mode="json")
+            try:
+                _spec, fresh, events, entries = await state.engine.inspect(r.run_id)
+            except KeyError:
+                continue
+            rec = fresh.model_dump(mode="json")
             # The journal is the durable clock: first entry = run started,
             # last entry = most recent activity.
-            try:
-                entries = state.engine.journal(r.run_id).entries()
-            except KeyError:
-                entries = []
-            rec["started_at"] = entries[0].at if entries else None
-            rec["updated_at"] = entries[-1].at if entries else None
+            clock = events or entries
+            rec["started_at"] = clock[0].at if clock else None
+            rec["updated_at"] = clock[-1].at if clock else None
             out.append(rec)
         return out
 
     @app.get("/api/runs/{run_id}")
     async def run_detail(run_id: str) -> dict[str, Any]:
         try:
-            run_state = state.engine.state(run_id)
-            journal = state.engine.journal(run_id)
+            _spec, run_state, events, entries = await state.engine.inspect(run_id)
         except (KeyError, AttributeError):
             raise HTTPException(404, f"unknown run {run_id}")
         return {
             "state": run_state.model_dump(mode="json"),
-            "journal": [e.model_dump(mode="json") for e in journal.entries()],
+            # `journal` remains the historical projection for old clients.
+            "journal": [e.model_dump(mode="json") for e in entries],
+            "events": [e.model_dump(mode="json") for e in events],
         }
 
     @app.get("/api/runs/{run_id}/package")
@@ -676,17 +954,341 @@ def create_app(state: HarnessState) -> FastAPI:
         from metaharness.workflows.package import build_package_bytes
 
         try:
-            spec = state.engine._runs[run_id][0]
-            run_state = state.engine.state(run_id)
-            journal = state.engine.journal(run_id)
+            spec, run_state, events, entries = await state.engine.inspect(run_id)
         except (KeyError, AttributeError):
             raise HTTPException(404, f"unknown run {run_id}")
-        payload = build_package_bytes(spec, run_state, journal.entries())
+        payload = build_package_bytes(
+            spec, run_state, entries,
+            canonical_events=events if events and hasattr(events[0], "schema_version") else None,
+        )
         return Response(
             content=payload,
             media_type="application/zip",
             headers={"Content-Disposition":
                      f'attachment; filename="{run_id}-package.zip"'},
+        )
+
+    # -- blueprint catalog --------------------------------------------------------
+
+    @app.get("/api/blueprints")
+    async def list_blueprints(include_archived: bool = False) -> list[dict[str, Any]]:
+        with _blueprint_api(state):
+            return [
+                item.model_dump(mode="json")
+                for item in state.blueprint_catalog.list(include_archived=include_archived)
+            ]
+
+    @app.post("/api/blueprints/readiness")
+    async def blueprint_readiness(req: BlueprintReadinessRequest) -> dict[str, Any]:
+        """Preview exact-version readiness without loading tools or starting work."""
+        from metaharness.blueprints.models import BlueprintVersion
+
+        with _blueprint_api(state):
+            snapshot = _load_runnable_blueprint_version(state, req.blueprint)
+        blueprint = BlueprintVersion.model_validate(snapshot)
+        result = prepare_blueprint_run(
+            blueprint,
+            req.context,
+            tools=state.tools,
+            mcp_servers=state.config.mcp_servers,
+            mcp_load_status=state.mcp_load_status,
+            router=state.router,
+            secret_bindings=state.secret_bindings,
+        )
+        return result.model_dump(mode="json")
+
+    @app.post("/api/blueprint-drafts", status_code=201)
+    async def create_draft(req: CreateDraftRequest) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(req.blueprint_id, "blueprint_id")
+            if is_builtin_id(req.blueprint_id):
+                raise BlueprintCatalogConflictError(
+                    f"{req.blueprint_id!r} is reserved for a built-in blueprint"
+                )
+            if req.base_version is not None:
+                ref = ArtifactRef(id=req.blueprint_id, version=req.base_version)
+                draft = state.blueprint_store.create_draft_from_version(
+                    ref, owner=LOCAL_BLUEPRINT_OWNER
+                )
+            else:
+                draft = state.blueprint_store.create_draft(
+                    req.blueprint_id, req.content, owner=LOCAL_BLUEPRINT_OWNER
+                )
+            return draft.model_dump(mode="json")
+
+    @app.get("/api/blueprint-drafts")
+    async def list_drafts() -> list[dict[str, Any]]:
+        with _blueprint_api(state):
+            drafts = []
+            for entry in state.blueprint_store.list(include_archived=True):
+                try:
+                    drafts.append(state.blueprint_store.get_draft(entry.id))
+                except BlueprintNotFoundError:
+                    continue
+            return [draft.model_dump(mode="json") for draft in drafts]
+
+    @app.get("/api/blueprint-drafts/{blueprint_id}")
+    async def get_draft(blueprint_id: str) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            return state.blueprint_store.get_draft(blueprint_id).model_dump(mode="json")
+
+    @app.patch("/api/blueprint-drafts/{blueprint_id}")
+    async def update_draft(blueprint_id: str, req: UpdateDraftRequest) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            draft = state.blueprint_store.update_draft(
+                blueprint_id, req.content, expected_revision=req.expected_revision
+            )
+            return draft.model_dump(mode="json")
+
+    @app.delete("/api/blueprint-drafts/{blueprint_id}")
+    async def delete_draft(blueprint_id: str) -> Response:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            state.blueprint_store.delete_draft(blueprint_id)
+            return Response(status_code=204)
+
+    @app.get("/api/blueprints/{blueprint_id}")
+    async def get_blueprint_catalog(blueprint_id: str) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            return state.blueprint_catalog.get(blueprint_id).model_dump(mode="json")
+
+    @app.get("/api/blueprints/{blueprint_id}/versions")
+    async def list_blueprint_versions(blueprint_id: str) -> list[dict[str, Any]]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            return [
+                item.model_dump(mode="json")
+                for item in state.blueprint_catalog.list_versions(blueprint_id)
+            ]
+
+    @app.get("/api/blueprints/{blueprint_id}/versions/{version}")
+    async def get_blueprint_version(blueprint_id: str, version: int) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            ref = ArtifactRef(id=blueprint_id, version=version)
+            return state.blueprint_catalog.get_version(ref).model_dump(mode="json")
+
+    @app.post("/api/blueprint-drafts/{blueprint_id}/publish")
+    async def publish_blueprint(blueprint_id: str, req: PublishRequest) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            version = state.blueprint_store.publish(
+                blueprint_id, expected_revision=req.expected_revision
+            )
+            return version.model_dump(mode="json")
+
+    @app.post("/api/blueprints/{blueprint_id}/fork")
+    async def fork_blueprint(blueprint_id: str, req: ForkRequest) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            _validate_slug(req.new_id, "new_id")
+            source = ArtifactRef(id=blueprint_id, version=req.source_version)
+            draft = state.blueprint_catalog.fork(
+                source, new_id=req.new_id, owner=LOCAL_BLUEPRINT_OWNER,
+                display_name=req.display_name or None,
+            )
+            return draft.model_dump(mode="json")
+
+    @app.patch("/api/blueprints/{blueprint_id}/metadata")
+    async def patch_blueprint_metadata(
+        blueprint_id: str, req: MetadataPatchRequest
+    ) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            _validate_display_name(req.display_name)
+            entry = state.blueprint_store.set_display_name(
+                blueprint_id, req.display_name
+            )
+            return entry.model_dump(mode="json")
+
+    @app.post("/api/blueprints/{blueprint_id}/archive")
+    async def archive_blueprint(blueprint_id: str) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            return state.blueprint_store.archive(blueprint_id).model_dump(mode="json")
+
+    @app.post("/api/blueprints/{blueprint_id}/restore")
+    async def restore_blueprint(blueprint_id: str) -> dict[str, Any]:
+        with _blueprint_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            return state.blueprint_store.restore(blueprint_id).model_dump(mode="json")
+
+    # -- exact evaluation suites, reports, and tuning ---------------------------
+
+    @app.get("/api/eval-suites")
+    async def list_eval_suites(include_archived: bool = False) -> list[dict[str, Any]]:
+        with _eval_api(state):
+            return [
+                item.model_dump(mode="json")
+                for item in state.eval_suite_store.list(include_archived=include_archived)
+            ]
+
+    @app.post("/api/eval-suites", status_code=201)
+    async def create_eval_suite(req: CreateEvalSuiteRequest) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(req.suite_id, "suite_id")
+            draft = state.eval_suite_store.create_draft(
+                req.suite_id, req.content, owner=LOCAL_BLUEPRINT_OWNER
+            )
+            return draft.model_dump(mode="json")
+
+    @app.get("/api/eval-suites/{suite_id}/draft")
+    async def get_eval_suite_draft(suite_id: str) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(suite_id, "suite_id")
+            return state.eval_suite_store.get_draft(suite_id).model_dump(mode="json")
+
+    @app.patch("/api/eval-suites/{suite_id}")
+    @app.patch("/api/eval-suites/{suite_id}/draft", include_in_schema=False)
+    async def update_eval_suite(
+        suite_id: str, req: UpdateEvalSuiteRequest
+    ) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(suite_id, "suite_id")
+            draft = state.eval_suite_store.update_draft(
+                suite_id, req.content, expected_revision=req.expected_revision
+            )
+            return draft.model_dump(mode="json")
+
+    @app.post("/api/eval-suites/{suite_id}/versions")
+    async def publish_eval_suite(suite_id: str, req: PublishRequest) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(suite_id, "suite_id")
+            published = state.eval_suite_store.publish(
+                suite_id, expected_revision=req.expected_revision
+            )
+            # EvalSuitePublic is a deliberately sealed projection.
+            return published.model_dump(mode="json")
+
+    @app.get("/api/eval-suites/{suite_id}/versions/{version}")
+    async def get_eval_suite_version(suite_id: str, version: int) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(suite_id, "suite_id")
+            return state.eval_suite_store.get_version(suite_id, version).model_dump(
+                mode="json"
+            )
+
+    @app.get("/api/evaluation-reports/{report_id}")
+    async def get_evaluation_report(report_id: str) -> dict[str, Any]:
+        with _eval_api(state):
+            _validate_slug(report_id, "report_id")
+            return state.evaluation_report_store.get(report_id).model_dump(mode="json")
+
+    @app.post(
+        "/api/blueprints/{blueprint_id}/versions/{version}/evaluate",
+        status_code=201,
+    )
+    async def evaluate_blueprint_version(
+        blueprint_id: str, version: int, req: EvaluateBlueprintRequest
+    ) -> dict[str, Any]:
+        with _blueprint_api(state), _eval_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            if req.runner.sealed_holdout_access:
+                raise UnsafeEvalRunnerError(
+                    "public evaluation runners cannot request sealed holdout access"
+                )
+            blueprint_ref = ArtifactRef(id=blueprint_id, version=version)
+            blueprint = state.blueprint_catalog.get_version(blueprint_ref)
+            if req.eval_ref not in blueprint.eval_suites:
+                raise EvalReferenceMismatchError(
+                    "eval suite exact ref is not frozen on the blueprint version"
+                )
+            # Resolve before starting an expensive subprocess and before trusting
+            # the descriptor. The evaluator resolves it again at execution time.
+            state.eval_suite_store.get_version_for_evaluation(
+                req.eval_ref.id, req.eval_ref.version
+            )
+            try:
+                state.evaluation_report_store.get(req.report_id)
+            except EvalArtifactNotFoundError:
+                pass
+            else:
+                raise EvalArtifactAlreadyExistsError(
+                    f"evaluation report {req.report_id!r} already exists"
+                )
+            evaluator = ExactSuiteEvaluator(
+                state.blueprint_catalog, state.eval_suite_store, req.runner
+            )
+            report = await asyncio.to_thread(
+                evaluator.evaluate,
+                report_id=req.report_id,
+                blueprint_ref=blueprint_ref,
+                eval_ref=req.eval_ref,
+                split=req.split,
+            )
+            return state.evaluation_report_store.create(report).model_dump(mode="json")
+
+    @app.post(
+        "/api/blueprints/{blueprint_id}/versions/{version}/tune",
+        status_code=201,
+    )
+    async def tune_blueprint_version(
+        blueprint_id: str, version: int, req: TuneBlueprintRequest
+    ) -> dict[str, Any]:
+        with _blueprint_api(state), _eval_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            blueprint_ref = ArtifactRef(id=blueprint_id, version=version)
+            blueprint = state.blueprint_catalog.get_version(blueprint_ref)
+            proposal = create_tuning_proposal(
+                proposal_id=req.proposal_id,
+                blueprint_ref=blueprint_ref,
+                eval_refs=blueprint.eval_suites,
+                catalog=state.blueprint_catalog,
+                eval_store=state.eval_suite_store,
+                report_store=state.evaluation_report_store,
+                report_refs=req.report_refs,
+                patches=req.patches,
+                rationale=req.rationale,
+            )
+            persisted = state.tuning_proposal_store.create(proposal)
+            applied_draft = None
+            if req.human_approved is True:
+                applied_draft = apply_tuning_proposal_to_draft(
+                    persisted,
+                    catalog=state.blueprint_catalog,
+                    owner=LOCAL_BLUEPRINT_OWNER,
+                    base_version=version,
+                    expected_revision=req.expected_revision,
+                    human_approved=True,
+                )
+            return {
+                "proposal": persisted.model_dump(mode="json"),
+                "applied_draft": (
+                    applied_draft.model_dump(mode="json")
+                    if applied_draft is not None
+                    else None
+                ),
+                "published": False,
+            }
+
+    @app.post("/api/blueprints/{blueprint_id}/versions/{version}/package")
+    async def package_blueprint_version(
+        blueprint_id: str, version: int, req: PortablePackageRequest
+    ) -> Response:
+        with _blueprint_api(state), _eval_api(state):
+            _validate_slug(blueprint_id, "blueprint_id")
+            ref = ArtifactRef(id=blueprint_id, version=version)
+            blueprint = state.blueprint_catalog.get_version(ref)
+            for eval_ref in blueprint.eval_suites:
+                state.eval_suite_store.get_version(eval_ref.id, eval_ref.version)
+            payload = build_portable_package(
+                blueprint,
+                targets=req.targets,
+                eval_refs=blueprint.eval_suites,
+                deployment_options=req.deployment_options,
+                generated_at=req.generated_at,
+            )
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{blueprint_id}-v{version}-portable.zip"'
+                )
+            },
         )
 
     def _advance_in_background(run_id: str) -> None:
@@ -696,9 +1298,9 @@ def create_app(state: HarnessState) -> FastAPI:
             except Exception as exc:  # never crashes the app — but journal it,
                 # or the run sits in "running" forever with no trail
                 try:
-                    state.engine.journal(run_id).append(
-                        "run.advance_error", run_id,
-                        payload={"error": f"{type(exc).__name__}: {exc}"[:300]},
+                    await state.engine.fail(
+                        run_id,
+                        f"{type(exc).__name__}: {exc}"[:300],
                     )
                 except Exception:
                     pass
@@ -707,15 +1309,13 @@ def create_app(state: HarnessState) -> FastAPI:
     @app.post("/api/runs/{run_id}/approval")
     async def resolve_approval(run_id: str, req: ApprovalRequest) -> dict[str, Any]:
         try:
-            run_state = state.engine.state(run_id)
+            run_state = await state.engine.resolve_hitl(
+                run_id, req.step_id, approved=req.approved
+            )
         except (KeyError, AttributeError):
             raise HTTPException(404, f"unknown run {run_id}")
-        if run_state.awaiting != req.step_id:
-            raise HTTPException(409, f"run is not awaiting approval on {req.step_id!r}")
-        if req.approved:
-            state.engine.approve(run_id, req.step_id)
-        else:
-            state.engine.reject(run_id, req.step_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         if req.wait:
             run_state = await state.engine.advance(run_id)
         else:
@@ -785,6 +1385,35 @@ def create_app(state: HarnessState) -> FastAPI:
         return [f"{step.id}: {p}" for step in spec.steps
                 for p in check_value_problems(step.success_check)]
 
+    def _resolve_run_source(req: StartRunRequest):
+        """Mutually-exclusive run source: blueprint exact version, legacy JSON
+        workflow, or legacy YAML workflow. Returns the resolved WorkflowSpec,
+        request context, and optional blueprint ref/snapshot."""
+        sources = [
+            ("blueprint", req.blueprint is not None),
+            ("workflow", req.workflow is not None),
+            ("workflow_yaml", bool(req.workflow_yaml)),
+        ]
+        present = [name for name, ok in sources if ok]
+        if len(present) != 1:
+            raise ValueError(
+                f"provide exactly one source; found {len(present)}: {present}"
+            )
+        source = present[0]
+        if source == "blueprint":
+            with _blueprint_api(state):
+                snapshot = _load_runnable_blueprint_version(state, req.blueprint)
+            from metaharness.blueprints.models import BlueprintVersion
+            blueprint = BlueprintVersion.model_validate(snapshot)
+            spec = blueprint.workflow
+            return spec, req.context, req.blueprint, snapshot
+        if source == "workflow":
+            from metaharness.workflows.dsl import WorkflowSpec
+            spec = WorkflowSpec.model_validate(req.workflow)
+        else:
+            spec = load_workflow(req.workflow_yaml)
+        return spec, req.context, None, None
+
     @app.post("/api/workflows/validate")
     async def validate_workflow(req: StartRunRequest) -> dict[str, Any]:
         """Validate a hand-written or hand-edited workflow WITHOUT running it:
@@ -794,22 +1423,47 @@ def create_app(state: HarnessState) -> FastAPI:
         import yaml
 
         try:
-            if req.workflow is not None:
-                from metaharness.workflows.dsl import WorkflowSpec
-                spec = WorkflowSpec.model_validate(req.workflow)
-            elif req.workflow_yaml:
-                spec = load_workflow(req.workflow_yaml)
-            else:
-                raise ValueError("provide workflow or workflow_yaml")
+            spec, _ctx, _ref, _snap = _resolve_run_source(req)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+        readiness = None
+        if _ref is not None:
+            from metaharness.blueprints.models import BlueprintVersion
+
+            blueprint = BlueprintVersion.model_validate(_snap)
+            readiness = prepare_blueprint_run(
+                blueprint,
+                _ctx,
+                tools=state.tools,
+                mcp_servers=state.config.mcp_servers,
+                mcp_load_status=state.mcp_load_status,
+                router=state.router,
+                secret_bindings=state.secret_bindings,
+            )
+            if readiness.ready:
+                try:
+                    spec = resolve_blueprint_workflow(
+                        blueprint, readiness.normalized_context
+                    )
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from None
         problems = _value_hazard_problems(spec)
         if problems:
             raise HTTPException(422, "; ".join(problems))
         _enforce_mcp_hitl(spec)
+        if _ref is None:
+            assignment_issues = workflow_assignment_issues(spec, router=state.router)
+            if assignment_issues:
+                raise HTTPException(409, detail={
+                    "ready": False,
+                    "issues": [issue.model_dump(mode="json") for issue in assignment_issues],
+                })
         data = spec.model_dump(mode="json")
-        return {"workflow": data,
-                "yaml": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
+        response = {"workflow": data,
+                    "yaml": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
+        if readiness is not None:
+            response["readiness"] = readiness.model_dump(mode="json")
+        return response
 
     @app.post("/api/plans")
     async def preview_plan(req: GoalRequest) -> dict[str, Any]:
@@ -829,20 +1483,53 @@ def create_app(state: HarnessState) -> FastAPI:
         if state.engine is None:
             raise HTTPException(503, "engine not wired")
         try:
-            if req.workflow is not None:
-                from metaharness.workflows.dsl import WorkflowSpec
-                spec = WorkflowSpec.model_validate(req.workflow)
-            elif req.workflow_yaml:
-                spec = load_workflow(req.workflow_yaml)
-            else:
-                raise ValueError("provide workflow or workflow_yaml")
+            spec, context, bp_ref, bp_snapshot = _resolve_run_source(req)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+        if bp_ref is not None:
+            from metaharness.blueprints.models import BlueprintVersion
+
+            blueprint = BlueprintVersion.model_validate(bp_snapshot)
+            # Recheck loaded registry/config truth immediately before creating a
+            # run.  Failure therefore allocates no run id and writes no journal.
+            readiness = prepare_blueprint_run(
+                blueprint,
+                context,
+                tools=state.tools,
+                mcp_servers=state.config.mcp_servers,
+                mcp_load_status=state.mcp_load_status,
+                router=state.router,
+                secret_bindings=state.secret_bindings,
+            )
+            if not readiness.ready:
+                status = (
+                    422
+                    if all(issue.code == "invalid_input" for issue in readiness.issues)
+                    else 409
+                )
+                raise HTTPException(status, detail=readiness.model_dump(mode="json"))
+            context = readiness.normalized_context
+            try:
+                spec = resolve_blueprint_workflow(blueprint, context)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
         problems = _value_hazard_problems(spec)
         if problems:
             raise HTTPException(422, "; ".join(problems))
         _enforce_mcp_hitl(spec)
-        run_state = state.engine.start(spec, context=req.context)
+        if bp_ref is None:
+            assignment_issues = workflow_assignment_issues(spec, router=state.router)
+            if assignment_issues:
+                raise HTTPException(409, detail={
+                    "ready": False,
+                    "issues": [issue.model_dump(mode="json") for issue in assignment_issues],
+                })
+        run_state = state.engine.start(
+            spec,
+            context=context,
+            blueprint_ref=bp_ref.model_dump(mode="json") if bp_ref is not None else None,
+            blueprint_snapshot=bp_snapshot,
+        )
         if req.wait:
             run_state = await state.engine.advance(run_state.run_id)
         else:
@@ -894,6 +1581,7 @@ def create_app(state: HarnessState) -> FastAPI:
             provider=provider, base_url="" if provider else req.base_url,
             model=req.model, system_prompt=req.system_prompt,
             task_types=req.task_types, temperature=req.temperature,
+            roles=req.roles, capabilities=req.capabilities,
             max_tokens=req.max_tokens, thinking=req.thinking, cli=req.cli,
             # mock has no timeout to apply it to; a direct API caller bypasses
             # the wizard's JS guards, so drop it server-side too (issue #2
@@ -935,7 +1623,10 @@ def create_app(state: HarnessState) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(422, str(exc))
         try:
-            state.add_worker(runner, req.tier)
+            state.add_worker(
+                runner, req.tier, task_types=req.task_types,
+                roles=req.roles, capabilities=req.capabilities,
+            )
         except (RegistryError, RuntimeError, ValueError) as exc:
             raise HTTPException(409, str(exc))
         if req.persist:
@@ -1050,16 +1741,58 @@ def create_app(state: HarnessState) -> FastAPI:
         state.save_config()
         return {"deleted": pid}
 
+    @app.post("/api/config/secret-bindings")
+    async def update_secret_binding(req: SecretBindingWriteRequest) -> dict[str, Any]:
+        """Create/replace one local binding; plaintext is write-only."""
+        try:
+            state.config.set_secret_binding(req.name, req.value)
+            state.secret_bindings.configure(req.name, req.value)
+        except ValueError as exc:
+            # Validation messages describe shape only and never interpolate value.
+            raise HTTPException(422, str(exc)) from None
+        state.save_config()
+        return {"name": req.name, "configured": True}
+
+    @app.delete("/api/config/secret-bindings/{name}")
+    async def delete_secret_binding(name: str) -> dict[str, Any]:
+        from metaharness.blueprints.secrets import validate_secret_binding_name
+
+        try:
+            binding = validate_secret_binding_name(name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if binding not in state.config.secret_bindings:
+            raise HTTPException(404, f"unknown secret binding {binding!r}")
+        del state.config.secret_bindings[binding]
+        state.secret_bindings.remove(binding)
+        state.save_config()
+        return {"deleted": binding}
+
     @app.post("/api/config/mcp")
     async def update_mcp_server(spec: dict[str, Any]) -> dict[str, Any]:
         secret_values = [str(spec.get("oauth_token", ""))]
         secret_values.extend(str(value) for value in (spec.get("env") or {}).values())
         if any(value.startswith("enc1:") for value in secret_values):
             raise HTTPException(422, "MCP secrets must be plaintext, not enc1 envelopes")
+        current = state.config.mcp_servers.get(str(spec.get("name", "")))
+        merged = current.model_dump() if current else {}
+        merged.update({key: value for key, value in spec.items() if key not in {"env", "oauth_token"}})
+        if "oauth_token" in spec:
+            token = spec.get("oauth_token")
+            if current is None or (token is not None and not is_masked(str(token)) and token != "set"):
+                merged["oauth_token"] = token or ""
+        if "env" in spec:
+            old_env = current.env if current else {}
+            merged["env"] = {
+                key: (old_env.get(key, "") if is_masked(str(value)) or value == "set" else value)
+                for key, value in (spec.get("env") or {}).items()
+            }
         try:
-            server = MCPServerConfig.model_validate(spec)
+            server = MCPServerConfig.model_validate(merged)
         except ValueError:
             raise HTTPException(422, "invalid MCP server configuration")
+        state.tools.unregister_source(f"mcp:{server.name}")
+        state.mcp_load_status.pop(server.name, None)
         state.config.mcp_servers[server.name] = server
         state.save_config()
         return state.config.public_dict()["mcp_servers"][server.name]
@@ -1070,17 +1803,32 @@ def create_app(state: HarnessState) -> FastAPI:
         if server is None:
             raise HTTPException(404, f"unknown MCP server {name}")
         import asyncio
-        from metaharness.tools import load_mcp_tools
+        from metaharness.tools import load_mcp_tools, mcp_config_fingerprint
         one = HarnessConfig(mcp_servers={name: server})
         try:
             async with asyncio.timeout(60):
                 report = await load_mcp_tools(state.tools, one)
         except TimeoutError:
-            return {"ok": False, "detail": "connection timed out after 60s"}
+            state.mcp_load_status[name] = {
+                "ok": False, "status": "load_failed", "tools": 0,
+                "detail": "connection timed out after 60s",
+                "fingerprint": mcp_config_fingerprint(server),
+            }
+            return {
+                "ok": False, "status": "load_failed",
+                "detail": "connection timed out after 60s",
+            }
         result = report[name]
+        state.mcp_load_status[name] = result
         if not result.get("ok"):
-            return {"ok": False, "detail": "connection failed; check server settings and credentials"}
-        return result
+            status = result.get("status", "load_failed")
+            detail = {
+                "disabled": "server is disabled",
+                "zero_tools": "server exposed zero tools",
+                "load_failed": "connection failed; check server settings and credentials",
+            }.get(status, "connection failed; check server settings and credentials")
+            return {"ok": False, "status": status, "detail": detail}
+        return {key: value for key, value in result.items() if key != "fingerprint"}
 
     @app.delete("/api/config/mcp/{name}")
     async def delete_mcp_server(name: str) -> dict[str, Any]:
@@ -1088,6 +1836,7 @@ def create_app(state: HarnessState) -> FastAPI:
             raise HTTPException(404, f"unknown MCP server {name}")
         del state.config.mcp_servers[name]
         state.tools.unregister_source(f"mcp:{name}")
+        state.mcp_load_status.pop(name, None)
         state.save_config()
         return {"deleted": name}
 

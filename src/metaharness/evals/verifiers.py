@@ -17,6 +17,9 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from metaharness.core.types import (
     MASTMode,
     Task,
@@ -24,7 +27,6 @@ from metaharness.core.types import (
     Verdict,
     WorkerResult,
 )
-from metaharness.harness.enrichment import check_schema
 
 MAX_TOL = 1.0  # a tol above this stops being a float-rounding tolerance and makes
                # non-adjacent answers match — treat as corruption / unscoreable.
@@ -131,18 +133,56 @@ def verify_output(task: Task, result: WorkerResult) -> VerificationResult:
             scorer="execution",
         )
 
-    problems = check_schema(result.output, task.output_schema)
-    if problems:
-        return VerificationResult(
-            verdict=Verdict.FAIL, score=0.0, detail="; ".join(problems),
-            failure_mode=MASTMode.SCHEMA_INVALID, scorer="schema",
-        )
+    if task.output_schema:
+        try:
+            Draft202012Validator.check_schema(task.output_schema)
+            schema_errors = sorted(
+                Draft202012Validator(task.output_schema).iter_errors(result.output),
+                key=lambda error: tuple(str(part) for part in error.absolute_path),
+            )
+        except SchemaError as exc:
+            return VerificationResult(
+                verdict=Verdict.UNVERIFIED,
+                score=0.5,
+                detail=f"invalid output schema: {exc.message}",
+                scorer="none",
+            )
+        if schema_errors:
+            return VerificationResult(
+                verdict=Verdict.FAIL,
+                score=0.0,
+                detail="; ".join(error.message for error in schema_errors),
+                failure_mode=MASTMode.SCHEMA_INVALID,
+                scorer="schema",
+            )
 
     check = task.success_check
     if not check:
         return VerificationResult(
             verdict=Verdict.UNVERIFIED, score=0.5,
             detail="no checkable success signal for this task", scorer="none",
+        )
+
+    # Malformed collection/string checks must never become tautologies.  In
+    # particular, membership in a string iterates characters and every string
+    # contains ""; both previously allowed malformed ground truth to PASS.
+    if "contains" in check and (
+        not isinstance(check["contains"], str) or not check["contains"].strip()
+    ):
+        return VerificationResult(
+            verdict=Verdict.UNVERIFIED,
+            score=0.5,
+            detail="success_check contains must be a nonempty string",
+            scorer="none",
+        )
+    if "one_of" in check and (
+        not isinstance(check["one_of"], list) or not check["one_of"]
+    ):
+        return VerificationResult(
+            verdict=Verdict.UNVERIFIED,
+            score=0.5,
+            detail="success_check one_of must be a nonempty list",
+            scorer="none",
         )
 
     # malformed GROUND TRUTH → UNVERIFIED, never crash, never fake-PASS, never unfairly FAIL

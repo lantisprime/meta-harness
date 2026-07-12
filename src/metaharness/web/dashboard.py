@@ -154,6 +154,12 @@ tr:last-child td{border-bottom:0}
 .next-action .btn{border-radius:12px;padding:14px 26px}
 .also{color:var(--mut2);font-size:12.5px;margin:0 4px 18px}
 #home-tiles{margin-top:16px}
+.library-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}
+.harness-card .origin{display:flex;gap:7px;align-items:center;margin-bottom:8px}
+.harness-card .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}
+.tool-list{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.library-filter{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+.version-list{border-top:1px solid var(--hair);margin-top:14px;padding-top:10px}
 
 /* AI companion: the gradient sparkle is the ONE signal for advisory content —
    everything without it is verified, deterministic data */
@@ -332,6 +338,7 @@ details.jt details.jt,.jrow{margin-left:16px}
   <div class="logo"><div class="sq">mh</div><div class="name">metaharness</div></div>
   <nav class="pills">
     <button id="nav-home" class="on" onclick="showView('home')">Home</button>
+    <button id="nav-library" onclick="showView('library')">Library</button>
     <button id="nav-wizard" onclick="showView('wizard')">Run</button>
     <button id="nav-settings" onclick="showView('settings')">Settings</button>
     <button id="nav-console" onclick="showView('console')">Console</button>
@@ -351,6 +358,18 @@ details.jt details.jt,.jrow{margin-left:16px}
   <div class="grid" id="home-rows"></div>
 </div>
 
+<!-- ================= HARNESS LIBRARY ================= -->
+<div id="view-library" class="view" style="display:none">
+  <div class="eyebrow">Reusable workflows</div>
+  <h1 class="greet">Harness Library</h1>
+  <div class="library-filter">
+    <div class="small dim">Built-ins stay immutable. Your drafts and published versions persist across restarts.</div>
+    <div style="display:flex;gap:10px;align-items:center"><button class="btn" onclick="startFreshHarness()">+ Create a harness</button>
+    <label class="small"><input id="library-archived" type="checkbox" style="width:auto" onchange="renderLibrary()"> Show archived</label></div>
+  </div>
+  <div id="library-body"><div class="card"><div class="empty">loading harnesses…</div></div></div>
+</div>
+
 <!-- ================= WIZARD ================= -->
 <div id="view-wizard" class="view" style="display:none">
   <div class="eyebrow">Meta agent harness</div>
@@ -365,6 +384,7 @@ details.jt details.jt,.jrow{margin-left:16px}
 <div id="view-settings" class="view" style="display:none">
   <div class="eyebrow">Configuration</div>
   <h1 class="greet">Where completions come from, and who does the work.</h1>
+  <div id="settings-return" style="display:none;margin-bottom:14px"><button class="btn" onclick="returnToHarnessRepair()">← Return to harness repair</button></div>
   <div class="guide"><div class="fx">ƒ</div><div><b>Why this page exists</b>
     <p>Three questions set up the whole harness — a wizard walks you through each.
     Anything sensitive stays on this machine and is always shown masked.</p></div></div>
@@ -481,7 +501,13 @@ details.jt details.jt,.jrow{margin-left:16px}
   </div>
 </div>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="fork-dialog"><form method="dialog" style="min-width:min(480px,90vw)"><h2>Fork this harness</h2>
+  <div class="field"><label for="fork-id">Harness id</label><input id="fork-id"></div>
+  <div class="field"><label for="fork-name">Harness name</label><input id="fork-name"></div>
+  <div class="small red" id="fork-msg"></div><div class="wiz-nav"><button class="btn ghost" value="cancel">Cancel</button>
+  <button class="btn" type="button" onclick="submitForkDialog()">Create fork</button></div></form></dialog>
+<dialog id="library-action-dialog"><div style="min-width:min(560px,90vw)" id="library-action-body"></div></dialog>
 
 <script>
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -621,15 +647,270 @@ function toast(msg){ const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2600); }
 
 /* ---------- view switching ---------- */
-function showView(v){
-  for(const name of ['home','wizard','settings','console','help']){
+let currentView = 'home';
+function showView(v, force=false){
+  if(currentView === 'wizard' && wiz.step === 2 && v !== 'wizard' && !syncOpenStepEditor()) return false;
+  if(!force && currentView === 'wizard' && v !== 'wizard' && wiz.dirty &&
+     !confirm('You have unsaved harness changes. Leave and discard them?')){
+    if(wiz.step === 2) renderPlanStep();
+    return false;
+  }
+  if(!force && currentView === 'wizard' && v !== 'wizard' && wiz.dirty) resetWizard(false, true);
+  currentView = v;
+  for(const name of ['home','library','wizard','settings','console','help']){
     document.getElementById('view-' + name).style.display = v === name ? '' : 'none';
     document.getElementById('nav-' + name).classList.toggle('on', v === name);
   }
   if(v === 'home') renderHome();
+  if(v === 'library') renderLibrary();
   if(v === 'console') refreshConsole();
   if(v === 'settings') renderSettings(true);
+  document.getElementById('settings-return').style.display = v === 'settings' && wiz.repairReturn ? '' : 'none';
   if(v === 'wizard' && wiz.step === 0) renderAgentsStep();  // agents may have changed
+  return true;
+}
+window.addEventListener('beforeunload', e => {
+  if(!wiz.dirty) return;
+  e.preventDefault(); e.returnValue = '';
+});
+
+/* ---------- reusable Harness Library ---------- */
+const LIB = {items: [], versions: {}, forkPending:null};
+async function libraryGet(path, label){
+  const r = await libraryRequest(path, {}, label);
+  return r ? await r.json() : null;
+}
+async function libraryRequest(path, options, label, allowed=[]){
+  try{
+    const r = await fetch(path, options || {});
+    if(!r.ok && !allowed.includes(r.status)){
+      const detail = (await r.text()).slice(0,240);
+      if(r.status === 409){ toast(`${label}: this draft changed elsewhere. Reload it or fork your edits.`); return null; }
+      if(r.status === 422 || r.status === 400){ toast(`${label}: ${humanApiError(detail)}`); return null; }
+      throw new Error(detail);
+    }
+    return r;
+  }catch(e){ toast(`${label} failed — retry when the server is available`); return null; }
+}
+function humanApiError(text){
+  try{ const value=JSON.parse(text); return typeof value.detail === 'string' ? value.detail : JSON.stringify(value.detail); }
+  catch(e){ return text || 'check the highlighted values'; }
+}
+function actionButton(item, action){
+  const id = `'${item.id}'`, version = item.latest_version || 1;
+  const editVersion = item.latest_version === null ? 'null' : item.latest_version;
+  const handlers = {
+    run: `libraryRun(${id},${version},'${item.origin}')`, edit: `libraryEdit(${id},${editVersion},'${item.origin}')`,
+    fork: `libraryFork(${id},${version})`, versions: `libraryVersions(${id})`,
+    archive: `libraryArchive(${id})`, restore: `libraryRestore(${id})`,
+    publish: `libraryPublish(${id})`, delete_draft: `libraryDeleteDraft(${id})`
+  };
+  if(!handlers[action]) return '';
+  const labels = {run:'Run',edit:'Edit',fork:'Fork',versions:'Versions',archive:'Archive',
+    restore:'Restore',publish:'Publish',delete_draft:'Delete draft'};
+  return `<button class="pill" data-action="${esc(action)}" onclick="${handlers[action]}">${labels[action]}</button>`;
+}
+async function renderLibrary(){
+  const body = document.getElementById('library-body');
+  const archived = !!document.getElementById('library-archived')?.checked;
+  body.innerHTML = '<div class="card"><div class="empty">loading harnesses…</div></div>';
+  try{
+    LIB.items = await get('/api/blueprints?include_archived=' + archived);
+    const runs = await get('/api/runs');
+    const details = {};
+    await Promise.all(LIB.items.map(async item=>{
+      try{
+        const record=item.has_draft ? await get('/api/blueprint-drafts/'+encodeURIComponent(item.id))
+          : item.latest_version ? await get(`/api/blueprints/${encodeURIComponent(item.id)}/versions/${item.latest_version}`) : null;
+        if(record) details[item.id]=record;
+      }catch(e){}
+    }));
+    body.innerHTML = `<div class="library-grid">${LIB.items.map(item => {
+      const state = item.archived ? badge('dim','archived') : item.has_draft
+        ? badge('warn', item.latest_version ? 'draft changes' : 'draft') : badge('ok','published');
+      const versions = LIB.versions[item.id];
+      const detail=details[item.id] || {}, lastRun=[...runs].reverse().find(r=>r.blueprint_ref && r.blueprint_ref.id===item.id);
+      const friendlyCaps=capabilityLabels(item.tool_ids || []);
+      return `<div class="card harness-card" data-harness-id="${esc(item.id)}">
+        <div class="origin">${badge(item.origin === 'builtin' ? 'act' : 'dim', item.origin)} ${state}</div>
+        <h2>${esc(item.display_name)}</h2>
+        <div class="sub mono">${esc(item.id)}${item.latest_version ? ' · v' + item.latest_version : ''}</div>
+        <p class="small">${esc(detail.description || 'No description yet.')}</p>
+        <div class="small">${item.stage_count} stage${item.stage_count === 1 ? '' : 's'}</div>
+        <div class="tool-list">${friendlyCaps.map(t => badge('act',t)).join('') || '<span class="small dim">No external capabilities</span>'}</div>
+        <div class="small dim">${detail.published_at ? 'Updated '+ago(detail.published_at) : detail.updated_at ? 'Updated '+ago(detail.updated_at) : 'Update time unavailable'} · ${lastRun ? 'Last run '+ago(lastRun.updated_at || lastRun.started_at) : 'Never run'} · Eval status unavailable</div>
+        <div class="actions">${(item.supported_actions || []).map(a => actionButton(item,a)).join('')}</div>
+        ${item.latest_version ? `<div class="actions"><button class="pill" onclick="libraryEvaluate('${esc(item.id)}',${item.latest_version})">Evaluate</button><button class="pill" onclick="libraryTune('${esc(item.id)}',${item.latest_version})">Tune</button><button class="pill" onclick="libraryPackage('${esc(item.id)}',${item.latest_version})">Package</button></div>` : ''}
+        ${versions ? `<div class="version-list"><div class="kv">Immutable versions</div>${versions.map(v =>
+          `<div class="lrow"><span class="mono">v${v.version}</span><span class="small dim">${ago(v.published_at)}</span>
+           ${item.archived ? '' : `<button class="pill" onclick="libraryRun('${esc(item.id)}',${v.version},'${item.origin}')">Run</button>
+           <button class="pill" onclick="libraryEdit('${esc(item.id)}',${v.version},'${item.origin}')">Edit</button>
+           <button class="pill" onclick="libraryFork('${esc(item.id)}',${v.version})">Fork</button>`}</div>`).join('')}</div>` : ''}
+      </div>`;
+    }).join('')}</div>`;
+  }catch(e){ body.innerHTML = '<div class="card"><div class="empty">Harness Library is unavailable.</div><button class="btn ghost" onclick="renderLibrary()">Retry</button></div>'; }
+}
+function closeLibraryAction(){ document.getElementById('library-action-dialog').close(); }
+async function libraryPackage(id, version){
+  const url=`/api/blueprints/${encodeURIComponent(id)}/versions/${version}/package`;
+  let r; try{ r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targets:['local']})}); }
+  catch(e){ toast('Package failed — retry when the server is available'); return; }
+  if(!r.ok){ toast('Package failed: '+humanApiError(await r.text())); return; }
+  const blob=await r.blob(), a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`${id}-v${version}-portable.zip`; a.click(); URL.revokeObjectURL(a.href);
+  toast(`Packaged ${id} v${version} for local use`);
+}
+async function libraryEvaluate(id, version){
+  const record=await libraryGet(`/api/blueprints/${encodeURIComponent(id)}/versions/${version}`,'Open evaluation'); if(!record) return;
+  const refs=record.eval_suites || [], body=document.getElementById('library-action-body');
+  body.innerHTML=`<h2>Evaluate ${esc(record.name || id)} · v${version}</h2>${refs.length ? `
+    <div class="field"><label>Evaluation suite</label><select id="la-eval-ref">${refs.map((ref,i)=>`<option value="${i}">${esc(ref.id)} · v${ref.version}</option>`).join('')}</select></div>
+    <div class="field"><label>Report id</label><input id="la-report-id" value="${esc(slugify(id+'-'+Date.now()))}"></div>
+    <div class="field"><label>Runner command</label><input id="la-runner-command" class="mono" placeholder="metaharness-eval-runner"></div>
+    <div class="small dim">The command runs in the evaluation sandbox. No evaluation starts until you submit it.</div>
+    <div class="wiz-nav"><button class="btn ghost" onclick="closeLibraryAction()">Cancel</button><button class="btn" onclick="submitLibraryEvaluate('${esc(id)}',${version})">Start evaluation</button></div>`
+    : `<div class="empty">This exact version has no evaluation suite attached. Edit or fork the harness, attach a published suite, then publish a new version.</div><div class="wiz-nav"><button class="btn" onclick="closeLibraryAction()">Close</button></div>`}`;
+  document.getElementById('library-action-dialog').showModal();
+  LIB.actionRecord=record;
+}
+async function submitLibraryEvaluate(id,version){
+  const refs=LIB.actionRecord?.eval_suites || [], ref=refs[+document.getElementById('la-eval-ref').value];
+  const reportId=document.getElementById('la-report-id').value.trim(), command=document.getElementById('la-runner-command').value.trim();
+  if(!reportId || !command){ toast('Give the report a name and runner command'); return; }
+  const r=await post(`/api/blueprints/${encodeURIComponent(id)}/versions/${version}/evaluate`,{report_id:reportId,eval_ref:ref,split:'development',runner:{runner_id:'dashboard-runner',argv:[command]}});
+  if(!r.ok){ toast('Evaluation failed: '+humanApiError(await r.text())); return; }
+  closeLibraryAction(); toast(`Evaluation report ${reportId} created`);
+}
+async function libraryTune(id,version){
+  const record=await libraryGet(`/api/blueprints/${encodeURIComponent(id)}/versions/${version}`,'Open tuning'); if(!record) return;
+  const body=document.getElementById('library-action-body');
+  body.innerHTML=`<h2>Tune ${esc(record.name || id)} · v${version}</h2>
+    <div class="field"><label>Evaluation report references (JSON)</label><textarea id="la-report-refs" class="mono" placeholder='[{"id":"report-1","content_digest":"…","split":"development"}]'></textarea></div>
+    <div class="field"><label>Safe changes (JSON)</label><textarea id="la-patches" class="mono" placeholder='[{"op":"set_description","value":"Improved description"}]'></textarea></div>
+    <div class="field"><label>Why these changes?</label><textarea id="la-rationale"></textarea></div>
+    <div class="small dim">This creates an inert proposal for human review; it does not publish or apply changes.</div>
+    <div class="wiz-nav"><button class="btn ghost" onclick="closeLibraryAction()">Cancel</button><button class="btn" onclick="submitLibraryTune('${esc(id)}',${version})">Create proposal</button></div>`;
+  document.getElementById('library-action-dialog').showModal();
+}
+async function submitLibraryTune(id,version){
+  let reportRefs, patches; try{ reportRefs=JSON.parse(document.getElementById('la-report-refs').value); patches=JSON.parse(document.getElementById('la-patches').value); }
+  catch(e){ toast('Report references and safe changes must be valid JSON'); return; }
+  const rationale=document.getElementById('la-rationale').value.trim(); if(!rationale){ toast('Explain why these changes are proposed'); return; }
+  const proposalId=slugify(`${id}-proposal-${Date.now()}`);
+  const r=await post(`/api/blueprints/${encodeURIComponent(id)}/versions/${version}/tune`,{proposal_id:proposalId,report_refs:reportRefs,patches,rationale,human_approved:false});
+  if(!r.ok){ toast('Tuning proposal failed: '+humanApiError(await r.text())); return; }
+  closeLibraryAction(); toast(`Tuning proposal ${proposalId} created for review`);
+}
+function capabilityLabels(tools){
+  const labels=[]; const set=new Set(tools);
+  if(['read_file','list_files'].some(t=>set.has(t))) labels.push('Read workspace');
+  if(['edit_file','write_file'].some(t=>set.has(t))) labels.push('Change files');
+  if(set.has('grep')) labels.push('Search workspace'); if(set.has('web_fetch')) labels.push('Use the web'); if(set.has('calculator')) labels.push('Calculate');
+  [...new Set(tools.filter(t=>t.includes('.')).map(t=>`Connected: ${t.split('.')[0]}`))].forEach(x=>labels.push(x)); return labels;
+}
+function slugify(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,80); }
+function blueprintContent(record){
+  return {schema_version: record.schema_version || 1, name: record.name,
+    description: record.description || '', workflow: record.workflow,
+    inputs: record.inputs || [], default_context: record.default_context || {},
+    eval_suites: record.eval_suites || [], source: record.source || null};
+}
+function loadBlueprintEditor(record, mode, origin='owned'){
+  resetWizard(false, true);
+  wiz.blueprintMode = mode; wiz.blueprintId = record.id;
+  wiz.blueprintVersion = record.version || record.base_version || null;
+  wiz.blueprintRevision = record.revision || null;
+  wiz.blueprintSource = record.source || null;
+  wiz.blueprintOrigin = origin;
+  wiz.blueprintContent = blueprintContent(record);
+  wiz.harnessName = record.name || ''; wiz.harnessDescription = record.description || '';
+  wiz.harnessSlug = record.id || '';
+  wiz.inputDefs = (record.inputs || []).filter(i=>i.name !== 'goal').map(i=>({name:i.name,type:schemaType(i),required:!!i.required,secret:!!i.secret,default:i.secret && i.default ? i.default.binding : (i.default ?? '')}));
+  wiz.blueprintOriginal = JSON.stringify(wiz.blueprintContent);
+  wiz.plan = structuredClone(record.workflow); wiz.planSource = `blueprint:${record.id}`;
+  wiz.goal = ''; wiz.context = {};
+  wiz.dirty = false; wiz.edited = false;
+  wiz.step = mode === 'run' ? 1 : 2;
+  showView('wizard', true);
+}
+async function libraryRun(id, version, origin='owned'){
+  const record = await libraryGet(`/api/blueprints/${encodeURIComponent(id)}/versions/${version}`, 'Load harness');
+  if(!record) return;
+  loadBlueprintEditor(record, 'run', origin);
+  setStep(1); // collect inputs first; no run starts until the review screen is confirmed
+}
+async function libraryEdit(id, version, origin){
+  if(origin === 'builtin') return libraryFork(id, version);
+  let r = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(id)}`, {}, 'Load draft', [404]);
+  if(!r) return;
+  if(r.status === 404){
+    if(version === null){ toast('The draft no longer exists — refresh the Library'); return; }
+    r = await libraryRequest('/api/blueprint-drafts', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({blueprint_id:id, base_version:version})}, 'Create draft');
+  }else{
+    const existing = await r.json();
+    if(version !== null && existing.base_version !== version){
+      const openExisting = confirm(`A draft based on v${existing.base_version || 'new'} already exists.\n\nOK: open that existing draft.\nCancel: create a separate fork from v${version}.`);
+      if(!openExisting) return libraryFork(id, version);
+      loadBlueprintEditor(existing, 'draft', origin); setStep(2); return;
+    }
+    loadBlueprintEditor(existing, 'draft', origin); setStep(2); return;
+  }
+  if(!r) return;
+  loadBlueprintEditor(await r.json(), 'draft', origin); setStep(2);
+}
+async function libraryFork(id, version, contentOverride=null, chosen=null){
+  const suggested = slugify('my-' + id);
+  if(!chosen){ LIB.forkPending={id,version,contentOverride}; document.getElementById('fork-id').value=suggested; document.getElementById('fork-name').value=suggested.replace(/-/g,' '); document.getElementById('fork-msg').textContent=''; document.getElementById('fork-dialog').showModal(); return; }
+  const newId=chosen.id, name=chosen.name;
+  const r = await libraryRequest(`/api/blueprints/${encodeURIComponent(id)}/fork`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({new_id:newId, source_version:version, display_name:name})}, 'Fork harness');
+  if(!r) return;
+  let draft = await r.json();
+  if(contentOverride){
+    const updated = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(newId)}`, {method:'PATCH',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({content:contentOverride, expected_revision:draft.revision})}, 'Preserve fork edits');
+    if(!updated){
+      await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(newId)}`, {method:'DELETE'}, 'Clean up fork');
+      toast('Fork could not preserve your edits; the original remains open'); return;
+    }
+    draft = await updated.json();
+  }
+  delete LIB.versions[newId];
+  loadBlueprintEditor(draft, 'draft', 'fork'); setStep(2);
+}
+function submitForkDialog(){
+  const pending=LIB.forkPending, id=document.getElementById('fork-id').value.trim(), name=document.getElementById('fork-name').value.trim();
+  if(!pending || !id || !name){ document.getElementById('fork-msg').textContent='Name and id are required.'; return; }
+  if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)){ document.getElementById('fork-msg').textContent='Use lowercase letters, numbers, and single hyphens for the id.'; return; }
+  document.getElementById('fork-dialog').close(); LIB.forkPending=null; libraryFork(pending.id,pending.version,pending.contentOverride,{id,name});
+}
+async function libraryVersions(id){
+  const versions = await libraryGet(`/api/blueprints/${encodeURIComponent(id)}/versions`, 'Load versions');
+  if(!versions) return;
+  LIB.versions[id] = versions;
+  renderLibrary();
+}
+async function libraryArchive(id){
+  if(!confirm('Archive this published harness? Runs and versions are preserved.')) return;
+  const r = await libraryRequest(`/api/blueprints/${encodeURIComponent(id)}/archive`, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}, 'Archive harness');
+  if(r){ delete LIB.versions[id]; renderLibrary(); }
+}
+async function libraryRestore(id){
+  const r = await libraryRequest(`/api/blueprints/${encodeURIComponent(id)}/restore`, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}, 'Restore harness');
+  if(r){ delete LIB.versions[id]; renderLibrary(); }
+}
+async function libraryDeleteDraft(id){
+  if(!confirm('Permanently delete this draft? Published versions are never deleted.')) return;
+  const r = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(id)}`, {method:'DELETE'}, 'Delete draft');
+  if(r){ delete LIB.versions[id]; renderLibrary(); }
+}
+async function libraryPublish(id){
+  const draft = await libraryGet(`/api/blueprint-drafts/${encodeURIComponent(id)}`, 'Load draft');
+  if(!draft) return;
+  const r = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(id)}/publish`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:draft.revision})}, 'Publish harness');
+  if(r){ delete LIB.versions[id]; toast(`Published v${(await r.json()).version}`); renderLibrary(); }
 }
 
 /* ---------- home: what needs doing, at a glance ---------- */
@@ -666,9 +947,9 @@ function nextActions(runs, workers, prov, tuning){
 
 async function renderHome(){
   try{
-    const [runs, workers, prov, playbook, tuning] = await Promise.all([
+    const [runs, workers, prov, playbook, tuning, blueprints] = await Promise.all([
       get('/api/runs'), get('/api/workers'), get('/api/provenance'),
-      get('/api/playbook'), get('/api/optimization')]);
+      get('/api/playbook'), get('/api/optimization'), get('/api/blueprints')]);
     document.getElementById('home-date').textContent =
       new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'});
     const q = nextActions(runs, workers, prov, tuning);
@@ -678,6 +959,9 @@ async function renderHome(){
       <h2>${esc(first.title)}</h2><p>${esc(first.detail)}</p></div>
       <button class="btn" onclick="showView('${first.go}')">${esc(first.cta)}</button></div>`
       + (q.length > 1 ? `<div class="also">Also waiting: ${q.slice(1).map(x => esc(x.title)).join('  ·  ')}</div>` : '');
+    document.getElementById('home-next').innerHTML += `<div style="display:flex;gap:10px;margin:0 0 18px;flex-wrap:wrap">
+      <button class="btn" onclick="startFreshHarness()">Create a harness</button>
+      <button class="btn ghost" onclick="showView('library')">Open Harness Library</button></div>`;
 
     const active = runs.filter(r => ['running','awaiting_approval'].includes(r.status)).length;
     const done = runs.filter(r => r.status === 'completed').length;
@@ -695,7 +979,16 @@ async function renderHome(){
       .sort((a, b) => (b.report.finished_at || 0) - (a.report.finished_at || 0))[0];
     const searchLine = latestSearch
       ? `<div class="small dim" style="margin-top:8px">${esc(tuningSummary(latestSearch))}</div>` : '';
+    const recentHarnesses = blueprints.filter(b => b.origin !== 'builtin').slice(-3).reverse();
     document.getElementById('home-rows').innerHTML = `
+      <div class="card wide"><h2>Recent harnesses</h2>
+        <div class="sub">Create once, then run it again with new inputs.</div>
+        ${recentHarnesses.length ? recentHarnesses.map(h => `<div class="lrow">
+          <div class="rr-main"><div class="rr-title">${esc(h.display_name)}</div>
+          <div class="rr-meta mono">${esc(h.id)}${h.latest_version ? ' · v' + h.latest_version : ' · draft'}</div></div>
+          ${h.latest_version ? `<button class="pill" onclick="libraryRun('${esc(h.id)}',${h.latest_version},'${h.origin}')">Run</button>` : ''}
+          <button class="pill" onclick="libraryEdit('${esc(h.id)}',${h.latest_version || 1},'${h.origin}')">Edit</button></div>`).join('')
+          : '<div class="empty">No saved harnesses yet. Create one once, then reuse it with new inputs.</div>'}</div>
       <div class="card"><h2>Latest result</h2>
         <div class="sub">The most recent thing the harness did</div>
         ${latest ? `<div class="lrow"><div class="rr-main">
@@ -732,7 +1025,36 @@ const STEPS = ['Agents','Goal','Plan','Run','Done'];
 const wiz = { step: 0, goal: '', context: {}, workflowType: '', plan: null, planSource: '',
               editingStep: null, builderMode: false, builder: null, yamlMode: false,
               yamlText: '', edited: false, runId: null, run: null, poller: null,
-              pinnedStep: null, fallbackReason: '' };
+              pinnedStep: null, fallbackReason: '', dirty: false,
+              stepEditorDirty: false,
+              stepEditorPriorDirty: false,
+              blueprintMode: null, blueprintId: null, blueprintVersion: null,
+              blueprintRevision: null, blueprintSource: null, blueprintContent: null,
+              blueprintOriginal: null, blueprintOrigin: null,
+              harnessName: '', harnessDescription: '', harnessSlug: '', inputDefs: [], readinessIssues: [], repairReturn:false, rerunInputs:false };
+
+function resetBlueprintState(){
+  wiz.blueprintMode = null; wiz.blueprintId = null; wiz.blueprintVersion = null;
+  wiz.blueprintRevision = null; wiz.blueprintSource = null; wiz.blueprintContent = null;
+  wiz.blueprintOriginal = null; wiz.blueprintOrigin = null; wiz.dirty = false;
+  wiz.stepEditorDirty = false;
+  wiz.stepEditorPriorDirty = false;
+  wiz.harnessName = ''; wiz.harnessDescription = ''; wiz.harnessSlug = ''; wiz.inputDefs = [];
+  wiz.readinessIssues=[]; wiz.repairReturn=false;
+  wiz.rerunInputs=false;
+}
+function markPlanDirty(){ wiz.edited = true; wiz.dirty = true; }
+function markStepEditorDirty(){ wiz.stepEditorDirty = true; wiz.dirty = true; }
+document.addEventListener('input', e => {
+  if(currentView !== 'wizard' || wiz.step !== 2) return;
+  if(e.target.closest('.step-edit') || e.target.matches('.yaml-box') ||
+     (e.target.id || '').startsWith('sb-')) markStepEditorDirty();
+});
+document.addEventListener('change', e => {
+  if(currentView === 'wizard' && wiz.step === 2 &&
+     (e.target.closest('.step-edit') || (e.target.id || '').startsWith('sb-')))
+    markStepEditorDirty();
+});
 
 function renderStepper(){
   document.getElementById('stepper').innerHTML = STEPS.map((label, i) =>
@@ -741,6 +1063,7 @@ function renderStepper(){
 }
 
 function setStep(n){
+  if(wiz.step === 2 && n !== 2 && !syncOpenStepEditor()) return false;
   wiz.step = n;
   renderStepper();
   [renderAgentsStep, renderGoalStep, renderPlanStep, renderRunStep, renderDoneStep][n]();
@@ -751,6 +1074,7 @@ function setStep(n){
     'The harness is working.',
     'Done. Here is what came back.',
   ][n];
+  return true;
 }
 
 /* ---------- step 1: agents ---------- */
@@ -807,6 +1131,7 @@ async function loadWorkflowTypes(){
 }
 
 function pickWorkflowType(id){
+  if(document.getElementById('harness-name')) captureHarnessSetup();
   wiz.workflowType = id;
   renderGoalStep();
 }
@@ -844,6 +1169,20 @@ function applyGoalAdvice(i){
 }
 
 async function renderGoalStep(){
+  if(wiz.blueprintMode === 'run' || wiz.rerunInputs){
+    const reusable = wiz.blueprintContent || contentForCurrentPlan();
+    const inputFields = (reusable.inputs || []).map(inputRunField).join('');
+    document.getElementById('wiz-body').innerHTML = `
+      <div class="guide"><div><b>Run ${esc(reusable.name)} with new inputs.</b>
+        <p>${wiz.blueprintMode === 'run' ? `This loads exact version v${wiz.blueprintVersion}.` : 'This keeps the current stages.'} Nothing runs until you review the stages and confirm.</p></div></div>
+      <div class="card"><h2>Inputs for this run</h2>${inputFields || '<div class="empty">This harness has no declared inputs.</div>'}
+        <details class="field"><summary>Advanced extra context (JSON)</summary>
+          <label for="goalctx">Extra context</label><input id="goalctx" class="mono" aria-label="Other input context as JSON" value=""></details>
+        <span class="small red" id="goalmsg"></span></div>
+      <div class="wiz-nav"><button class="btn ghost" onclick="showView('library')">← Library</button>
+        <button class="btn" onclick="reviewBlueprintRun()">Review harness →</button></div>`;
+    return;
+  }
   const types = await loadWorkflowTypes();
   const chosen = types.find(t => t.id === wiz.workflowType);
   const typePills = ['<button class="pill ' + (wiz.workflowType ? '' : 'on') + '" onclick="pickWorkflowType(\\'\\')">Free-form (planner)</button>']
@@ -866,13 +1205,22 @@ async function renderGoalStep(){
       your goal through that named process with its built-in verification gates.
       Put any data the task needs into context — steps reference it by key.</p></div></div>
     <div class="card">
+      <div class="field" style="display:flex;gap:10px"><span style="flex:1"><label for="harness-name">Harness name</label>
+        <input id="harness-name" value="${esc(wiz.harnessName)}" placeholder="Weekly incident triage"></span>
+        <span style="width:240px"><label for="harness-slug">Harness id</label><input id="harness-slug" class="mono" value="${esc(wiz.harnessSlug)}" placeholder="weekly-incident-triage"></span></div>
+      <div class="field"><label for="harness-description">Description</label>
+        <input id="harness-description" value="${esc(wiz.harnessDescription)}" placeholder="What this reusable harness is for"></div>
       <div class="field"><label>Workflow type</label>
         <div class="pillrow">${typePills}</div>${typeNote}</div>
-      <div class="field"><label>Goal</label>
+      <div class="field"><label for="goal">Goal</label>
         <textarea id="goal" placeholder="e.g. Read the incident report in context, classify severity as exactly low or high, summarize it for on-call, and draft the page for my approval.">${esc(wiz.goal)}</textarea></div>
-      <div class="field"><label>Context (JSON, optional)</label>
-        <input id="goalctx" class="mono" placeholder='{"report": "db-1 disk full, checkout failing"}'
+      <div class="field"><label for="goalctx">Context (JSON, optional)</label>
+        <input id="goalctx" class="mono" aria-label="Context as JSON" placeholder='{"report": "db-1 disk full, checkout failing"}'
           value="${esc(Object.keys(wiz.context).length ? JSON.stringify(wiz.context) : '')}"></div>
+      <fieldset class="field"><legend>Reusable inputs</legend>
+        <div class="small dim">Add named values that each run will ask for. Goal is handled automatically.</div>
+        ${inputDefinitionRows()}
+        <button class="pill" type="button" onclick="addInputDefinition()">+ Add input</button></fieldset>
       <span class="small dim" id="goalmsg"></span>
       <div style="margin-top:6px"><button class="btn ghost" onclick="adviseGoal()" id="advise-goal-btn">
         <svg style="width:13px;height:13px"><use href="#sparkle"/></svg> Improve with AI</button></div>
@@ -882,11 +1230,99 @@ async function renderGoalStep(){
       <button class="btn" id="planbtn" onclick="makePlan()">Plan workflow →</button></div>`;
 }
 
+function schemaType(input){ return (input.schema || {}).type || 'string'; }
+function guidedInputNames(){
+  const names=['goal'];
+  [...(wiz.blueprintContent?.inputs || []), ...(wiz.inputDefs || [])].forEach(input => {
+    const name=String(input?.name || '').trim(); if(name && !names.includes(name)) names.push(name);
+  });
+  return names;
+}
+function inputMappingFields(value, prefix){
+  const inputs=value.inputs || {};
+  return `<fieldset class="field"><legend>Inputs available to this stage</legend>
+    <div class="small dim">Choose which reusable run values this stage receives, and the local name used in its task.</div>
+    ${guidedInputNames().map(source => {
+      const found=Object.entries(inputs).find(([,v]) => v === `$context.${source}`);
+      const target=found ? found[0] : source;
+      return `<div style="display:flex;gap:10px;align-items:end;margin-top:8px">
+        <label style="flex:1;display:flex;gap:8px;align-items:center"><input type="checkbox" style="width:auto" data-map-prefix="${prefix}" data-map-source="${esc(source)}" ${found ? 'checked' : ''}> Use <span class="mono">${esc(source)}</span></label>
+        <span style="flex:1"><label>Stage input name</label><input data-map-prefix="${prefix}" data-map-target="${esc(source)}" value="${esc(target)}" ${found ? '' : 'disabled'}></span></div>`;
+    }).join('')}</fieldset>`;
+}
+function collectMappedInputs(prefix, original={}){
+  const mapped={};
+  Object.entries(original).forEach(([key,value]) => { if(typeof value !== 'string' || !value.startsWith('$context.')) mapped[key]=value; });
+  document.querySelectorAll(`[data-map-prefix="${prefix}"][data-map-source]`).forEach(box => {
+    if(!box.checked) return;
+    const target=document.querySelector(`[data-map-prefix="${prefix}"][data-map-target="${CSS.escape(box.dataset.mapSource)}"]`);
+    const name=(target?.value || box.dataset.mapSource).trim(); if(name) mapped[name]=`$context.${box.dataset.mapSource}`;
+  });
+  return mapped;
+}
+document.addEventListener('change', event => {
+  const box=event.target.closest?.('[data-map-source]'); if(!box) return;
+  const target=document.querySelector(`[data-map-prefix="${box.dataset.mapPrefix}"][data-map-target="${CSS.escape(box.dataset.mapSource)}"]`);
+  if(target) target.disabled=!box.checked;
+});
+function inputRunField(input){
+  const name=esc(input.name), value=wiz.context[input.name] ?? input.default ?? '';
+  if(input.name === 'goal') return `<div class="field"><label for="goal">Goal${input.required ? ' · required' : ''}</label><textarea id="goal" data-run-input="goal">${esc(wiz.goal || value)}</textarea></div>`;
+  if(input.secret) return `<div class="field"><label for="run-input-${name}">${name} secret binding${input.required ? ' · required' : ''}</label><input id="run-input-${name}" data-run-input="${name}" data-secret="true" value="${esc(value && value.binding ? value.binding : '')}" placeholder="configured-binding-name"></div>`;
+  const type=schemaType(input), htmlType=type === 'number' || type === 'integer' ? 'number' : 'text';
+  if(type === 'boolean') return `<div class="field"><label><input type="checkbox" style="width:auto" data-run-input="${name}" data-value-type="boolean" ${value ? 'checked' : ''}> ${name}${input.required ? ' · required' : ''}</label></div>`;
+  return `<div class="field"><label for="run-input-${name}">${name}${input.required ? ' · required' : ''}</label><input id="run-input-${name}" data-run-input="${name}" data-value-type="${esc(type)}" type="${htmlType}" value="${esc(value)}"></div>`;
+}
+function captureRunInputs(){
+  const out={}; document.querySelectorAll('[data-run-input]').forEach(el => {
+    let value=el.dataset.valueType === 'boolean' ? el.checked : el.value; if(value === '') return;
+    if(el.dataset.secret) value={binding:value};
+    else if(['number','integer'].includes(el.dataset.valueType)) value=Number(value);
+    if(el.dataset.runInput === 'goal') wiz.goal=String(value); else out[el.dataset.runInput]=value;
+  }); return out;
+}
+function captureHarnessSetup(){
+  const grab=id=>document.getElementById(id)?.value || '';
+  wiz.harnessName=grab('harness-name').trim(); wiz.harnessDescription=grab('harness-description').trim();
+  wiz.harnessSlug=grab('harness-slug').trim() || slugify(wiz.harnessName);
+  document.querySelectorAll('[data-input-row]').forEach((row,i)=>{
+    const item=wiz.inputDefs[i]; if(!item) return;
+    item.name=row.querySelector('[data-part=name]').value.trim(); item.type=row.querySelector('[data-part=type]').value;
+    item.required=row.querySelector('[data-part=required]').checked; item.secret=row.querySelector('[data-part=secret]').checked;
+    item.default=row.querySelector('[data-part=default]').value;
+  });
+}
+function inputDefinitionRows(){ return wiz.inputDefs.map((d,i)=>`<div data-input-row style="display:grid;grid-template-columns:1.2fr .8fr .8fr .8fr 1.3fr auto;gap:8px;align-items:end;margin:8px 0">
+  <span><label>Input name</label><input data-part="name" value="${esc(d.name)}"></span>
+  <span><label>Type</label><select data-part="type">${['string','number','integer','boolean'].map(t=>`<option ${d.type===t?'selected':''}>${t}</option>`).join('')}</select></span>
+  <label><input data-part="required" type="checkbox" style="width:auto" ${d.required?'checked':''}> Required</label>
+  <label><input data-part="secret" type="checkbox" style="width:auto" ${d.secret?'checked':''}> Secret</label>
+  <span><label>${d.secret ? 'Default binding' : 'Default'}</label><input data-part="default" value="${esc(d.default || '')}" placeholder="${d.secret ? 'binding-name' : ''}"></span>
+  <button type="button" class="pill" aria-label="Remove input ${esc(d.name || i+1)}" onclick="removeInputDefinition(${i})">Remove</button></div>`).join(''); }
+function addInputDefinition(){ captureHarnessSetup(); wiz.inputDefs.push({name:'',type:'string',required:false,secret:false,default:''}); renderGoalStep(); }
+function removeInputDefinition(i){ captureHarnessSetup(); wiz.inputDefs.splice(i,1); renderGoalStep(); }
+
+function reviewBlueprintRun(){
+  const msg = document.getElementById('goalmsg');
+  wiz.goal = '';
+  const raw = document.getElementById('goalctx').value.trim();
+  try{ wiz.context = Object.assign(raw ? JSON.parse(raw) : {}, captureRunInputs()); }catch(e){ msg.textContent = 'context is not valid JSON'; return; }
+  const content=wiz.blueprintContent || contentForCurrentPlan();
+  if((content.inputs || []).some(i => i.name === 'goal' && i.required) && !wiz.goal){
+    msg.textContent = 'this harness requires a goal'; return;
+  }
+  wiz.rerunInputs=false;
+  setStep(2);
+}
+
 async function makePlan(){
   const msg = document.getElementById('goalmsg');
   const btn = document.getElementById('planbtn');
+  captureHarnessSetup();
   wiz.goal = document.getElementById('goal').value.trim();
   if(!wiz.goal){ msg.textContent = 'describe a goal first'; return; }
+  if(!wiz.harnessName) wiz.harnessName=wiz.goal.slice(0,80);
+  if(!wiz.harnessSlug) wiz.harnessSlug=slugify(wiz.harnessName) || 'custom-harness';
   const ctxRaw = document.getElementById('goalctx').value.trim();
   wiz.context = {};
   if(ctxRaw){ try{ wiz.context = JSON.parse(ctxRaw); }catch(e){ msg.textContent = 'context is not valid JSON'; return; } }
@@ -897,6 +1333,7 @@ async function makePlan(){
                          depends_on: [], hitl: false, success_check: null}]};
     wiz.plan.steps = [];  // wizard-driven: steps are added one by one
     wiz.planSource = 'custom';
+    wiz.dirty = true;
     wiz.builderMode = true;
     wiz.builder = null;
     setStep(2);
@@ -913,6 +1350,7 @@ async function makePlan(){
   const data = await r.json();
   wiz.plan = data.workflow; wiz.planSource = data.plan_source;
   wiz.fallbackReason = data.fallback_reason || '';
+  wiz.dirty = true;
   setStep(2);
 }
 
@@ -921,36 +1359,75 @@ const TASK_TYPES = ['classify','extract','summarize','transform','arithmetic',
                     'code_edit','reasoning','planning','general'];
 let TOOLS_NAMES = null;
 let TOOLS_CATALOG = null;
+let TOOL_BUNDLES = [];
+let ASSIGNMENT_WORKERS = [];
+let ASSIGNMENT_WORKERS_LOADED = false;
 async function loadToolNames(){
   if(TOOLS_NAMES === null){
     try{
       TOOLS_CATALOG = await get('/api/tools');
       TOOLS_NAMES = TOOLS_CATALOG.map(t => t.name);
+      buildToolBundles();
     }catch(e){ TOOLS_CATALOG = []; TOOLS_NAMES = []; }
   }
   return TOOLS_NAMES;
+}
+function buildToolBundles(){
+  const has = names => names.filter(n => (TOOLS_NAMES || []).includes(n));
+  TOOL_BUNDLES = [
+    {label:'Read workspace',tools:has(['read_file','list_files'])},
+    {label:'Search workspace',tools:has(['grep','list_files'])},
+    {label:'Change files',tools:has(['read_file','write_file','edit_file','grep','list_files'])},
+    {label:'Use the web',tools:has(['web_fetch'])}, {label:'Calculate',tools:has(['calculator'])},
+  ].filter(b=>b.tools.length);
+  const mcp={}; (TOOLS_CATALOG || []).filter(t=>(t.source||'').startsWith('mcp:')).forEach(t=>{
+    const server=t.source.slice(4); (mcp[server]=mcp[server]||[]).push(t.name); });
+  Object.entries(mcp).forEach(([server,tools])=>TOOL_BUNDLES.push({label:`Connected: ${server}`,tools}));
+}
+async function loadAssignmentWorkers(){
+  if(ASSIGNMENT_WORKERS_LOADED) return;
+  try{ const routing=await get('/api/routing'); ASSIGNMENT_WORKERS=Object.entries(routing).flatMap(([tier,p])=>(p.members||[]).map(m=>({...m,tier}))); }
+  catch(e){ ASSIGNMENT_WORKERS=[]; }
+  ASSIGNMENT_WORKERS_LOADED=true;
 }
 
 function toolPicker(selected, mode){
   const groups = {};
   (TOOLS_CATALOG || []).forEach(tool =>
     (groups[tool.source || 'builtin'] = groups[tool.source || 'builtin'] || []).push(tool));
-  return Object.entries(groups).map(([source, tools]) => {
+  const bundles = `<div class="hint-panel"><b>Capabilities</b><div class="small dim">Choose a friendly bundle; the exact granted tools are shown underneath.</div>
+    <div class="pillrow">${TOOL_BUNDLES.map((b,i)=>`<button type="button" class="pill ${b.tools.every(t=>selected.includes(t))?'on':''}" data-tool-bundle="${i}" data-tool-mode="${mode}">${esc(b.label)}</button>`).join('')}</div>
+    ${TOOL_BUNDLES.map(b=>`<div class="small"><b>${esc(b.label)}:</b> <span class="mono">${esc(b.tools.join(', '))}</span></div>`).join('')}</div>`;
+  const exact = Object.entries(groups).map(([source, tools]) => {
     const mcp = source.startsWith('mcp:');
     const label = mcp ? `MCP server · ${source.slice(4)}` : 'Built-in tools';
     return `<div style="margin:10px 0"><div class="kv">${esc(label)} · ${tools.length}</div>
       ${tools.map(tool => {
         const friendly = mcp && tool.name.includes('.') ? tool.name.split('.').slice(1).join('.') : tool.name;
         const click = mode === 'builder'
-          ? 'toggleDraftTool(this.dataset.tool)' : "this.classList.toggle('on')";
+          ? 'toggleDraftTool(this.dataset.tool)' : "this.classList.toggle('on');markStepEditorDirty()";
         const safety = mcp ? badge('warn','human gate') : '';
         return `<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
           <button class="tool-toggle ${selected.includes(tool.name) ? 'on' : ''}"
             onclick="${click}" data-tool="${esc(tool.name)}">${esc(friendly)}</button>
           ${safety}<span class="small dim">${esc(tool.description || '')}</span></div>`;
       }).join('')}</div>`;
-  }).join('') || '<div class="small dim">No tools are loaded.</div>';
+  }).join('') || '<div class="small dim">No tools are loaded. Open Settings to connect or load a capability.</div>';
+  return bundles + `<details open><summary>Advanced: choose exact tools</summary>${exact}</details>`;
 }
+
+document.addEventListener('click', e=>{
+  const button=e.target.closest('[data-tool-bundle]'); if(!button) return;
+  const bundle=TOOL_BUNDLES[+button.dataset.toolBundle]; if(!bundle) return;
+  if(button.dataset.toolMode === 'builder'){
+    const selected=wiz.builder.draft.tools, all=bundle.tools.every(t=>selected.includes(t));
+    bundle.tools.forEach(t=>{ if(all){ const i=selected.indexOf(t); if(i>=0) selected.splice(i,1); } else if(!selected.includes(t)) selected.push(t); });
+    if(selected.some(mcpToolNeedsGate)) wiz.builder.draft.hitl=true; markStepEditorDirty(); renderPlanStep();
+  }else{
+    const all=bundle.tools.every(t=>document.querySelector(`.step-edit [data-tool="${CSS.escape(t)}"]`)?.classList.contains('on'));
+    bundle.tools.forEach(t=>document.querySelector(`.step-edit [data-tool="${CSS.escape(t)}"]`)?.classList.toggle('on',!all)); markStepEditorDirty();
+  }
+});
 
 function mcpToolNeedsGate(name){
   const tool = (TOOLS_CATALOG || []).find(t => t.name === name);
@@ -999,18 +1476,31 @@ function planNote(){
 }
 
 async function renderPlanStep(){
-  await loadToolNames();
+  await Promise.all([loadToolNames(), loadAssignmentWorkers()]);
   if(wiz.builderMode){
     if(!wiz.builder) wiz.builder = {sub: 0, draft: newDraft()};
     return renderStepBuilder();
   }
   if(wiz.yamlMode) return renderYamlEditor();
   const p = wiz.plan;
+  const identity = wiz.blueprintId
+    ? `${badge('act', wiz.blueprintMode === 'draft' ? 'saved draft' : 'exact version')} <span class="mono small">${esc(wiz.blueprintId)}${wiz.blueprintVersion ? '@' + wiz.blueprintVersion : ''}</span>`
+    : badge('dim','not saved');
+  const saveActions = wiz.blueprintMode === 'draft'
+    ? `<button class="btn ghost" onclick="saveHarnessDraft()">Save draft</button>
+       <button class="btn ghost" onclick="publishHarness()">Publish</button>`
+    : wiz.blueprintMode === 'run'
+    ? `<button class="btn ghost" onclick="forkCurrentHarness()">Fork to edit</button>`
+    : `<button class="btn ghost" onclick="saveHarnessDraft()">Save as harness</button>`;
   document.getElementById('wiz-body').innerHTML = `
     <div class="guide"><div><b>Nothing has run yet — and every step is editable.</b>
       <p>✎ edits a step, ↑↓ reorder, ✕ removes, + adds one via the step wizard.
       Steps marked HITL pause for your approval. YAML mode has every advanced field.</p></div></div>
-    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">${planNote()}</div>
+    <div class="card"><h2>${esc(p.name)}</h2><div class="sub">${planNote()} · ${identity}</div>
+      <details class="field"><summary><b>Harness details and reusable inputs</b></summary>
+        <div class="field"><label for="plan-harness-name">Name</label><input id="plan-harness-name" value="${esc(wiz.harnessName || wiz.blueprintContent?.name || p.name)}" oninput="wiz.harnessName=this.value;markPlanDirty()"></div>
+        <div class="field"><label for="plan-harness-description">Description</label><input id="plan-harness-description" value="${esc(wiz.harnessDescription || wiz.blueprintContent?.description || '')}" oninput="wiz.harnessDescription=this.value;markPlanDirty()"></div>
+        <div class="small dim">Input fields are configured on the Goal step; Advanced YAML remains available for schema-only features.</div></details>
       ${p.steps.map((st, i) => wiz.editingStep === i ? stepEditForm(st, i) : `
         <div class="planstep"><div class="n">${i + 1}</div>
           <div style="flex:1"><div class="pt">${esc(st.id)}
@@ -1020,17 +1510,81 @@ async function renderPlanStep(){
           <div class="pd">${esc(st.objective)}</div>
           ${(st.depends_on || []).length ? `<div class="pd mono">after: ${esc(st.depends_on.join(', '))}</div>` : ''}</div>
           <div class="step-actions">
-            <button title="edit" onclick="editStep(${i})">✎</button>
-            <button title="move up" onclick="moveStep(${i},-1)" ${i ? '' : 'disabled'}>↑</button>
-            <button title="move down" onclick="moveStep(${i},1)" ${i < p.steps.length - 1 ? '' : 'disabled'}>↓</button>
-            <button title="remove" onclick="deleteStep(${i})">✕</button></div></div>`).join('')}
+            <button title="edit" aria-label="Edit stage ${esc(st.id)}" onclick="editStep(${i})">✎</button>
+            <button title="move up" aria-label="Move stage ${esc(st.id)} up" onclick="moveStep(${i},-1)" ${i ? '' : 'disabled'}>↑</button>
+            <button title="move down" aria-label="Move stage ${esc(st.id)} down" onclick="moveStep(${i},1)" ${i < p.steps.length - 1 ? '' : 'disabled'}>↓</button>
+            <button title="remove" aria-label="Remove stage ${esc(st.id)}" onclick="deleteStep(${i})">✕</button></div></div>`).join('')}
       <div style="margin-top:14px;display:flex;gap:10px">
         <button class="btn ghost" onclick="openStepBuilder()">+ Add step (wizard)</button>
-        <button class="btn ghost" onclick="openYaml()">Edit as YAML</button></div>
+        <button class="btn ghost" onclick="openYaml()">Edit as YAML</button>
+        ${saveActions}</div>
       <div class="small red" id="planmsg" style="margin-top:8px"></div></div>
     <div class="wiz-nav">
-      <button class="btn ghost" onclick="setStep(1)">← Rephrase goal</button>
-      <button class="btn" onclick="runValidatedPlan()" ${p.steps.length ? '' : 'disabled'}>Run this plan →</button></div>`;
+      <button class="btn ghost" onclick="setStep(1)">← ${wiz.blueprintMode === 'run' ? 'Change inputs' : 'Rephrase goal'}</button>
+      <button class="btn" onclick="runValidatedPlan()" ${p.steps.length ? '' : 'disabled'}>${wiz.blueprintMode === 'run' && !wiz.dirty ? 'Confirm and run v' + wiz.blueprintVersion + ' →' : wiz.blueprintMode === 'draft' ? 'Run without saving →' : 'Run this plan →'}</button></div>`;
+}
+
+function contentForCurrentPlan(name){
+  const base = wiz.blueprintContent || {};
+  const needsGoal = JSON.stringify(wiz.plan).includes('$context.goal');
+  const guided = (wiz.inputDefs || []).filter(i=>i.name).map(i=>({name:i.name,schema:{type:i.type},required:i.required,
+    default:i.secret ? (i.default ? {binding:i.default} : null) : i.default === '' ? null : (['number','integer'].includes(i.type) ? Number(i.default) : i.type === 'boolean' ? i.default === 'true' : i.default),secret:i.secret}));
+  const existingGoal=(base.inputs || []).find(i=>i.name==='goal');
+  const inputs = [...(existingGoal ? [existingGoal] : needsGoal ? [{name:'goal',schema:{type:'string'},required:true,default:null,secret:false}] : []), ...guided];
+  return {schema_version:1, name:name || wiz.harnessName || base.name || wiz.plan.name, description:wiz.harnessDescription || base.description || '',
+    workflow:wiz.plan, inputs,
+    default_context:base.default_context || {}, eval_suites:base.eval_suites || [], source:base.source || null};
+}
+async function saveHarnessDraft(){
+  if(!syncOpenStepEditor()) return false;
+  const valid = await post('/api/workflows/validate', {workflow:wiz.plan});
+  if(!valid.ok){ toast('Fix the workflow: '+humanApiError(await valid.text())); return false; }
+  wiz.plan = (await valid.json()).workflow;
+  let id = wiz.blueprintId, name = wiz.blueprintContent?.name;
+  if(!id){
+    name = wiz.harnessName || wiz.plan.name.replace(/-/g,' ');
+    id = wiz.harnessSlug || slugify(name);
+    if(!name || !id){ toast('Add a harness name and id on the Goal step before saving'); return false; }
+  }
+  const content = contentForCurrentPlan(name);
+  let r;
+  if(wiz.blueprintMode === 'draft'){
+    r = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(id)}`, {method:'PATCH',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({content, expected_revision:wiz.blueprintRevision})}, 'Save draft');
+  }else{
+    r = await libraryRequest('/api/blueprint-drafts', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({blueprint_id:id, content})}, 'Save draft');
+  }
+  if(!r) return false;
+  const draft = await r.json();
+  wiz.blueprintMode='draft'; wiz.blueprintId=draft.id; wiz.blueprintVersion=draft.base_version;
+  wiz.blueprintRevision=draft.revision; wiz.blueprintSource=draft.source;
+  wiz.blueprintContent=blueprintContent(draft); wiz.blueprintOriginal=JSON.stringify(wiz.blueprintContent);
+  wiz.dirty=false; toast('Draft saved');
+  if(wiz.step === 2) renderPlanStep(); else if(wiz.step === 4) renderDoneStep();
+  return true;
+}
+async function publishHarness(){
+  if(!syncOpenStepEditor()) return;
+  if(wiz.dirty && !(await saveHarnessDraft())) return;
+  if(wiz.blueprintMode !== 'draft') return;
+  const r = await libraryRequest(`/api/blueprint-drafts/${encodeURIComponent(wiz.blueprintId)}/publish`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:wiz.blueprintRevision})}, 'Publish harness');
+  if(!r) return;
+  const version = await r.json();
+  wiz.blueprintMode='run'; wiz.blueprintVersion=version.version; wiz.blueprintRevision=null;
+  wiz.blueprintContent=blueprintContent(version); wiz.blueprintOriginal=JSON.stringify(wiz.blueprintContent);
+  wiz.dirty=false; delete LIB.versions[wiz.blueprintId]; toast(`Published v${version.version}`);
+  if(wiz.step === 2) renderPlanStep(); else if(wiz.step === 4) renderDoneStep();
+}
+async function forkCurrentHarness(){
+  if(!wiz.blueprintId || !wiz.blueprintVersion) return;
+  if(!syncOpenStepEditor()) return;
+  await libraryFork(
+    wiz.blueprintId,
+    wiz.blueprintVersion,
+    wiz.dirty ? contentForCurrentPlan() : null,
+  );
 }
 
 /* -- inline step editor (works on ANY plan: LLM, template, custom) -- */
@@ -1038,41 +1592,51 @@ function stepEditForm(st, i){
   const check = checkOf(st);
   return `<div class="step-edit">
     <div class="field" style="display:flex;gap:10px">
-      <span style="width:180px"><label>Step id</label>
+      <span style="width:180px"><label for="se-id">Step id</label>
         <input id="se-id" class="mono" value="${esc(st.id)}"></span>
-      <span style="flex:1"><label>Task type</label><select id="se-type">
+      <span style="flex:1"><label for="se-type">Task type</label><select id="se-type">
         ${TASK_TYPES.map(t => `<option ${st.task_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></span></div>
-    <div class="field"><label>Objective — the full delegation contract for this step</label>
+    <div class="field"><label for="se-obj">Objective — the full delegation contract for this step</label>
       <textarea id="se-obj">${esc(st.objective)}</textarea></div>
-    <div class="field"><label>Tools this step may call</label>
-      ${toolPicker(st.tools || [], 'edit')}</div>
+    ${inputMappingFields(st, 'se')}
+    ${assignmentFields(st, 'se')}
+    <fieldset class="field" style="border:0;padding:0"><legend>Tools this step may call</legend>
+      ${toolPicker(st.tools || [], 'edit')}</fieldset>
     <div class="field" style="display:flex;gap:10px">
-      <span style="width:160px"><label>Success check</label><select id="se-check">
+      <span style="width:160px"><label for="se-check">Success check</label><select id="se-check">
         ${['none','equals','contains','one_of'].map(k => `<option ${check.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
-      <span style="flex:1"><label>Check value (one_of: comma-separated)</label>
+      <span style="flex:1"><label for="se-checkval">Check value (one_of: comma-separated)</label>
         <input id="se-checkval" class="mono" value="${esc(check.value)}"></span></div>
     <div class="field" style="display:flex;gap:10px">
-      <span style="flex:1"><label>Depends on (comma-separated step ids)</label>
+      <span style="flex:1"><label for="se-deps">Depends on (comma-separated step ids)</label>
         <input id="se-deps" class="mono" value="${esc((st.depends_on || []).join(', '))}"></span>
       <span style="width:190px;align-self:end"><label style="display:flex;gap:8px;align-items:center">
         <input type="checkbox" id="se-hitl" ${st.hitl ? 'checked' : ''} style="width:auto"> HITL gate</label></span></div>
     <div class="field" style="display:flex;gap:10px">
-      <span style="width:220px"><label>Only run when (branch)</label><select id="se-when-step">
+      <span style="width:220px"><label for="se-when-step">Only run when (branch)</label><select id="se-when-step">
         <option value="">— always —</option>
         ${wiz.plan.steps.filter(o => o.id !== st.id).map(o =>
           `<option ${st.when && st.when.step === o.id ? 'selected' : ''}>${esc(o.id)}</option>`).join('')}</select></span>
-      <span style="width:140px"><label>Condition</label><select id="se-when-kind">
+      <span style="width:140px"><label for="se-when-kind">Condition</label><select id="se-when-kind">
         ${['equals','contains','one_of'].map(k => {
           const cur = st.when ? ['equals','contains','one_of'].find(x => x in st.when) : 'equals';
           return `<option ${cur === k ? 'selected' : ''}>${k}</option>`;}).join('')}</select></span>
-      <span style="flex:1"><label>Value (one_of: comma-separated)</label>
+      <span style="flex:1"><label for="se-when-val">Value (one_of: comma-separated)</label>
         <input id="se-when-val" class="mono" value="${esc(st.when ? (Array.isArray(st.when[['equals','contains','one_of'].find(x => x in st.when)]) ? st.when[['equals','contains','one_of'].find(x => x in st.when)].join(', ') : st.when[['equals','contains','one_of'].find(x => x in st.when)]) : '')}"></span></div>
     <div style="display:flex;gap:10px">
       <button class="btn" onclick="saveStep(${i})">Save step</button>
-      <button class="btn ghost" onclick="wiz.editingStep=null;renderPlanStep()">Cancel</button></div></div>`;
+      <button class="btn ghost" onclick="cancelStepEdit()">Cancel</button></div></div>`;
 }
 
-function editStep(i){ wiz.editingStep = i; renderPlanStep(); }
+function editStep(i){
+  if(wiz.editingStep !== null && wiz.editingStep !== i && !syncOpenStepEditor()) return;
+  wiz.editingStep = i; wiz.stepEditorDirty = false; wiz.stepEditorPriorDirty = wiz.dirty;
+  renderPlanStep();
+}
+function cancelStepEdit(){
+  wiz.editingStep = null; wiz.stepEditorDirty = false; wiz.dirty = wiz.stepEditorPriorDirty;
+  wiz.stepEditorPriorDirty = false; renderPlanStep();
+}
 
 function collectStepForm(){
   const tools = [...document.querySelectorAll('.step-edit .tool-toggle.on')].map(b => b.dataset.tool);
@@ -1080,6 +1644,11 @@ function collectStepForm(){
     id: document.getElementById('se-id').value.trim(),
     task_type: document.getElementById('se-type').value,
     objective: document.getElementById('se-obj').value.trim(),
+    inputs: collectMappedInputs('se', wiz.plan.steps[wiz.editingStep]?.inputs || {}),
+    role: document.getElementById('se-role').value.trim() || null,
+    required_capabilities: document.getElementById('se-capabilities').value.split(',').map(x=>x.trim()).filter(Boolean),
+    worker_id: document.getElementById('se-worker').value || null,
+    tier_hint: document.getElementById('se-worker').value ? null : (document.getElementById('se-tier').value || null),
     tools,
     success_check: buildCheck(document.getElementById('se-check').value,
                               document.getElementById('se-checkval').value),
@@ -1091,34 +1660,58 @@ function collectStepForm(){
   };
 }
 
-function saveStep(i){
+function applyOpenStepForm(){
+  if(wiz.yamlMode){ toast('Apply or cancel YAML changes before continuing'); return false; }
+  if(wiz.builderMode){
+    if(wiz.stepEditorDirty) toast('Finish or cancel the open step before continuing');
+    return !wiz.stepEditorDirty;
+  }
+  if(wiz.editingStep === null) return true;
+  if(!wiz.stepEditorDirty){
+    wiz.editingStep = null;
+    wiz.dirty = wiz.stepEditorPriorDirty;
+    wiz.stepEditorPriorDirty = false;
+    return true;
+  }
+  const i = wiz.editingStep;
   const edit = collectStepForm();
-  if(!edit.id){ toast('the step needs an id'); return; }
-  if(!edit.objective){ toast('the step needs an objective'); return; }
+  if(!edit.id){ toast('the open step needs an id before continuing'); return false; }
+  if(!edit.objective){ toast('the open step needs an objective before continuing'); return false; }
   if(wiz.plan.steps.some((st, j) => j !== i && st.id === edit.id)){
-    toast(`step id ${edit.id} is already used`); return; }
+    toast(`step id ${edit.id} is already used`); return false; }
   wiz.plan.steps[i] = Object.assign({}, wiz.plan.steps[i], edit);
-  wiz.editingStep = null; wiz.edited = true;
+  wiz.editingStep = null; wiz.stepEditorDirty = false; markPlanDirty();
+  wiz.stepEditorPriorDirty = false;
+  return true;
+}
+
+function syncOpenStepEditor(){ return applyOpenStepForm(); }
+
+function saveStep(i){
+  if(wiz.editingStep !== i || !applyOpenStepForm()) return;
   renderPlanStep();
 }
 
 function deleteStep(i){
+  if(!syncOpenStepEditor()) return;
   const removed = wiz.plan.steps.splice(i, 1)[0];
   wiz.plan.steps.forEach(st => {
     st.depends_on = (st.depends_on || []).filter(d => d !== removed.id); });
-  wiz.editingStep = null; wiz.edited = true;
+  wiz.editingStep = null; markPlanDirty();
   renderPlanStep();
 }
 
 function moveStep(i, delta){
+  if(!syncOpenStepEditor()) return;
   const j = i + delta;
   if(j < 0 || j >= wiz.plan.steps.length) return;
   [wiz.plan.steps[i], wiz.plan.steps[j]] = [wiz.plan.steps[j], wiz.plan.steps[i]];
-  wiz.edited = true;
+  markPlanDirty();
   renderPlanStep();
 }
 
 async function runValidatedPlan(){
+  if(!syncOpenStepEditor()) return;
   const msg = document.getElementById('planmsg');
   msg.textContent = '';
   const r = await post('/api/workflows/validate', {workflow: wiz.plan});
@@ -1127,17 +1720,65 @@ async function runValidatedPlan(){
     return;
   }
   wiz.plan = (await r.json()).workflow;  // normalized
+  if(wiz.blueprintMode === 'run' && !wiz.dirty){
+    const context = Object.assign({}, wiz.context, wiz.goal ? {goal:wiz.goal} : {});
+    const ready = await post('/api/blueprints/readiness', {
+      blueprint:{id:wiz.blueprintId,version:wiz.blueprintVersion}, context});
+    if(!ready.ok){ msg.textContent = 'readiness check failed'; return; }
+    const report = await ready.json();
+    if(!report.ready){
+      wiz.readinessIssues=report.issues; msg.innerHTML = readinessIssueHtml(report.issues); return;
+    }
+  }
   startRun();
 }
+function readinessIssueHtml(issues){ return `<div class="readiness-list" role="alert"><b>This harness needs attention before it can run.</b>${issues.map((i,n)=>
+  `<div class="hint-panel"><b>${esc(i.stage_id || i.input_name || 'Harness')}</b> — ${esc(i.message)}<div><button class="pill" onclick="repairReadiness(${n})">${esc(i.repair?.label || 'Repair')}</button></div></div>`).join('')}</div>`; }
+async function repairReadiness(index){
+  const issue=wiz.readinessIssues[index]; if(!issue) return;
+  const action=issue.repair?.action, target=issue.repair?.target;
+  if(action === 'load_mcp' && target){
+    const r=await post('/api/config/mcp/'+encodeURIComponent(target)+'/load',{});
+    if(!r.ok){ toast('Could not load '+target+': '+humanApiError(await r.text())); return; }
+    const report=await r.json();
+    if(!report.ok){
+      const detail=report.detail || report.status || 'connection failed';
+      issue.message=`${target} could not load: ${detail}`;
+      toast(`Could not load ${target}: ${detail}`);
+      const msg=document.getElementById('planmsg'); if(msg) msg.innerHTML=readinessIssueHtml(wiz.readinessIssues);
+      return;
+    }
+    TOOLS_NAMES=null; TOOLS_CATALOG=null; toast('Capability loaded — checking readiness again'); await renderPlanStep(); runValidatedPlan(); return;
+  }
+  if(['choose_worker','choose_tool'].includes(action)){
+    if(wiz.blueprintMode === 'run' && !wiz.dirty){ toast('Fork this exact version to change its stage settings'); return forkCurrentHarness(); }
+    const idx=wiz.plan.steps.findIndex(s=>s.id===issue.stage_id); if(idx>=0){ editStep(idx); return; }
+  }
+  wiz.repairReturn=true; showView('settings', true);
+}
+function returnToHarnessRepair(){ currentView='settings'; showView('wizard',true); wiz.repairReturn=false; setStep(2); }
 
 /* -- step builder: wizard-driven custom workflow authoring -- */
 function newDraft(){
   return {id: `step-${wiz.plan.steps.length + 1}`, task_type: 'general', objective: '',
-          tools: [], hitl: false, depends_on: [], check_kind: 'none', check_value: '',
-          when_step: '', when_kind: 'equals', when_value: ''};
+          inputs: {goal:'$context.goal'}, tools: [], hitl: false, depends_on: [], check_kind: 'none', check_value: '',
+          when_step: '', when_kind: 'equals', when_value: '', role:'', required_capabilities:[], worker_id:'', tier_hint:''};
+}
+
+function assignmentFields(value, prefix){
+  const selected=value.worker_id || '';
+  return `<fieldset class="field"><legend>Who should handle this stage?</legend>
+    <div class="field" style="display:flex;gap:10px"><span style="flex:1"><label for="${prefix}-worker">Assignment</label><select id="${prefix}-worker">
+      <option value="">Automatic (recommended)</option>${ASSIGNMENT_WORKERS.map(w=>`<option value="${esc(w.worker_id)}" ${selected===w.worker_id?'selected':''}>Require ${esc(w.display_name || w.worker_id)} · ${esc(w.tier)}</option>`).join('')}</select></span>
+      <span style="width:180px"><label for="${prefix}-tier">Minimum level</label><select id="${prefix}-tier" ${selected?'disabled':''}><option value="">Automatic</option>
+        <option value="small" ${value.tier_hint==='small'?'selected':''}>Quick</option><option value="mid" ${value.tier_hint==='mid'?'selected':''}>Balanced</option><option value="frontier" ${value.tier_hint==='frontier'?'selected':''}>Most capable</option></select></span></div>
+    <div class="field" style="display:flex;gap:10px"><span style="flex:1"><label for="${prefix}-role">Role (optional)</label><input id="${prefix}-role" value="${esc(value.role || '')}" placeholder="implementer"></span>
+      <span style="flex:2"><label for="${prefix}-capabilities">Agent capabilities (comma-separated)</label><input id="${prefix}-capabilities" value="${esc((value.required_capabilities || []).join(', '))}" placeholder="workspace.write, tests.run"></span></div>
+    <div class="small dim">Tool permissions below remain separate and least-privilege.</div></fieldset>`;
 }
 
 function openStepBuilder(){
+  if(!syncOpenStepEditor()) return;
   wiz.builderMode = true;
   wiz.builder = {sub: 0, draft: newDraft()};
   renderPlanStep();
@@ -1155,24 +1796,26 @@ function renderStepBuilder(){
         Say exactly what the worker must produce — outcome, not process. Mention
         checkable expectations ("respond with exactly one of: low, high") and the
         verify sub-step can enforce them mechanically.</div>
-      <div class="field"><label>Step id</label>
+      <div class="field"><label for="sb-id">Step id</label>
         <input id="sb-id" class="mono" value="${esc(d.id)}"></div>
-      <div class="field"><label>Objective</label>
-        <textarea id="sb-obj" placeholder="e.g. Classify the ticket severity as exactly one of: low, high.">${esc(d.objective)}</textarea></div>`;
+      <div class="field"><label for="sb-obj">Objective</label>
+        <textarea id="sb-obj" placeholder="e.g. Classify the ticket severity as exactly one of: low, high.">${esc(d.objective)}</textarea></div>
+      ${inputMappingFields(d, 'sb')}`;
   }else if(b.sub === 1){
     inner = `
-      <div class="field"><label>Task type — routes the step to the right tier</label>
+      <fieldset class="field" style="border:0;padding:0"><legend>Task type — routes the step to the right tier</legend>
         <div class="pillrow">${TASK_TYPES.map(t =>
-          `<button class="pill ${d.task_type === t ? 'on' : ''}" onclick="wiz.builder.draft.task_type='${t}';renderPlanStep()">${t}</button>`).join('')}</div></div>
-      <div class="field"><label>Tools (only what this step truly needs — fewer is better)</label>
-        ${toolPicker(d.tools, 'builder')}</div>`;
+          `<button class="pill ${d.task_type === t ? 'on' : ''}" onclick="wiz.builder.draft.task_type='${t}';markStepEditorDirty();renderPlanStep()">${t}</button>`).join('')}</div></fieldset>
+      ${assignmentFields(d, 'sb')}
+      <fieldset class="field" style="border:0;padding:0"><legend>Tools (only what this step truly needs — fewer is better)</legend>
+        ${toolPicker(d.tools, 'builder')}</fieldset>`;
   }else{
     const prior = wiz.plan.steps.map(st => st.id);
     inner = `
       <div class="field" style="display:flex;gap:10px">
-        <span style="width:160px"><label>Success check</label><select id="sb-check">
+        <span style="width:160px"><label for="sb-check">Success check</label><select id="sb-check">
           ${['none','equals','contains','one_of'].map(k => `<option ${d.check_kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
-        <span style="flex:1"><label>Check value (one_of: comma-separated)</label>
+        <span style="flex:1"><label for="sb-checkval">Check value (one_of: comma-separated)</label>
           <input id="sb-checkval" class="mono" value="${esc(d.check_value)}"></span></div>
       <div class="field"><label>Runs after (dependencies)</label>
         ${prior.length ? `<div class="pillrow">${prior.map(id =>
@@ -1182,12 +1825,12 @@ function renderStepBuilder(){
         <input type="checkbox" id="sb-hitl" ${d.hitl ? 'checked' : ''} style="width:auto">
         HITL gate — pause for my approval before this step runs</label></div>
       ${prior.length ? `<div class="field" style="display:flex;gap:10px">
-        <span style="width:200px"><label>Only run when (branch)</label><select id="sb-when-step">
+        <span style="width:200px"><label for="sb-when-step">Only run when (branch)</label><select id="sb-when-step">
           <option value="">— always —</option>
           ${prior.map(id => `<option ${d.when_step === id ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></span>
-        <span style="width:130px"><label>Condition</label><select id="sb-when-kind">
+        <span style="width:130px"><label for="sb-when-kind">Condition</label><select id="sb-when-kind">
           ${['equals','contains','one_of'].map(k => `<option ${d.when_kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></span>
-        <span style="flex:1"><label>Value</label>
+        <span style="flex:1"><label for="sb-when-val">Value</label>
           <input id="sb-when-val" class="mono" value="${esc(d.when_value || '')}" placeholder="e.g. high"></span></div>` : ''}`;
   }
   const added = wiz.plan.steps.map((st, i) =>
@@ -1209,12 +1852,14 @@ function toggleDraftTool(t){
   const tools = wiz.builder.draft.tools;
   tools.includes(t) ? tools.splice(tools.indexOf(t), 1) : tools.push(t);
   if(tools.includes(t) && mcpToolNeedsGate(t)) wiz.builder.draft.hitl = true;
+  markStepEditorDirty();
   renderPlanStep();
 }
 
 function toggleDraftDep(id){
   const deps = wiz.builder.draft.depends_on;
   deps.includes(id) ? deps.splice(deps.indexOf(id), 1) : deps.push(id);
+  markStepEditorDirty();
   renderPlanStep();
 }
 
@@ -1229,6 +1874,11 @@ function builderCapture(){
   const ws = grab('sb-when-step'); if(ws !== null) d.when_step = ws;
   const wk = grab('sb-when-kind'); if(wk !== null) d.when_kind = wk;
   const wv = grab('sb-when-val'); if(wv !== null) d.when_value = wv;
+  const worker=grab('sb-worker'); if(worker !== null) d.worker_id=worker;
+  const tier=grab('sb-tier'); if(tier !== null) d.tier_hint=worker ? '' : tier;
+  const role=grab('sb-role'); if(role !== null) d.role=role.trim();
+  const caps=grab('sb-capabilities'); if(caps !== null) d.required_capabilities=caps.split(',').map(x=>x.trim()).filter(Boolean);
+  if(document.querySelector('[data-map-prefix="sb"][data-map-source]')) d.inputs=collectMappedInputs('sb',d.inputs);
 }
 
 function builderNav(delta){
@@ -1236,6 +1886,7 @@ function builderNav(delta){
   const b = wiz.builder;
   if(b.sub === 0 && delta < 0){
     wiz.builderMode = false;
+    wiz.stepEditorDirty = false;
     if(!wiz.plan.steps.length && wiz.planSource === 'custom') setStep(1);
     else renderPlanStep();
     return;
@@ -1251,11 +1902,13 @@ function builderCommit(){
   if(d.tools.some(mcpToolNeedsGate)){ d.hitl = true; d.hitl_timing = 'before'; }
   if(wiz.plan.steps.some(st => st.id === d.id)){ toast(`step id ${d.id} is already used`); return; }
   wiz.plan.steps.push({id: d.id, task_type: d.task_type, objective: d.objective,
-    inputs: {goal: '$context.goal'}, boundaries: [], tools: d.tools.slice(),
+    inputs: {...d.inputs}, boundaries: [], tools: d.tools.slice(),
     depends_on: d.depends_on.slice(), hitl: d.hitl,
+    role:d.role || null, required_capabilities:d.required_capabilities.slice(), worker_id:d.worker_id || null, tier_hint:d.worker_id ? null : (d.tier_hint || null),
     success_check: buildCheck(d.check_kind, d.check_value),
     when: buildWhen(d.when_step, d.when_kind, d.when_value)});
-  wiz.edited = true;
+  markPlanDirty();
+  wiz.stepEditorDirty = false;
   toast(`Added ${d.id}`);
   wiz.builder = {sub: 0, draft: newDraft()};
   renderPlanStep();
@@ -1263,6 +1916,7 @@ function builderCommit(){
 
 /* -- YAML power mode -- */
 async function openYaml(){
+  if(!syncOpenStepEditor()) return;
   const r = await post('/api/workflows/validate', {workflow: wiz.plan});
   if(!r.ok){ toast('current plan is invalid: ' + (await r.text()).slice(0, 120)); return; }
   wiz.yamlText = (await r.json()).yaml;
@@ -1279,7 +1933,7 @@ async function applyYaml(){
     return;
   }
   wiz.plan = (await r.json()).workflow;
-  wiz.yamlMode = false; wiz.edited = true;
+  wiz.yamlMode = false; wiz.stepEditorDirty = false; markPlanDirty();
   renderPlanStep();
 }
 
@@ -1291,12 +1945,16 @@ function renderYamlEditor(){
       <textarea id="yaml-box" class="yaml-box">${esc(wiz.yamlText)}</textarea>
       <div class="small red" id="yamlmsg" style="margin:8px 0"></div>
       <div class="wiz-nav">
-        <button class="btn ghost" onclick="wiz.yamlMode=false;renderPlanStep()">Cancel</button>
+        <button class="btn ghost" onclick="wiz.yamlMode=false;wiz.stepEditorDirty=false;renderPlanStep()">Cancel</button>
         <button class="btn" onclick="applyYaml()">Apply YAML</button></div></div>`;
 }
 
 async function startRun(){
-  const r = await post('/api/runs', {workflow: wiz.plan, context: Object.assign({goal: wiz.goal}, wiz.context), wait: false});
+  const context = Object.assign({}, wiz.context, wiz.goal ? {goal:wiz.goal} : {});
+  const body = wiz.blueprintMode === 'run' && !wiz.dirty
+    ? {blueprint:{id:wiz.blueprintId,version:wiz.blueprintVersion}, context, wait:false}
+    : {workflow:wiz.plan, context, wait:false};
+  const r = await post('/api/runs', body);
   if(!r.ok){ toast('start failed: ' + (await r.text()).slice(0,120)); return; }
   const state = await r.json();
   wiz.runId = state.run_id; wiz.run = state;
@@ -1333,12 +1991,30 @@ function stepStatus(s){
 function attemptRows(stepId){
   // per-attempt verdicts + verifier reasons from the run journal — the
   // "why did this step fail 3 times" panel
-  const atts = (wiz.journal || []).filter(e => e.kind === 'step.attempt' && e.step_id === stepId);
+  const atts = (wiz.journal || []).filter(e => ['verification.completed','step.attempt'].includes(e.kind) && e.step_id === stepId);
   if(!atts.length) return '';
   return `<div class="attempts">${atts.map(e => {
     const p = e.payload || {};
     return `<div class="att ${esc(p.verdict)}"><b>#${p.n} ${esc(p.verdict)}</b> · ${esc(p.model)}${p.scorer ? ' · ' + esc(p.scorer) : ''}${p.detail ? ' — ' + esc(p.detail) : ''}</div>`;
   }).join('')}</div>`;
+}
+function stageTimeline(stepId){
+  const events=(wiz.journal || []).filter(e=>e.step_id===stepId && ['step.ready','attempt.assigned','attempt.started','tool.requested','tool.completed','verification.started','verification.completed','approval.required','approval.resolved','step.completed','step.failed','step.skipped'].includes(e.kind));
+  if(!events.length) return '<div class="small dim">Waiting for dependencies and readiness checks.</div>';
+  let previousTier=null;
+  return `<ol class="timeline" aria-label="Live stage progress">${events.map(e=>{
+    const p=e.payload||{}; let text=e.kind.replaceAll('.',' ');
+    if(e.kind==='attempt.assigned'){
+      const escalated=previousTier && previousTier!==p.tier; previousTier=p.tier;
+      text=`${escalated?'Escalated and assigned':'Assigned'} attempt ${p.n} to ${p.worker_id} · ${p.model} · ${p.tier}`;
+    }else if(e.kind==='attempt.started') text=`Agent ${p.worker_id} started attempt ${p.n}`;
+    else if(e.kind==='tool.requested') text=`Using ${p.tool || 'a capability'}`;
+    else if(e.kind==='tool.completed') text=`${p.tool || 'Capability'} ${p.status || 'completed'}`;
+    else if(e.kind==='verification.started') text=`Verifying ${p.worker_id || 'agent'} output`;
+    else if(e.kind==='verification.completed') text=`Verification ${p.verdict || 'completed'}${p.scorer?' · '+p.scorer:''}`;
+    else if(e.kind==='step.ready') text='Dependencies satisfied; stage ready';
+    return `<li><span class="small">${esc(text)}</span></li>`;
+  }).join('')}</ol>`;
 }
 
 /* ---------- tabbed step display (Run + Done screens) ----------
@@ -1359,9 +2035,9 @@ function activeStepId(){
 }
 
 function stepTabs(sel){
-  return `<div class="steptabs">` + wiz.plan.steps.map((s, i) => {
+  return `<div class="steptabs" role="tablist" aria-label="Harness stages">` + wiz.plan.steps.map((s, i) => {
     const st = stepStatus(s);
-    return `<button class="stab ${s.id === sel ? 'on' : ''}" data-step-id="${esc(s.id)}">
+    return `<button role="tab" aria-selected="${s.id===sel}" aria-controls="stage-panel" class="stab ${s.id === sel ? 'on' : ''}" data-step-id="${esc(s.id)}">
       <span class="ticon ${st.cls}">${st.icon || i + 1}</span>${esc(s.id)}</button>`;
   }).join('') + `</div>`;
 }
@@ -1370,10 +2046,11 @@ function stepPanel(s){
   const run = wiz.run || {completed: {}};
   const st = stepStatus(s);
   const rec = (run.completed || {})[s.id];
-  return `<div class="steppanel">
+  return `<div class="steppanel" id="stage-panel" role="tabpanel">
     <div class="pt">${esc(s.id)} ${badge('dim', s.task_type)} ${st.label}</div>
     <div class="pd">${esc(s.objective)}</div>
     ${rec ? humanizeOutput(rec.output) : ''}
+    ${stageTimeline(s.id)}
     ${(run.failed_step === s.id || (rec && rec.attempts > 1)) ? attemptRows(s.id) : ''}
   </div>`;
 }
@@ -1401,7 +2078,7 @@ function renderRunStep(){
     : '';
   const selected = p.steps.find(s => s.id === activeStepId()) || p.steps[0];
   document.getElementById('wiz-body').innerHTML = hitl + `
-    <div class="card"><h2>${esc(p.name)}</h2>
+    <div class="card" aria-live="polite" aria-atomic="false"><h2>${esc(p.name)}</h2>
       <div class="sub">run ${esc(wiz.runId)} · ${statusBadge(run.status || 'running')}</div>
       ${stepTabs(selected.id)}
       ${stepPanel(selected)}</div>`;
@@ -1444,10 +2121,28 @@ function renderDoneStep(){
         <button class="btn ghost" onclick="runAgain()">↻ Run the same workflow again</button>
         <button class="btn ghost" id="fu-btn" onclick="planFollowup()">Plan follow-up with frontier agent →</button></div>
       <div class="small dim" id="fu-msg" style="margin-top:8px"></div></div>
+    <div class="card" style="margin-top:16px"><h2>Reuse this harness</h2>
+      <div class="sub">Save it once, edit it, or run the same stages with new inputs.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${wiz.blueprintMode === 'draft' ? '<button class="btn ghost" onclick="saveHarnessDraft()">Save draft</button><button class="btn ghost" onclick="publishHarness()">Publish</button>'
+          : wiz.blueprintMode === 'run' ? '<button class="btn ghost" onclick="forkCurrentHarness()">Fork to edit</button>'
+          : '<button class="btn ghost" onclick="saveHarnessDraft()">Save as harness</button>'}
+        <button class="btn ghost" onclick="editAfterRun()">Edit stages</button>
+        <button class="btn ghost" onclick="runWithNewInputs()">Run with new inputs</button></div></div>
     <div class="wiz-nav">
       <button class="btn ghost" onclick="showView('console')">Inspect in Console</button>
       <a class="btn ghost" href="/api/runs/${esc(wiz.runId)}/package" download>⬇ Download run package</a>
       <button class="btn" onclick="resetWizard()">Start another run →</button></div>`;
+}
+
+function editAfterRun(){
+  wiz.runId=null; wiz.run=null;
+  if(wiz.blueprintMode === 'run') return libraryEdit(wiz.blueprintId, wiz.blueprintVersion, wiz.blueprintOrigin || 'owned');
+  wiz.dirty = wiz.blueprintMode !== 'draft'; setStep(2);
+}
+function runWithNewInputs(){
+  wiz.runId=null; wiz.run=null; wiz.goal=''; wiz.context={};
+  wiz.rerunInputs=true; setStep(1);
 }
 
 function runAgain(){
@@ -1468,19 +2163,25 @@ async function planFollowup(){
   wiz.planSource = data.plan_source;
   wiz.fallbackReason = data.fallback_reason || '';
   wiz.edited = false; wiz.editingStep = null;
+  wiz.dirty = true;
   wiz.builderMode = false; wiz.yamlMode = false;
   toast('Follow-up plan ready — review and approve before it runs');
   setStep(2);
 }
 
-function resetWizard(){
+function resetWizard(render=true, force=false){
+  if(!force && wiz.step === 2 && !syncOpenStepEditor()) return false;
+  if(!force && wiz.dirty && !confirm('Discard unsaved harness changes and start over?')) return false;
   wiz.goal = ''; wiz.context = {}; wiz.plan = null; wiz.runId = null; wiz.run = null;
   wiz.editingStep = null; wiz.builderMode = false; wiz.builder = null;
   wiz.yamlMode = false; wiz.edited = false;
   wiz.pinnedStep = null; wiz.fallbackReason = '';
+  resetBlueprintState();
   if(wiz.poller){ clearInterval(wiz.poller); wiz.poller = null; }
-  setStep(1);
+  if(render) setStep(1);
+  return true;
 }
+function startFreshHarness(){ if(resetWizard(true)) showView('wizard', true); }
 
 /* ---------- console view ---------- */
 const openRuns = new Set();
@@ -2159,7 +2860,8 @@ function renderSettingsHome(){
         subscription_cli: 'subscription', mock: 'mock'}[a.kind] || a.kind)}</div>
       <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
         ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}
-        ${a.timeout_s ? ' · timeout ' + a.timeout_s + 's' : ''}</div></div>
+        ${a.timeout_s ? ' · timeout ' + a.timeout_s + 's' : ''}</div>
+      <div class="small dim">Roles: ${esc((a.roles || []).join(', ') || 'any')} · Capabilities: ${esc((a.capabilities || []).join(', ') || 'general')}</div></div>
       <button class="pill" data-act="agent_edit" data-id="${i}">Edit</button>
       <button class="pill" data-act="agent_del" data-id="${esc(a.worker_id)}">Remove</button></div>`).join('')
     : '<div class="empty">no saved agents — the ones running now were auto-discovered and vanish when the server restarts</div>';
@@ -2174,6 +2876,7 @@ function renderSettingsHome(){
     <div class="prov-item"><div class="pi-main">
       <div class="pi-name">${esc(s.name)} ${badge('dim', s.transport)} ${s.authenticated ? badge('ok','OAuth token') : ''}</div>
       <div class="kv">${esc(s.transport === 'http' ? s.url : s.command + ' ' + (s.args || []).join(' '))}</div></div>
+      <button class="pill" data-act="mcp_edit" data-id="${esc(s.name)}">${s.authenticated ? 'Re-authenticate / Edit' : 'Edit'}</button>
       <button class="pill" data-act="mcp_load" data-id="${esc(s.name)}">Load tools</button>
       <button class="pill" data-act="mcp_del" data-id="${esc(s.name)}">Remove</button></div>`).join('')
     : '<div class="empty">none configured — fine for most workflows</div>';
@@ -2226,6 +2929,7 @@ document.getElementById('settings-body').addEventListener('click', ev => {
     prov_del:  () => deleteProvider(id),
     agent_edit:() => startAgentWizardIdx(+id),
     agent_del: () => removeAgent(id),
+    mcp_edit:  () => startMcpWizardExisting(id),
     mcp_load:  () => loadMcp(id),
     mcp_del:   () => deleteMcp(id),
     pick:      () => pickModel(el.dataset.input, el.dataset.value),
@@ -2258,6 +2962,7 @@ async function deleteProvider(pid){
 async function removeAgent(id){
   const r = await fetch('/api/workers/' + encodeURIComponent(id), {method:'DELETE'});
   toast(r.ok ? 'Retired ' + id : 'Failed: ' + (await r.text()).slice(0,140));
+  if(r.ok){ ASSIGNMENT_WORKERS=[]; ASSIGNMENT_WORKERS_LOADED=false; }
   renderSettings(true);
 }
 
@@ -2286,10 +2991,23 @@ const MCP_PRESETS = {
 };
 
 function startMcpWizard(){
-  SET.mcpWiz = {step: 0, preset: 'filesystem', transport: 'stdio', name: '',
+  SET.mcpWiz = {step: 0, editing:false, preset: 'filesystem', transport: 'stdio', name: '',
     command: '', args: [], env: [], url: '', oauth_token: '',
     oauth_project: '', requires_oauth: false, required_env: ''};
   mcpApplyPreset('filesystem');
+  renderSettings();
+}
+
+function startMcpWizardExisting(name){
+  const server=(SET.cfg.mcp_servers || {})[name]; if(!server) return;
+  const preset=server.url === MCP_PRESETS.gmail.url ? 'gmail'
+    : server.url === MCP_PRESETS.calendar.url ? 'calendar'
+    : server.transport === 'stdio' ? 'local' : 'remote';
+  SET.mcpWiz={step:1, editing:true, preset, transport:server.transport, name:server.name,
+    command:server.command || '', args:(server.args || []).slice(),
+    env:Object.entries(server.env || {}).map(([key,value])=>({key,value})), url:server.url || '',
+    oauth_token:server.oauth_token || '', oauth_project:server.oauth_project || '',
+    requires_oauth:['gmail','calendar'].includes(preset), required_env:''};
   renderSettings();
 }
 
@@ -2311,7 +3029,7 @@ function renderMcpWizard(){
       <div class="small dim" style="margin-top:8px">Presets are never enabled automatically. Review their command, permissions, and credentials before saving.</div>`;
   }else if(w.step === 1){
     const common = `<div class="field"><label>Connection name</label>
-      <input id="mw-name" class="mono" value="${esc(w.name)}" placeholder="filesystem-tools">
+      <input id="mw-name" class="mono" value="${esc(w.name)}" placeholder="filesystem-tools" ${w.editing ? 'disabled' : ''}>
       <span class="small dim">A short name used in config and tool source labels.</span></div>`;
     if(w.transport === 'stdio'){
       const envRows = w.env.map((pair, i) => `<div style="display:flex;gap:8px;margin-top:8px">
@@ -2351,13 +3069,13 @@ function renderMcpWizard(){
       <span class="kv">${w.transport === 'stdio' ? 'Local command' : 'Remote URL'} → ${destination}</span>${envNote}${authNote}</div>
       <div class="small dim">Saving writes this connection to config. Then use Load tools—no terminal or manual CLI step required.</div>`;
   }
-  return `<div class="card"><h2>Connect MCP server</h2>
+  return `<div class="card"><h2>${w.editing ? 'Edit MCP server' : 'Connect MCP server'}</h2>
     ${mcpWizSteps()}${inner}
     <div class="wiz-nav">
       <button class="btn ghost" onclick="mcpWizNav(-1)">${w.step === 0 ? 'Cancel' : '← Back'}</button>
       ${w.step < 2
         ? '<button class="btn" onclick="mcpWizNav(1)">Next →</button>'
-        : '<button class="btn" onclick="mcpSave()">Save connection</button>'}</div></div>`;
+        : `<button class="btn" onclick="mcpSave()">${w.editing ? 'Update connection' : 'Save connection'}</button>`}</div></div>`;
 }
 
 function mcpApplyPreset(id){
@@ -2447,7 +3165,7 @@ async function mcpSave(){
   }
   const r = await post('/api/config/mcp', body);
   if(!r.ok){ toast('save failed: ' + (await r.text()).slice(0,140)); return; }
-  toast('Connected MCP server ' + w.name);
+  toast((w.editing ? 'Updated' : 'Connected') + ' MCP server ' + w.name);
   SET.mcpWiz = null;
   renderSettings(true);
 }
@@ -2656,6 +3374,8 @@ function startAgentWizard(a){
     provider: a ? a.provider : '', base_url: a ? a.base_url : '',
     model: a ? a.model : '', cli: a ? a.cli : '',
     system_prompt: a ? a.system_prompt : '', archetype: '',
+    roles: a ? (a.roles || []).slice() : [],
+    capabilities: a ? (a.capabilities || []).slice() : [],
     timeout_s: a ? (a.timeout_s ?? null) : null,
     probed: [], test: null };
   if(SET.cfg) renderSettings(); else showView('settings');
@@ -2737,6 +3457,10 @@ function renderAgentWizard(){
         <span style="flex:1"><label>Worker id</label><input id="aw-id" class="mono" value="${esc(w.worker_id)}" placeholder="review-bot" ${w.editing ? 'disabled' : ''}></span>
         <span style="width:140px"><label>Tier</label><select id="aw-tier">
           ${['small','mid','frontier'].map(t => `<option value="${t}" ${w.tier === t ? 'selected' : ''}>${t}</option>`).join('')}</select></span></div>
+      <div class="field" style="display:flex;gap:10px">
+        <span style="flex:1"><label for="aw-roles">Roles this agent can take</label><input id="aw-roles" value="${esc(w.roles.join(', '))}" placeholder="reviewer, implementer"></span>
+        <span style="flex:1"><label for="aw-capabilities">Capability IDs</label><input id="aw-capabilities" value="${esc(w.capabilities.join(', '))}" placeholder="workspace.write, tests.run"></span></div>
+      <div class="small dim">Comma-separated. Automatic assignment uses these exact IDs to match a stage's role and capability requirements.</div>
       <div class="field"><label>System prompt — start from an archetype, then tailor it</label>
         <div class="pillrow">${Object.entries(PROMPT_ARCHETYPES).map(([k, a]) =>
           `<button class="pill ${w.archetype === k ? 'on' : ''}" onclick="agentArchetype('${k}')">${a.label}</button>`).join('')}</div>
@@ -2814,6 +3538,8 @@ function agentCapture(){
   const id = grab('aw-id'); if(id !== null && !w.editing) w.worker_id = id.trim();
   const tier = grab('aw-tier'); if(tier !== null) w.tier = tier;
   const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
+  const roles=grab('aw-roles'); if(roles !== null) w.roles=roles.split(',').map(x=>x.trim()).filter(Boolean);
+  const capabilities=grab('aw-capabilities'); if(capabilities !== null) w.capabilities=capabilities.split(',').map(x=>x.trim()).filter(Boolean);
   const timeout = grab('aw-timeout');
   if(timeout !== null){
     const n = parseFloat(timeout);
@@ -2872,12 +3598,13 @@ async function agentSave(){
   }
   const r = await post('/api/workers', {worker_id: w.worker_id, tier: w.tier, kind: w.kind,
     provider: w.provider, base_url: w.provider ? '' : w.base_url, model: w.model,
-    system_prompt: w.system_prompt, cli: w.cli, persist: true,
+    system_prompt: w.system_prompt, cli: w.cli, roles:w.roles, capabilities:w.capabilities, persist: true,
     // a timeout entered before a kind switch to mock must not silently
     // reach a kind that has no timeout to apply it to (issue #2)
     ...(w.timeout_s && w.kind !== 'mock' ? {timeout_s: w.timeout_s} : {})});
   if(!r.ok){ toast('failed: ' + (await r.text()).slice(0,140)); return; }
   toast(`${w.editing ? 'Updated' : 'Registered'} ${w.worker_id} on ${w.tier} tier`);
+  ASSIGNMENT_WORKERS=[]; ASSIGNMENT_WORKERS_LOADED=false;
   SET.agentWiz = null;
   renderSettings(true);
 }
