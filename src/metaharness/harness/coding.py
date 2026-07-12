@@ -21,6 +21,7 @@ import os
 import re
 import signal
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -418,23 +419,107 @@ class CodingAgentWorker(BaseRunner):
         if proc.returncode is not None:
             await proc.wait()
             return
+        pgid = CodingAgentWorker._process_group_id(proc)
+        tracked = CodingAgentWorker._linux_descendant_pids(proc.pid)
+        CodingAgentWorker._signal_process_tree(proc, signal.SIGTERM, pgid, tracked)
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except asyncio.TimeoutError:
             pass
+        await asyncio.sleep(0.05)
+        tracked.update(CodingAgentWorker._linux_descendant_pids(proc.pid))
+        if (
+            proc.returncode is not None
+            and not CodingAgentWorker._group_alive(pgid)
+            and not CodingAgentWorker._any_pid_alive(tracked)
+        ):
+            return
+        CodingAgentWorker._signal_process_tree(proc, signal.SIGKILL, pgid, tracked)
         try:
             await asyncio.wait_for(proc.wait(), timeout=2.0)
         except asyncio.TimeoutError:
-            pass
-        group_alive = True
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+    @staticmethod
+    def _process_group_id(proc: asyncio.subprocess.Process) -> int | None:
         try:
-            os.killpg(proc.pid, 0)
-        except ProcessLookupError:
-            group_alive = False
-        if not group_alive:
-            return
+            return os.getpgid(proc.pid)
+        except (ProcessLookupError, PermissionError, OSError):
+            return proc.pid
+
+    @staticmethod
+    def _group_alive(pgid: int | None) -> bool:
+        if pgid is None:
+            return False
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        await proc.wait()
+            os.killpg(pgid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    @staticmethod
+    def _any_pid_alive(pids: set[int]) -> bool:
+        return any(CodingAgentWorker._pid_alive(pid) for pid in pids)
+
+    @staticmethod
+    def _signal_process_tree(
+        proc: asyncio.subprocess.Process,
+        sig: signal.Signals,
+        pgid: int | None,
+        pids: set[int],
+    ) -> None:
+        if pgid is not None:
+            try:
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        for pid in sorted(pids | {proc.pid}, reverse=True):
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    @staticmethod
+    def _linux_descendant_pids(root_pid: int) -> set[int]:
+        """Return descendants visible in /proc, including session-escaped ones."""
+        if not sys.platform.startswith("linux"):
+            return set()
+        parents: dict[int, int] = {}
+        proc_root = Path("/proc")
+        try:
+            entries = list(proc_root.iterdir())
+        except OSError:
+            return set()
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                text = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+                fields = text.rsplit(")", 1)[1].strip().split()
+                pid = int(entry.name)
+                ppid = int(fields[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            parents[pid] = ppid
+        descendants: set[int] = set()
+        frontier = [root_pid]
+        while frontier:
+            parent = frontier.pop()
+            children = [pid for pid, ppid in parents.items() if ppid == parent]
+            for child in children:
+                if child not in descendants:
+                    descendants.add(child)
+                    frontier.append(child)
+        return descendants

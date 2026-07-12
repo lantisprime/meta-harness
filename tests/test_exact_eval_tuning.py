@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from metaharness.evals import evaluator as evaluator_mod
 from metaharness.blueprints import (
     ArtifactRef,
     BlueprintCatalog,
@@ -48,6 +51,7 @@ from metaharness.evals.tuning import (
     apply_tuning_proposal_to_draft,
     create_tuning_proposal,
 )
+from metaharness.evals.execution import _system_sandbox as real_system_sandbox
 from metaharness.workflows.dsl import StepSpec, WorkflowSpec
 from metaharness.portable.integrity import canonical_json_bytes, sha256_hex
 
@@ -275,6 +279,24 @@ def test_eval_fails_closed_on_mismatched_refs_and_unisolated_tools(tmp_path):
 
 
 def test_os_sandbox_blocks_ambient_write(tmp_path):
+    if evaluator_mod._system_sandbox is not real_system_sandbox:
+        pytest.skip("real operating-system sandbox wrapper is not active")
+    with tempfile.TemporaryDirectory(prefix="metaharness-sandbox-probe-") as root:
+        workspace = Path(root) / "workspace"
+        scratch = Path(root) / "scratch"
+        workspace.mkdir()
+        scratch.mkdir()
+        wrapped = real_system_sandbox(
+            (sys.executable, "-c", "print('sandbox probe')"),
+            workspace,
+            scratch,
+        )
+    if wrapped is None:
+        pytest.skip("no supported operating-system sandbox wrapper is available")
+    _argv, backend = wrapped
+    if backend not in {"seatbelt", "bubblewrap"}:
+        pytest.skip("real operating-system sandbox wrapper is not active")
+
     outside = tmp_path / "ambient-write.txt"
     _, eval_store, blueprint_store, blueprint, suite, _ = _published_pair(
         tmp_path / "sandbox", k=1
@@ -294,8 +316,8 @@ print(json.dumps({{"output":"dev-answer"}}))
             report_id="sandbox-probe", blueprint_ref=blueprint.ref,
             eval_ref=suite.ref, split="development", created_at=1.0,
         )
-    except _SandboxStartError:
-        pytest.skip("operating-system sandbox temporarily unavailable in test host")
+    except (_SandboxStartError, UnsafeEvalRunnerError) as exc:
+        pytest.skip(f"operating-system sandbox unavailable in test host: {exc}")
     assert report.passed == 1
     assert not outside.exists()
 
