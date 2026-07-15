@@ -1,0 +1,278 @@
+{
+  "corpus_id": "META-5-adversarial-context-corpus",
+  "corpus_version": 1,
+  "target_module": "src/metaharness/context",
+  "description": "Machine-readable case corpus for META-5 adversarial/red-team coverage of the typed context contract (src/metaharness/context) and the currently-absent memory-skill contracts layered on top of it. Each case names the suite (test file) that consumes it, whether the behavior it describes is 'enforced' by shipped code today (executable negative test) or 'absent' (strict xfail with a stable requirement_id), and the concept category it demonstrates.",
+  "categories": [
+    "unknown_operations",
+    "traversal",
+    "cross_scope_access",
+    "immutable_evidence_rewrites",
+    "premature_logging",
+    "lossy_compression",
+    "activation_or_tombstoning",
+    "specialist_task_actions",
+    "unreceipted_mutation",
+    "task_action_training_targets",
+    "hw_confounding",
+    "repeated_set_promotion",
+    "incompatible_reuse",
+    "unhealthy_fallback",
+    "incomplete_packaging",
+    "evaluator_non_self_approval"
+  ],
+  "cases": [
+    {
+      "id": "unknown-operation-source-extra-field",
+      "category": "unknown_operations",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextSourceRef",
+      "description": "An unrecognized top-level field on a context source reference must be rejected (extra='forbid'), not silently ignored."
+    },
+    {
+      "id": "unknown-operation-manifest-entry-surface",
+      "category": "unknown_operations",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextManifestEntry.surface",
+      "description": "A manifest entry naming a surface outside the closed {message, tool_schemas} set is an unknown operation and must be rejected."
+    },
+    {
+      "id": "unknown-operation-source-kind-enum",
+      "category": "unknown_operations",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextSourceRef.kind",
+      "description": "A source kind outside the closed ContextSourceKind enum must be rejected rather than coerced or ignored."
+    },
+    {
+      "id": "traversal-source-id-path-escape",
+      "category": "traversal",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-002",
+      "target": "ContextSourceRef.source_id / memory-skill artifact resolution",
+      "description": "A memory-skill artifact loader that resolves source_id/artifact_ref onto a filesystem or object-store path must reject path-traversal sequences (e.g. '../../etc/passwd'). No such resolver or validation exists yet; the bare pydantic model accepts these strings today."
+    },
+    {
+      "id": "traversal-artifact-ref-path-escape",
+      "category": "traversal",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-002",
+      "target": "ContextSourceRef.artifact_ref / memory-skill artifact resolution",
+      "description": "artifact_ref values are opaque strings today with no traversal guard; a future memory-skill artifact fetcher must reject traversal-shaped refs before dereferencing them."
+    },
+    {
+      "id": "cross-scope-task-requires-run",
+      "category": "cross_scope_access",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextScope",
+      "description": "A scope naming a task_id without a run_id is ambiguous nesting and must be rejected."
+    },
+    {
+      "id": "cross-scope-attempt-requires-task",
+      "category": "cross_scope_access",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextScope",
+      "description": "A scope naming an attempt_id without a task_id is ambiguous nesting and must be rejected."
+    },
+    {
+      "id": "cross-scope-envelope-mixed-projects",
+      "category": "cross_scope_access",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-003",
+      "target": "ContextEnvelope",
+      "description": "A future memory-skill assembler must refuse to bind sections whose sources carry different project_id/run_id scopes into a single envelope (no cross-run/cross-project bleed). ContextEnvelope has no scope-consistency validator today, so mixed-scope sections currently assemble without error."
+    },
+    {
+      "id": "immutable-frozen-attribute-mutation",
+      "category": "immutable_evidence_rewrites",
+      "suite": "test_context_authority",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextScope / FrozenModel",
+      "description": "Every context contract model is frozen; attempting to assign a new value to an existing field after construction must raise, not silently mutate evidence in place."
+    },
+    {
+      "id": "immutable-envelope-content-hash-tamper",
+      "category": "immutable_evidence_rewrites",
+      "suite": "test_context_authority",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextEnvelope",
+      "description": "Reusing a stale content_hash after sections change (constructing a new envelope with an old hash) must be rejected by the envelope's hash/order validator."
+    },
+    {
+      "id": "immutable-manifest-redacted-envelope-tamper",
+      "category": "immutable_evidence_rewrites",
+      "suite": "test_context_authority",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextManifest",
+      "description": "A manifest whose redacted_envelope_hash does not attest redacted_envelope_json must be rejected; the redacted evidence snapshot cannot be rewritten independently of its hash."
+    },
+    {
+      "id": "immutable-memory-record-in-place-rewrite",
+      "category": "immutable_evidence_rewrites",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-001",
+      "target": "metaharness.memory (does not exist)",
+      "description": "A future episodic/semantic memory store must refuse in-place rewrites of committed memory records (append-only with tombstone/supersede, not destructive update). No metaharness.memory module exists yet to enforce this."
+    },
+    {
+      "id": "premature-logging-entry-receipt-alignment",
+      "category": "premature_logging",
+      "suite": "test_context_authority",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextManifest",
+      "description": "Manifest entries and compression receipts must be positionally aligned by stable_id; a manifest cannot be constructed (and therefore cannot be logged/emitted) if an entry's receipt is missing or misordered."
+    },
+    {
+      "id": "premature-logging-write-ahead-commit-ordering",
+      "category": "premature_logging",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-005",
+      "target": "metaharness.memory (does not exist)",
+      "description": "A future memory-skill write path must guarantee a memory mutation is durably committed before any observability event describing it is emitted (no premature logging of not-yet-committed memory state). No commit-then-log contract exists yet outside the unrelated context.manifest.shadow event."
+    },
+    {
+      "id": "lossy-compression-receipt-hash-consistency",
+      "category": "lossy_compression",
+      "suite": "test_context_determinism",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "CompressionReceipt",
+      "description": "A compression receipt's action must agree with whether before_hash and after_hash differ: CompressionAction.NONE requires an unchanged hash, and any other action requires a changed hash."
+    },
+    {
+      "id": "lossy-compression-fidelity-bound",
+      "category": "lossy_compression",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-006",
+      "target": "CompressionReceipt / metaharness.memory (does not exist)",
+      "description": "A future memory-skill compaction contract must attach a bounded fidelity/information-loss estimate to lossy compression (e.g. STRUCTURED_SUMMARY) receipts so downstream consumers can reason about what was dropped. CompressionReceipt today records only before/after hashes and token counts, with no loss bound."
+    },
+    {
+      "id": "activation-lifecycle-states",
+      "category": "activation_or_tombstoning",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-007",
+      "target": "metaharness.memory (does not exist)",
+      "description": "A future memory-skill record must carry an activation lifecycle (active/dormant/tombstoned) so retrieval can exclude tombstoned records without deleting evidence. No such lifecycle type exists in this codebase."
+    },
+    {
+      "id": "specialist-task-action-contract",
+      "category": "specialist_task_actions",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-008",
+      "target": "metaharness.memory.skills (does not exist)",
+      "description": "A future specialist sub-agent must expose a typed task-action contract (bounded action vocabulary, authorized scope) distinct from a general worker's free-form tool calls. No specialist task-action type exists yet."
+    },
+    {
+      "id": "unreceipted-mutation-requires-receipt",
+      "category": "unreceipted_mutation",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-004",
+      "target": "metaharness.memory (does not exist)",
+      "description": "Every mutation of a committed memory record must produce a receipt (analogous to CompressionReceipt) linking before/after state; a future memory-skill store must refuse unreceipted mutation. No memory store exists yet to enforce this."
+    },
+    {
+      "id": "task-action-training-target-schema",
+      "category": "task_action_training_targets",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-009",
+      "target": "metaharness.memory.training (does not exist)",
+      "description": "A future harness-optimization loop needs a typed training-target schema mapping recorded task actions to labeled outcomes for specialist policy training. No such schema exists yet."
+    },
+    {
+      "id": "hw-confounding-source-identity-xor",
+      "category": "hw_confounding",
+      "suite": "test_context_determinism",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextSourceRef",
+      "description": "A source ref must be identified by exactly one of content_hash (pinned/immutable) or high_water_mark (live/streaming); supplying both or neither is rejected so pinned and live identity cannot be confused."
+    },
+    {
+      "id": "hw-confounding-cross-section-lineage",
+      "category": "hw_confounding",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-010",
+      "target": "ContextEnvelope / metaharness.memory (does not exist)",
+      "description": "A future memory-skill assembler must refuse to bind a high-water-mark-tracked (live) section and a content-hash-pinned (immutable) section to the same underlying lineage without an explicit reconciliation marker, to avoid confounding live state with a pinned snapshot. No such cross-section lineage check exists in ContextEnvelope today."
+    },
+    {
+      "id": "repeated-set-promotion-gate",
+      "category": "repeated_set_promotion",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-011",
+      "target": "metaharness.memory.promotion (does not exist)",
+      "description": "A future promotion gate must refuse to promote a candidate/memory record whose supporting evidence comes from repeatedly re-evaluating the same search set (search-set leakage into the promotion decision). No promotion-gate module exists yet."
+    },
+    {
+      "id": "incompatible-reuse-version-lineage",
+      "category": "incompatible_reuse",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-012",
+      "target": "ContextVersionBindings",
+      "description": "A future compatibility check must refuse to reuse a memory_snapshot_version/evidence_snapshot_version pair across an incompatible harness_version bump (e.g. a breaking schema change) even though the two version axes are individually well-formed. ContextVersionBindings validates only self/parent candidate lineage, not cross-axis compatibility."
+    },
+    {
+      "id": "unhealthy-fallback-health-signal",
+      "category": "unhealthy_fallback",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-013",
+      "target": "metaharness.memory.health (does not exist)",
+      "description": "A future memory-skill subsystem must expose a health signal so repeated assembly failures trip a circuit breaker instead of silently falling back to the legacy fitter on every call. No health-check or circuit-breaker module exists yet; today a single failure always falls back with no unhealthy-state tracking."
+    },
+    {
+      "id": "incomplete-packaging-manifest-alignment",
+      "category": "incomplete_packaging",
+      "suite": "test_context_invalid_inputs",
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextManifest",
+      "description": "A manifest whose entries and compression_receipts counts disagree is an incompletely packaged manifest and must be rejected."
+    },
+    {
+      "id": "incomplete-packaging-artifact-refs-completeness",
+      "category": "incomplete_packaging",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-014",
+      "target": "ContextManifest.artifact_refs",
+      "description": "A future packaging contract must guarantee every fetchable section's artifact_ref appears in the manifest's artifact_refs list, so a downstream consumer can retrieve everything the manifest claims is fetchable. ContextManifest has no such completeness validator today, so an incompletely packaged manifest (fetchable source, absent artifact_ref) currently constructs without error."
+    },
+    {
+      "id": "evaluator-receipt-instruction-self-promotion",
+      "category": "evaluator_non_self_approval",
+      "suite": "test_memory_skill_boundaries",
+      "status": "absent",
+      "requirement_id": "META5-MEM-015",
+      "target": "ContextSourceRef.kind / ContextSourceRef.trust",
+      "description": "Evaluator receipts are evidence and must never acquire instruction authority. ContextSourceRef currently accepts an EVALUATOR_RECEIPT with trust=INSTRUCTION, so a future memory-skill assembler must enforce a source-kind trust ceiling before the receipt can enter an instruction-bearing section."
+    }
+  ]
+}
