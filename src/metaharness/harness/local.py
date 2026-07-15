@@ -21,6 +21,7 @@ import httpx
 from metaharness.core.types import Task, Tier, WorkerResult
 from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
+from metaharness.observability.run_events import emit_run_event
 
 
 async def probe_endpoint(base_url: str, timeout_s: float = 3.0,
@@ -180,7 +181,11 @@ class OpenAICompatWorker(BaseRunner):
         return resp.json()
 
     async def _execute(self, task: Task) -> WorkerResult:
-        from metaharness.context import budget_for, fit_messages
+        from metaharness.context import (
+            budget_for,
+            content_hash,
+            fit_messages_with_receipt,
+        )
 
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -194,7 +199,54 @@ class OpenAICompatWorker(BaseRunner):
         client = self._client or httpx.AsyncClient(timeout=self.timeout_s)
         try:
             for _round in range(self.max_tool_rounds + 1):
-                messages = fit_messages(messages, prompt_budget)
+                unfitted_messages = messages
+                try:
+                    context_receipt = fit_messages_with_receipt(
+                        unfitted_messages,
+                        prompt_budget,
+                        model_id=self.model,
+                        harness_version="metaharness:0.1.0",
+                        tier=self.tier,
+                        tool_schemas=tool_schemas,
+                        redaction_values=[self.api_key] if self.api_key else (),
+                    )
+                except Exception as exc:
+                    # Shadow evidence must never alter the live prompt path.
+                    # Invalid direct contract inputs still fail closed at the
+                    # public model/assembler boundary; this runtime observer
+                    # falls back to the exact legacy fitter.
+                    from metaharness.context import fit_messages
+
+                    messages = fit_messages(unfitted_messages, prompt_budget)
+                    try:
+                        emit_run_event(
+                            "context.manifest.shadow_failed",
+                            {
+                                "schema_version": 1,
+                                "shadow": True,
+                                "task_id": task.id,
+                                "error_type": type(exc).__name__,
+                            },
+                        )
+                    except Exception:
+                        pass
+                else:
+                    messages = context_receipt.messages
+                    try:
+                        emit_run_event(
+                            "context.manifest.shadow",
+                            {
+                                "schema_version": 1,
+                                "shadow": True,
+                                "task_id": task.id,
+                                "live_messages_hash": content_hash(messages),
+                                "manifest": context_receipt.manifest.model_dump(mode="json"),
+                            },
+                        )
+                    except Exception:
+                        # A telemetry sink is outside candidate execution
+                        # authority and cannot make the model call fail.
+                        pass
                 try:
                     data = await self._post(
                         client, self._body(task, messages, tool_schemas), headers)
