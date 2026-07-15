@@ -18,4 +18,5 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - run: git config --global init.defaultBranch main
       - run: node --test scripts/workplan.test.mjs
