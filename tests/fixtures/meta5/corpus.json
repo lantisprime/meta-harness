@@ -53,19 +53,19 @@
       "id": "traversal-source-id-path-escape",
       "category": "traversal",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-002",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.source_id / memory-skill artifact resolution",
-      "description": "A memory-skill artifact loader that resolves source_id/artifact_ref onto a filesystem or object-store path must reject path-traversal sequences (e.g. '../../etc/passwd'). No such resolver or validation exists yet; the bare pydantic model accepts these strings today."
+      "description": "A memory-skill artifact loader that resolves source_id/artifact_ref onto a filesystem or object-store path must reject path-traversal sequences (e.g. '../../etc/passwd'). ContextSourceRef now rejects any '..' segment in source_id (and artifact_ref) under both '/' and '\\' separators; legit ids ('artifact:evidence-42', 'event-seq:1', 'lineage-42') pass."
     },
     {
       "id": "traversal-artifact-ref-path-escape",
       "category": "traversal",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-002",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.artifact_ref / memory-skill artifact resolution",
-      "description": "artifact_ref values are opaque strings today with no traversal guard; a future memory-skill artifact fetcher must reject traversal-shaped refs before dereferencing them."
+      "description": "artifact_ref values used to be opaque strings with no traversal guard; ContextSourceRef now rejects '..' segments in artifact_ref under both '/' and '\\' separators before the value can be handed to a memory-skill fetcher."
     },
     {
       "id": "cross-scope-task-requires-run",
@@ -89,10 +89,10 @@
       "id": "cross-scope-envelope-mixed-projects",
       "category": "cross_scope_access",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-003",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextEnvelope",
-      "description": "A future memory-skill assembler must refuse to bind sections whose sources carry different project_id/run_id scopes into a single envelope (no cross-run/cross-project bleed). ContextEnvelope has no scope-consistency validator today, so mixed-scope sections currently assemble without error."
+      "description": "A memory-skill assembler must refuse to bind sections whose sources carry different project_id scopes into a single envelope (no cross-project bleed). ContextEnvelope now rejects an envelope whose sections span more than one project_id; run_id / task_id consistency is delegated to ContextScope's existing nesting rules."
     },
     {
       "id": "immutable-frozen-attribute-mutation",
@@ -161,10 +161,10 @@
       "id": "lossy-compression-fidelity-bound",
       "category": "lossy_compression",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-006",
-      "target": "CompressionReceipt / metaharness.memory (does not exist)",
-      "description": "A future memory-skill compaction contract must attach a bounded fidelity/information-loss estimate to lossy compression (e.g. STRUCTURED_SUMMARY) receipts so downstream consumers can reason about what was dropped. CompressionReceipt today records only before/after hashes and token counts, with no loss bound."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "CompressionReceipt",
+      "description": "CompressionReceipt now carries a bounded fidelity_loss_estimate in [0,1], auto-computed by a model validator when absent: clamped 1 - final_tokens/original_tokens for lossy actions, 0.0 for NONE. Assembled receipts (assembly.py) get the field for free; live fitting output is unchanged."
     },
     {
       "id": "activation-lifecycle-states",
@@ -215,10 +215,10 @@
       "id": "hw-confounding-cross-section-lineage",
       "category": "hw_confounding",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-010",
-      "target": "ContextEnvelope / metaharness.memory (does not exist)",
-      "description": "A future memory-skill assembler must refuse to bind a high-water-mark-tracked (live) section and a content-hash-pinned (immutable) section to the same underlying lineage without an explicit reconciliation marker, to avoid confounding live state with a pinned snapshot. No such cross-section lineage check exists in ContextEnvelope today."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextEnvelope",
+      "description": "ContextEnvelope now rejects an envelope in which two sections share a source_id but one is content_hash-pinned (immutable) and the other is high_water_mark-tracked (live); the error names a future reconciliation marker (out of scope for this stage). The within-source identity XOR check on ContextSourceRef is unchanged."
     },
     {
       "id": "repeated-set-promotion-gate",
@@ -233,10 +233,10 @@
       "id": "incompatible-reuse-version-lineage",
       "category": "incompatible_reuse",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-012",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextVersionBindings",
-      "description": "A future compatibility check must refuse to reuse a memory_snapshot_version/evidence_snapshot_version pair across an incompatible harness_version bump (e.g. a breaking schema change) even though the two version axes are individually well-formed. ContextVersionBindings validates only self/parent candidate lineage, not cross-axis compatibility."
+      "description": "ContextVersionBindings now enforces the documented cross-axis convention: a harness_version self-declaring a breaking schema change (a '-breaking-' segment in the version string) must not bind a non-None memory_snapshot_version or evidence_snapshot_version. Reuse across a breaking bump is rejected with a message naming the future reconciliation marker."
     },
     {
       "id": "unhealthy-fallback-health-signal",
@@ -260,19 +260,19 @@
       "id": "incomplete-packaging-artifact-refs-completeness",
       "category": "incomplete_packaging",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-014",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextManifest.artifact_refs",
-      "description": "A future packaging contract must guarantee every fetchable section's artifact_ref appears in the manifest's artifact_refs list, so a downstream consumer can retrieve everything the manifest claims is fetchable. ContextManifest has no such completeness validator today, so an incompletely packaged manifest (fetchable source, absent artifact_ref) currently constructs without error."
+      "description": "ContextManifest now parses redacted_envelope_json, collects every fetchable source's artifact_ref, and requires each to appear in artifact_refs. Live assembly output stays valid because emitted sources are non-fetchable and the empty artifact_refs check passes trivially."
     },
     {
       "id": "evaluator-receipt-instruction-self-promotion",
       "category": "evaluator_non_self_approval",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-015",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.kind / ContextSourceRef.trust",
-      "description": "Evaluator receipts are evidence and must never acquire instruction authority. ContextSourceRef currently accepts an EVALUATOR_RECEIPT with trust=INSTRUCTION, so a future memory-skill assembler must enforce a source-kind trust ceiling before the receipt can enter an instruction-bearing section."
+      "description": "ContextSourceRef now enforces the source-kind trust ceiling: EVALUATOR_RECEIPT with trust=INSTRUCTION is rejected at construction. Other kind/trust combinations (e.g. EVALUATOR_RECEIPT with VERIFIED_FACT or UNTRUSTED_EVIDENCE) remain valid; the ceiling is the single forbidden pair."
     }
   ]
 }

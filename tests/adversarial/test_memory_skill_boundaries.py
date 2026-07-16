@@ -49,22 +49,18 @@ def _versions(**changes):
 
 
 def test_all_absent_cases_have_a_stable_requirement_id_and_a_test_below():
+    # Post-Stage-1 absent set: 7 META5-MEM cards have been flipped to enforced
+    # by validators in src/metaharness/context/models.py; remaining cards will
+    # be closed by Stage 2 (memory package) and Stage 3 (broker + scaffold).
     covered_requirement_ids = {
         "META5-MEM-001",
-        "META5-MEM-002",
-        "META5-MEM-003",
         "META5-MEM-004",
         "META5-MEM-005",
-        "META5-MEM-006",
         "META5-MEM-007",
         "META5-MEM-008",
         "META5-MEM-009",
-        "META5-MEM-010",
         "META5-MEM-011",
-        "META5-MEM-012",
         "META5-MEM-013",
-        "META5-MEM-014",
-        "META5-MEM-015",
     }
     corpus_requirement_ids = {case["requirement_id"] for case in ABSENT_CASES.values()}
     assert corpus_requirement_ids == covered_requirement_ids
@@ -85,14 +81,7 @@ def test_committed_memory_record_cannot_be_rewritten_in_place():
         store.overwrite(record.id, content="rewritten observation")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-002: source_id/artifact_ref values must be rejected when they "
-    "encode filesystem path traversal; no artifact resolver enforces this yet",
-)
 def test_source_id_and_artifact_ref_reject_path_traversal_sequences():
-    assert ABSENT_CASES["traversal-source-id-path-escape"]["requirement_id"] == "META5-MEM-002"
     with pytest.raises(ValidationError):
         make_source(source_id="../../etc/passwd")
     with pytest.raises(ValidationError):
@@ -105,13 +94,6 @@ def test_source_id_and_artifact_ref_reject_path_traversal_sequences():
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-003: a context envelope must refuse to bind sections whose "
-    "sources carry different project/run scopes; ContextEnvelope has no "
-    "scope-consistency validator today",
-)
 def test_envelope_rejects_sections_drawn_from_incompatible_scopes():
     source_a = make_source(
         source_id="project-a-instructions",
@@ -177,12 +159,6 @@ def test_memory_write_is_committed_before_it_is_logged():
     assert events[0][1]["commit_state"] == "committed"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="META5-MEM-006: lossy compression receipts must carry a bounded "
-    "fidelity/information-loss estimate; CompressionReceipt has no such field",
-)
 def test_lossy_compression_receipt_carries_a_fidelity_bound():
     from metaharness.context import CompressionAction, CompressionReceipt
 
@@ -253,14 +229,6 @@ def test_task_action_training_target_schema_exists_and_validates():
     assert target.outcome_label in {"pass", "fail"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-010: a memory-skill assembler must refuse to bind a "
-    "high-water-mark-tracked (live) section and a content-hash-pinned "
-    "(immutable) section to the same lineage without an explicit "
-    "reconciliation marker; ContextEnvelope has no such cross-section check",
-)
 def test_envelope_rejects_confounded_live_and_pinned_sections_for_same_lineage():
     pinned_source = make_source(
         source_id="lineage-42",
@@ -323,13 +291,6 @@ def test_promotion_gate_rejects_repeated_search_set_evidence():
         gate.decide(evidence)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-012: reusing a memory/evidence snapshot pair across an "
-    "incompatible harness_version bump must be rejected; "
-    "ContextVersionBindings only validates candidate lineage today",
-)
 def test_version_bindings_reject_incompatible_snapshot_reuse_across_harness_bump():
     shared_axes = {
         "memory_snapshot_version": "memory:9",
@@ -369,13 +330,6 @@ def test_repeated_shadow_assembly_failures_trip_an_unhealthy_circuit_breaker():
         breaker.require_healthy()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-014: every fetchable section's artifact_ref must appear in "
-    "the manifest's artifact_refs list; ContextManifest has no such "
-    "completeness validator today",
-)
 def test_manifest_artifact_refs_must_cover_every_fetchable_section():
     fetchable_source = make_source(
         source_id="fetchable-artifact",
@@ -437,14 +391,7 @@ def test_manifest_artifact_refs_must_cover_every_fetchable_section():
         ContextManifest(**manifest_values, manifest_hash=content_hash(serializable))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="META5-MEM-015: evaluator receipts are evidence, never instructions; "
-    "ContextSourceRef has no source-kind trust ceiling today",
-)
 def test_evaluator_receipt_cannot_self_promote_to_instruction_authority():
-    assert ABSENT_CASES["evaluator-receipt-instruction-self-promotion"]["requirement_id"] == "META5-MEM-015"
     with pytest.raises(ValidationError):
         make_source(
             source_id="evaluator-verdict",
