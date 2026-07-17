@@ -312,6 +312,24 @@ self-optimizing**:
    pack suites through the same held-out gate. Steering gets tuned by
    evidence, not taste.
 
+### After a verified success
+
+When the worker's result comes back and passes external verification, the
+deliverable ships (step output journaled, downstream phases consume it) and
+the ledgers update deterministically: helpful marks weighted toward
+entries cited in `applied_knowledge`, capability-matrix and qualification
+evidence, provenance, pack usage stats. **The answer itself never becomes
+knowledge** — task outputs are performances, not sources; letting them
+self-publish would be self-assessment through the back door.
+
+One deliberate exception: **skill harvesting.** When a verified success
+contains a reusable procedure no existing skill entry covers, the harness
+may propose a *candidate* skill entry (Voyager-style). The proposal enters
+the acquisition pipeline exactly like external material: quarantined, its
+`check:` derived from the test that verified the original task, probes
+generated and second-model-validated, eval-gated before publish. The
+agent's own experience is treated as just another untrusted source.
+
 ## Module architecture (decision 8)
 
 The self-learning system is a **standalone distribution** — `selflearn/` at
