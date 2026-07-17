@@ -98,12 +98,15 @@ def test_degraded_mode_is_loud_and_flagged(tmp_path):
     assert got and got[0].degraded
 
 
-def test_unindexed_entries_refuse_silent_partial_retrieval(tmp_path):
+def test_unindexed_entries_are_lazily_indexed(tmp_path):
+    """Review fix: entries published after wiring no longer hard-fail
+    retrieval — they get embedded on the fly and the vectors persist."""
     store = PackStore(tmp_path)
     publish(store, "kn-f-a", "lifespan replaces on_event.")
     retriever = Retriever(store, HashEmbedder())
-    with pytest.raises(StoreError, match="index"):
-        retriever.retrieve(["fastapi"], "lifespan")
+    got = retriever.retrieve(["fastapi"], "lifespan")
+    assert got and got[0].entry_id == "kn-f-a"
+    assert store.get("kn-f-a").embedder_id == "hash-v1"
 
 
 def test_embedder_swap_reindexes(indexed_store):

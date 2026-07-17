@@ -57,7 +57,7 @@ def test_auto_deprecation_at_threshold(store):
     assert reports[0].deprecated == ()           # not before threshold
     # deprecation reason is journaled in pack provenance
     prov = (store.root / "p" / "provenance.jsonl").read_text()
-    assert "auto: harmful=3.00" in prov
+    assert "auto: 3 consecutive harmful marks" in prov
 
 
 def test_helpful_history_delays_deprecation(store):

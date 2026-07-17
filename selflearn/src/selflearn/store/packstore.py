@@ -56,6 +56,11 @@ class StoredEntry:
     # loop learn "helps for code_edit but misleads for review" instead of
     # one coarse counter (review finding 4).
     marks_by_task: dict[str, list[float]] = field(default_factory=dict)
+    # decay-free EVENT counter: consecutive harmful marks with no helpful
+    # mark in between. Drives auto-deprecation so the guarantee holds at
+    # any cadence — decayed float counters plateau below any threshold for
+    # slow cadences (review finding: never-deprecate above ~52-day spacing).
+    consecutive_harmful: int = 0
     marks_updated_at: str = ""       # ISO timestamp of the last mark event
     embedder_id: str = ""
     vector: tuple[float, ...] = ()
@@ -124,6 +129,7 @@ class PackStore:
                     marks_by_task={
                         str(k): [float(v[0]), float(v[1])]
                         for k, v in meta.get("marks_by_task", {}).items()},
+                    consecutive_harmful=int(meta.get("consecutive_harmful", 0)),
                     marks_updated_at=meta.get("marks_updated_at", ""),
                     embedder_id=meta.get("embedder_id", ""),
                     vector=tuple(meta.get("vector", [])))
@@ -232,6 +238,10 @@ class PackStore:
                 bucket[1] *= decay
         stored.helpful += helpful
         stored.harmful += harmful
+        if harmful > 0:
+            stored.consecutive_harmful += 1
+        elif helpful > 0:
+            stored.consecutive_harmful = 0
         if task_type:
             bucket = stored.marks_by_task.setdefault(task_type, [0.0, 0.0])
             bucket[0] += helpful
@@ -327,6 +337,7 @@ class PackStore:
                     "helpful": e.helpful, "harmful": e.harmful,
                     "marks_by_task": {k: list(v)
                                       for k, v in e.marks_by_task.items()},
+                    "consecutive_harmful": e.consecutive_harmful,
                     "marks_updated_at": e.marks_updated_at,
                     "embedder_id": e.embedder_id,
                     "vector": list(e.vector),

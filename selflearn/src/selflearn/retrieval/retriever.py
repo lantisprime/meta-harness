@@ -113,11 +113,16 @@ class Retriever:
             stale = [e for e in candidates
                      if e.embedder_id != self.embedder.embedder_id]
             if stale:
-                raise StoreError(
-                    f"{len(stale)} published entries lack vectors from embedder "
-                    f"{self.embedder.embedder_id!r} (e.g. {stale[0].cand.id!r}); "
-                    "run Retriever.index() first — refusing silent partial "
-                    "retrieval")
+                # Lazy re-index (review finding: publishing after wiring left
+                # unvectored entries that hard-failed every retrieval until a
+                # manual index). No silent partial retrieval — we fix the gap
+                # by embedding the stale entries now, not by skipping them.
+                vectors = self.embedder.embed(
+                    [e.cand.body + " " + " ".join(e.cand.claims)
+                     for e in stale])
+                for entry, vector in zip(stale, vectors):
+                    self.store.set_vector(entry.cand.id, vector,
+                                          self.embedder.embedder_id)
             qv = self.embedder.embed([query])[0]
             scored = [(cosine(qv, e.vector) * e.score_for(task_type), e)
                       for e in candidates]

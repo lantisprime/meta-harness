@@ -271,7 +271,7 @@ def test_contract_rejects_incoherent_attribution():
     with pytest.raises(ContractError, match="applied .* subset"):
         TaskOutcome(task_id="t", task_type="code_edit", topic="x",
                     verdict="pass", injected=("a",), applied=("b",))
-    with pytest.raises(ContractError, match="implicated .* subset"):
+    with pytest.raises(ContractError, match="no influence"):
         TaskOutcome(task_id="t", task_type="code_edit", topic="x",
                     verdict="fail", injected=(), implicated=("ghost",))
 

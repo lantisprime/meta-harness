@@ -82,7 +82,9 @@ class AcquireContext:
     def artifact_path(self, name: str) -> Path:
         """A path inside the jail; escaping it is a loud error."""
         path = (self.workdir / name).resolve()
-        if not str(path).startswith(str(self.workdir.resolve())):
+        # Path.is_relative_to, not str.startswith: a prefix check lets a
+        # sibling like <workdir>-escape/ pass (review finding, reproduced).
+        if not path.is_relative_to(self.workdir.resolve()):
             raise AcquisitionError(f"artifact path {name!r} escapes the workdir jail")
         path.parent.mkdir(parents=True, exist_ok=True)
         return path

@@ -28,6 +28,18 @@ class ContractError(ValueError):
     """A contract object was constructed with invalid data. Always loud."""
 
 
+def registrable_domain(url_or_name: str) -> str:
+    """Canonical registrable-domain key for tier lookup and corroboration
+    independence: lowercased netloc with a leading 'www.' label removed
+    (removeprefix — lstrip('www.') strips a CHARACTER SET and mangles
+    w-starting domains like web.dev; review finding, reproduced)."""
+    s = url_or_name.strip().lower()
+    if "://" in s:
+        s = s.split("/")[2]
+    s = s.split("@")[-1].split(":")[0]        # strip userinfo / port
+    return s.removeprefix("www.")
+
+
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise ContractError(message)
@@ -107,10 +119,12 @@ class EntrySource:
     @property
     def domain(self) -> str:
         """Registrable-domain key for corroboration independence
-        (simulation finding 2: independence = distinct registrable domains)."""
+        (simulation finding 2: independence = distinct registrable domains).
+        www is normalized away so www.site and site never count as two
+        independent sources (review finding, reproduced)."""
         if "://" in self.url:
-            return self.url.split("/")[2].lower()
-        return self.url.split("/")[0].lower()
+            return registrable_domain(self.url)
+        return registrable_domain(self.url.split("/")[0])
 
 
 @dataclass(frozen=True)
@@ -226,6 +240,10 @@ class TaskOutcome:
     the failing step's definition instead of the whole entry. ``topic`` is
     assigned by the host's deterministic labeler (simulation finding 3); an
     empty topic means 'unlabeled' and is excluded from gap joins.
+    ``seeded_by`` carries the workflow entries that shaped this task's PLAN
+    (plan_from_knowledge attribution): they influenced the task through the
+    plan rather than the prompt, so they are a legitimate mark target even
+    though they were never injected.
     """
 
     task_id: str
@@ -237,19 +255,26 @@ class TaskOutcome:
     failure_mode: str = ""
     implicated: tuple[str, ...] = ()
     step_id: str = ""
+    seeded_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require(self.verdict in VERDICTS, f"verdict {self.verdict!r} invalid")
         _require(not (self.verdict == "pass" and self.implicated),
                  "a passing outcome cannot implicate entries")
-        # Host-discipline made checkable (review finding 3): the host's
-        # attribution must at least be coherent — an entry that was never in
-        # the prompt cannot have been applied, and cannot have caused the
-        # failure. Domain-level "knowledge was missing" belongs to gap
-        # signals, not harmful marks.
+        # Host-discipline made checkable (review finding 3): attribution must
+        # be coherent — an entry that neither appeared in the prompt nor
+        # seeded the plan cannot have been applied or caused the failure.
+        # Domain-level "knowledge was missing" belongs to gap signals.
         _require(set(self.applied) <= set(self.injected),
                  "applied entries must be a subset of injected entries")
-        _require(set(self.implicated) <= set(self.injected),
-                 "implicated entries must be a subset of injected entries — "
-                 "an entry absent from the prompt cannot have caused the "
-                 "failure (missing knowledge is a gap signal, not a mark)")
+        _require(set(self.implicated) <= set(self.injected) | set(self.seeded_by),
+                 "implicated entries must come from the injected entries or "
+                 "the plan's seeded_by entries — an entry with no influence "
+                 "on the task cannot have caused the failure (missing "
+                 "knowledge is a gap signal, not a mark)")
+
+    @property
+    def credited(self) -> tuple[str, ...]:
+        """Entries earning helpful marks on a pass: injected + plan seeds."""
+        return self.injected + tuple(e for e in self.seeded_by
+                                     if e not in self.injected)

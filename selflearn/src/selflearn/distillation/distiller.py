@@ -64,8 +64,12 @@ def injection_screen(text: str) -> str:
 
 
 def _entry_id(pack: str, topic: str, body: str) -> str:
+    """The content digest is never truncated away — truncating the whole id
+    collided distinct entries under long pack/topic (review finding,
+    reproduced) and silently dropped the second entry as 'already known'."""
     digest = hashlib.sha256(body.encode()).hexdigest()[:10]
-    return f"kn-{pack}-{topic}-{digest}"[:80]
+    prefix = f"kn-{pack}-{topic}"[:69].rstrip("-")
+    return f"{prefix}-{digest}"
 
 
 class Distiller:
@@ -119,15 +123,22 @@ def entries_from_specs(specs: list, docs: Sequence[SourceDocument], pack: str,
         entry_topic = str(spec.get("topic") or topic).strip() or topic
         hit = source_hit or injection_screen(
             body + " " + " ".join(map(str, spec.get("claims", []))))
-        procedure = tuple(
-            ProcedureStep(
-                id=str(s.get("id", "")), objective=str(s.get("objective", "")),
-                task_type=str(s.get("task_type", "")),
-                tools=tuple(s.get("tools", [])),
-                depends_on=tuple(s.get("depends_on", [])),
-                check=tuple(sorted(dict(s.get("check", {})).items())))
-            for s in spec.get("procedure", {}).get("steps", []))
+        # SchemaGuard covers procedure parsing too (review finding: a step
+        # missing 'objective' or a bare-list procedure — the natural JSON
+        # shape — escaped as raw ContractError/AttributeError). Both shapes
+        # are accepted: {"steps": [...]} and [...].
         try:
+            raw_procedure = spec.get("procedure") or {}
+            steps = (raw_procedure if isinstance(raw_procedure, list)
+                     else raw_procedure.get("steps", []))
+            procedure = tuple(
+                ProcedureStep(
+                    id=str(s.get("id", "")), objective=str(s.get("objective", "")),
+                    task_type=str(s.get("task_type", "")),
+                    tools=tuple(s.get("tools", [])),
+                    depends_on=tuple(s.get("depends_on", [])),
+                    check=tuple(sorted(dict(s.get("check", {})).items())))
+                for s in steps)
             entry = CandidateEntry(
                 id=_entry_id(pack, entry_topic, body),
                 pack=pack, kind=str(spec.get("kind", "knowledge")),
@@ -137,7 +148,7 @@ def entries_from_specs(specs: list, docs: Sequence[SourceDocument], pack: str,
                 sources=sources, procedure=procedure,
                 quarantined=bool(hit),
                 quarantine_reason=f"injection screen: /{hit}/" if hit else "")
-        except ContractError as exc:
+        except (ContractError, AttributeError, TypeError, ValueError) as exc:
             raise DistillationError(f"SchemaGuard: invalid entry from "
                                     f"distiller: {exc}")
         entries.append(entry)

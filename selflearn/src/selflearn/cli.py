@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 from dataclasses import asdict
@@ -71,9 +72,27 @@ class OpenAICompatChat:
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
             payload = json.loads(resp.read())
         content = payload["choices"][0]["message"]["content"]
-        content = content.strip().removeprefix("```json").removeprefix("```")
-        content = content.removesuffix("```").strip()
-        return json.loads(content)
+        return _extract_json(content)
+
+
+def _extract_json(content: str) -> dict:
+    """Parse model output into JSON, tolerating hybrid-thinking <think>
+    blocks and code fences anywhere in the text (review finding: edge-only
+    fence stripping re-introduced the think-text parse bug metaharness
+    already fixed in harness/local.py; qwen3-class models emit both)."""
+    text = re.sub(r"<think>.*?</think>", " ", content, flags=re.S)
+    text = re.sub(r"<think>.*", " ", text, flags=re.S)   # unterminated block
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.S)
+    if fenced:
+        text = fenced.group(1)
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
 
 
 class OpenAICompatEmbeddingClient:

@@ -96,7 +96,9 @@ def apply_outcome(store: PackStore, outcome: TaskOutcome,
                           task_type=outcome.task_type, **counts)
 
     if outcome.verdict == "pass":
-        for entry_id in outcome.injected:
+        # credited = injected + plan-seeding entries (a workflow entry that
+        # shaped the plan earns helpful evidence from a verified completion)
+        for entry_id in outcome.credited:
             weight = applied_weight if entry_id in outcome.applied else helpful_weight
             _mark(entry_id, helpful=weight)
             helpful_marked.append(entry_id)
@@ -105,16 +107,19 @@ def apply_outcome(store: PackStore, outcome: TaskOutcome,
     for entry_id in outcome.implicated:
         stored = _mark(entry_id, harmful=harmful_weight)
         harmful_marked.append(entry_id)
-        # epsilon: rapid successive marks each decay by a sliver of wall
-        # time, so N marks sum to N - 1e-7 — never miss the threshold on
-        # float dust
+        # Deprecation triggers on the decay-free EVENT streak (N consecutive
+        # harmful marks, any cadence — decayed float counters plateau below
+        # any threshold at slow cadences), while the helpful-vs-harmful
+        # comparison uses the decayed counters so strong RECENT helpful
+        # history still delays deprecation.
         if (stored.status == "published"
-                and stored.harmful >= deprecate_threshold - 1e-6
+                and stored.consecutive_harmful >= deprecate_threshold
                 and stored.harmful > stored.helpful):
             store.deprecate(entry_id,
-                            f"auto: harmful={stored.harmful:.2f} > "
-                            f"helpful={stored.helpful:.2f} "
-                            f"(threshold {deprecate_threshold}); "
+                            f"auto: {stored.consecutive_harmful} consecutive "
+                            f"harmful marks (threshold {deprecate_threshold}) "
+                            f"and decayed harmful={stored.harmful:.2f} > "
+                            f"helpful={stored.helpful:.2f}; "
                             f"last failure task={outcome.task_id} "
                             f"mode={outcome.failure_mode or 'unspecified'}")
             deprecated.append(entry_id)

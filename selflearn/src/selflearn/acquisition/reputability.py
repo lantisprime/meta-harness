@@ -6,15 +6,11 @@ during gather but their claims cannot be sole support for a published entry
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
+from selflearn.contracts import registrable_domain
 
-def registrable_domain(url_or_name: str) -> str:
-    """Key used for tier lookup and corroboration independence."""
-    s = url_or_name.strip().lower()
-    if "://" in s:
-        s = s.split("/")[2]
-    return s.lstrip("www.") if s.startswith("www.") else s
+__all__ = ["ReputabilityPolicy", "DEFAULT_POLICY", "registrable_domain"]
 
 
 @dataclass(frozen=True)
@@ -27,13 +23,14 @@ class ReputabilityPolicy:
     primary_channels: frozenset[str] = frozenset()
 
     def tier_for(self, url: str) -> str:
+        # normalize BOTH sides so an operator listing 'www.example.com'
+        # still matches 'example.com' and vice versa
         domain = registrable_domain(url)
-        if domain in self.official:
-            return "official"
-        if domain in self.primary:
-            return "primary"
-        if domain in self.community:
-            return "community"
+        for tier, entries in (("official", self.official),
+                              ("primary", self.primary),
+                              ("community", self.community)):
+            if any(registrable_domain(e) == domain for e in entries):
+                return tier
         return "unknown"
 
     def tier_for_channel(self, channel: str) -> str:

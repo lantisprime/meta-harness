@@ -108,6 +108,29 @@ def test_tools_loud_paths(toolset):
         tools["knowledge_verify"].handler(pack="empty-pack")
 
 
+def test_tool_errors_never_escape_the_tool_boundary(toolset):
+    """Review fix: worker-shaped bad inputs must surface as ToolError (worker-
+    visible, correctable), never as raw exceptions that burn task attempts."""
+    store, tools, note = toolset
+    with pytest.raises(ToolError, match="refs is empty"):
+        tools["knowledge_gather"].handler(refs=[])
+    with pytest.raises(ToolError):                      # empty-string ref
+        tools["knowledge_gather"].handler(refs=[""])
+    tools["knowledge_gather"].handler(refs=[f"file://{note}"], tier="official")
+    with pytest.raises(ToolError, match="SchemaGuard"):  # step missing objective
+        tools["knowledge_submit_entries"].handler(
+            entries=[{"kind": "workflow", "body": "b", "claims": ["c"],
+                      "procedure": {"steps": [{"id": "s1"}]}}],
+            pack="fastapi", topic="t")
+    # bare-list procedure (the natural JSON shape) is now ACCEPTED
+    result = json.loads(tools["knowledge_submit_entries"].handler(
+        entries=[{"kind": "workflow", "body": "b", "claims": ["c"],
+                  "procedure": [{"id": "s1", "objective": "do it",
+                                 "task_type": "code_edit"}]}],
+        pack="fastapi", topic="t"))
+    assert result["added"]
+
+
 # -- knowledge-driven planning ---------------------------------------------
 
 def publish_workflow_entry(store):

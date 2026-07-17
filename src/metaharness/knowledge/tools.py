@@ -36,7 +36,7 @@ def knowledge_tools(store, workdir: Path, search_backend=None, embedder=None,
         UrllibFetcher,
         builtin_plugins,
     )
-    from selflearn.contracts import SourceRef
+    from selflearn.contracts import ContractError, SourceRef
     from selflearn.distillation import DistillationError, entries_from_specs
     from selflearn.store.packstore import StoreError
     from selflearn.verification import Verifier
@@ -50,11 +50,16 @@ def knowledge_tools(store, workdir: Path, search_backend=None, embedder=None,
     session: dict[str, list] = {"docs": []}
 
     def knowledge_gather(refs: list[str], tier: str = "") -> str:
+        if not refs:
+            raise ToolError("refs is empty — pass at least one source ref "
+                            "(URL, file://, arXiv link, or search:<question>)")
         try:
             docs = registry.gather(
                 [SourceRef(uri=r, hint=tier) for r in refs], ctx)
-        except AcquisitionError as exc:
+        except (AcquisitionError, ContractError) as exc:
             raise ToolError(str(exc))
+        if not docs:
+            raise ToolError("no documents were produced for those refs")
         session["docs"].extend(docs)
         lines = [f"{d.provenance.url} [tier={d.tier}] "
                  f"{len(d.chunks)} chunks via {d.provenance.plugin}"
@@ -70,7 +75,7 @@ def knowledge_tools(store, workdir: Path, search_backend=None, embedder=None,
                             "knowledge_gather first")
         try:
             built = entries_from_specs(entries, session["docs"], pack, topic)
-        except DistillationError as exc:
+        except (DistillationError, ContractError) as exc:
             raise ToolError(str(exc))
         added, skipped, quarantined = [], [], []
         for entry in built:

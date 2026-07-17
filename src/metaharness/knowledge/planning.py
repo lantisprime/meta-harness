@@ -33,9 +33,14 @@ def plan_from_knowledge(
     """Returns (spec, seeded_by, guidance).
 
     spec is a deterministic WorkflowSpec when a workflow entry matched
-    strongly (seeded_by = its entry id, recorded for plan-level marks);
-    otherwise spec is None and guidance carries the best weak match's prose
-    ("" when no workflow entries exist at all).
+    strongly (seeded_by = its entry id); otherwise spec is None and guidance
+    carries the best weak match's prose ("" when no workflow entries exist).
+
+    Plan-level marks: record the returned seeded_by id in
+    ``TaskOutcome.seeded_by`` on every step outcome of the instantiated run
+    — a verified pass credits it (helpful), and a failing step may implicate
+    it (harmful) even though it was never injected into a prompt, because
+    it shaped the plan itself.
     """
     from selflearn.retrieval import Retriever
 

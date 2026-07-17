@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from selflearn.contracts import GapSignal, TaskOutcome
+from selflearn.contracts import ContractError, GapSignal, TaskOutcome
 from selflearn.learning.marks import (
     MARK_HALF_LIFE_DAYS,
     MarkReport,
@@ -96,16 +97,32 @@ class Learner:
             return
         data = json.loads(self.state_path.read_text())
         self._backoff = {str(k): int(v) for k, v in data.get("backoff", {}).items()}
-        self._failures = [
-            TaskOutcome(
-                task_id=f["task_id"], task_type=f["task_type"],
-                topic=f["topic"], verdict=f["verdict"],
-                injected=tuple(f.get("injected", [])),
-                applied=tuple(f.get("applied", [])),
-                failure_mode=f.get("failure_mode", ""),
-                implicated=tuple(f.get("implicated", [])),
-                step_id=f.get("step_id", ""))
-            for f in data.get("failures", [])]
+        self._failures = []
+        skipped = 0
+        for f in data.get("failures", []):
+            # Migration tolerance (review finding): records persisted under
+            # an older contract must not brick the learning loop — skip
+            # individually-invalid records loudly instead of dying in
+            # __init__ on the whole file.
+            try:
+                self._failures.append(TaskOutcome(
+                    task_id=f["task_id"], task_type=f["task_type"],
+                    topic=f["topic"], verdict=f["verdict"],
+                    injected=tuple(f.get("injected", [])),
+                    applied=tuple(f.get("applied", [])),
+                    failure_mode=f.get("failure_mode", ""),
+                    implicated=tuple(f.get("implicated", [])),
+                    step_id=f.get("step_id", ""),
+                    seeded_by=tuple(f.get("seeded_by", []))))
+            except (ContractError, KeyError, TypeError) as exc:
+                skipped += 1
+                if skipped == 1:
+                    warnings.warn(
+                        f"learner-state {self.state_path}: skipping records "
+                        f"invalid under the current contract (first: {exc}); "
+                        "evidence from them is lost", stacklevel=2)
+        if skipped:
+            self._save_state()      # rewrite so the skips happen once
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,11 +145,15 @@ class Learner:
     # -- slow loop ------------------------------------------------------
 
     def gap_signals(self, pack: str) -> list[GapSignal]:
+        coverage = self.store.coverage(pack)
         by_topic: dict[str, list[TaskOutcome]] = {}
         for f in self._failures:
-            if f.topic:                         # unlabeled excluded, not guessed
+            # Pack-scoped join (review finding): only topics this pack's
+            # coverage map owns. A topic owned by another pack is left for
+            # that pack's sweep; a topic owned by no pack is excluded like
+            # an unlabeled outcome — never attributed by sweep order.
+            if f.topic and f.topic in coverage:
                 by_topic.setdefault(f.topic, []).append(f)
-        coverage = self.store.coverage(pack)
         # backoff is round-based: every sweep ages all of this pack's
         # counters, whether or not that topic has pending failures
         suppressed: set[str] = set()
