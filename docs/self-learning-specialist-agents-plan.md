@@ -141,9 +141,11 @@ The design must not assume any particular LLM or vendor:
 
 Every published entry must also *teach the harness how to test for it*. The
 verification module's **evalgen** step runs inside the acquisition workflow
-and derives eval items from each candidate entry, reusing the existing suite
-machinery
-(`evals/gate.py: run_suite / compare_suites`, pass^k, sign test):
+and derives eval items from each candidate entry. The library's built-in
+probe-suite runner mirrors the existing suite machinery (pass^k, paired
+sign test); in meta-harness the adapter feeds its results into
+`evals/gate.py: compare_suites` and the capability matrix rather than
+duplicating them:
 
 - **Recall probes** (knowledge entries): fact questions whose answer keys are
   extracted from the *verified sources* — never from model memory — checked
@@ -191,20 +193,24 @@ for:
 
 ## Module architecture (decision 8)
 
-`src/metaharness/knowledge/` is a package of six modules with **typed
-contracts** between them. Modules never import each other's internals — they
-exchange frozen value objects — so each is independently testable,
-replaceable, and reusable outside this harness (the platform-agnosticism
-requirement applied to the code itself):
+The self-learning system is a **standalone distribution** — `selflearn/` at
+the repo root with its own `pyproject.toml` and **zero `metaharness`
+imports** (the `development/remote_workplan/` precedent; extractable to its
+own repo later, like `youtube-distiller`). meta-harness consumes it through
+one thin adapter package, `src/metaharness/knowledge/`. Inside `selflearn`
+are six modules with **typed contracts** between them. Modules never import
+each other's internals — they exchange frozen value objects — so each is
+independently testable, replaceable, and usable by any harness (the
+platform-agnosticism requirement applied to the code itself):
 
 | Module | Package | Consumes → Produces |
 |---|---|---|
-| Acquisition | `knowledge/acquisition/` | `SourceRef` → `SourceDocument` — plugin-based, below |
-| Distillation | `knowledge/distillation/` | `SourceDocument[]` → `CandidateEntry[]` — SchemaGuard-enforced, injection screen |
-| Verification & evals | `knowledge/verification/` | `CandidateEntry` → `VerifiedEntry + ProbeSet + PublishDecision` — reputability policy, corroboration, skill `check:` execution, evalgen, second-model probe validation, eval gate |
-| Store | `knowledge/store/` | packs on disk — entries, manifests, embedding index, assets, quarantine/promotion state machine, provenance |
-| Retrieval | `knowledge/retrieval/` | `Task` + bound packs → budgeted, fenced injection block — semantic scoring |
-| Learning | `knowledge/learning/` | verified task outcomes → helpful/harmful marks, auto-deprecation; MAST failure clusters → gap signals / acquisition suggestions |
+| Acquisition | `selflearn/acquisition/` | `SourceRef` → `SourceDocument` — plugin-based, below |
+| Distillation | `selflearn/distillation/` | `SourceDocument[]` → `CandidateEntry[]` — SchemaGuard-enforced, injection screen |
+| Verification & evals | `selflearn/verification/` | `CandidateEntry` → `VerifiedEntry + ProbeSet + PublishDecision` — reputability policy, corroboration, skill `check:` execution, evalgen, second-model probe validation, eval gate |
+| Store | `selflearn/store/` | packs on disk — entries, manifests, embedding index, assets, quarantine/promotion state machine, provenance |
+| Retrieval | `selflearn/retrieval/` | `TaskProfile` + bound packs → budgeted, fenced injection block — semantic scoring |
+| Learning | `selflearn/learning/` | verified task outcomes → helpful/harmful marks, auto-deprecation; failure clusters → gap signals / acquisition suggestions |
 
 Contract flow: `SourceRef → SourceDocument → CandidateEntry →
 (VerifiedEntry, ProbeSet, PublishDecision)`. The store is the only shared
@@ -212,6 +218,37 @@ state, and the `knowledge_acquisition` workflow template is pure
 orchestration — each phase calls exactly one module, keeping the
 deterministic spine intact: `scope → gather (acquisition) → distill
 (distillation) → verify + eval-gate (verification) → publish (store)`.
+
+### Ports: how a host plugs in (decision 10)
+
+`selflearn` is host-agnostic through five small Protocols; everything else
+is self-contained (stores are plain files):
+
+- **`ModelPort`** — one `complete(request) -> result` for every LLM step
+  (distill, judge, evalgen, vision descriptions). meta-harness binds its
+  runner layer and tier router; another harness binds whatever it drives.
+- **`EmbeddingPort`** — `embed(texts) -> vectors`, keyed by embedder id (the
+  re-index-on-swap rule lives in the library).
+- **`ExecutionPort`** — sandboxed command execution for skill `check:`
+  blocks and executable probes. meta-harness binds the `evals/execution.py`
+  sandbox; a host without one gets executable checks refused loudly, never
+  skipped silently.
+- **`ProvenancePort`** — append-only event sink. meta-harness binds the
+  hash-chained provenance log; the standalone default is a local JSONL.
+- **`IdentityPort`** — answers "are these two workers distinct?" for the
+  probe-author/validator separation. meta-harness binds Ed25519 worker
+  identities; the standalone default compares model ids (weaker, and
+  reported as such in the publish decision).
+
+The library ships its own minimal probe-suite runner (pass^k + paired
+comparison) so eval-gated publishing works with no host at all, and a small
+`selflearn` CLI (`acquire / distill / publish / retrieve / evals`) exercises
+the full pipeline standalone — which doubles as the integration-test
+surface. The meta-harness adapter (`src/metaharness/knowledge/`) is the only
+place harness and library meet: it binds the five ports, registers the
+worker-agent archetypes, wires `AgentConfig.knowledge_packs`, feeds suite
+results into `evals/gate.py`'s go/no-go and the capability matrix, and
+exposes the `knowledge_acquisition` workflow template.
 
 Publishing is **eval-gated** (decision 3): the deterministic
 reputability/citation policy must pass, the entry's second-model-validated
@@ -348,13 +385,17 @@ Each milestone is independently shippable and tested; later ones can be
 re-scoped after we see the earlier ones work.
 
 Milestones map one-to-one onto modules, so each ships as a bounded package
-with its contract types and tests.
+with its contract types and tests. Module paths live in the standalone
+`selflearn` distribution; anything touching `AgentConfig`, templates, the
+trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
 
-1. **M1 — Store module** (`knowledge/store/`: entry/manifest models,
-   quarantine state machine, provenance, boot loading). Import
-   `memory/knowledge_base/*.md` and one `yt-distill` `distilled/` lecture
-   as seed packs to prove the format.
-2. **M2 — Retrieval module + specialist binding** (`knowledge/retrieval/`
+1. **M1 — Package skeleton + store module** (`selflearn/` distribution:
+   pyproject, contract value objects, the five port Protocols, adapter
+   stub; `selflearn/store/`: entry/manifest models, quarantine state
+   machine, provenance, boot loading). Import `memory/knowledge_base/*.md`
+   and one `yt-distill` `distilled/` lecture as seed packs to prove the
+   format.
+2. **M2 — Retrieval module + specialist binding** (`selflearn/retrieval/`
    semantic scorer — embedding cosine primary with keyword prefilter,
    manifest vectors keyed by embedder model with re-index on embedder swap,
    loud keyword-only degradation when no embedder is configured —
@@ -362,14 +403,14 @@ with its contract types and tests.
    context-budget slice, fenced injection, helpful/harmful feedback
    wiring). Value ships here even with hand-authored packs, against any
    configured worker.
-3. **M3 — Acquisition + distillation modules** (`knowledge/acquisition/`:
+3. **M3 — Acquisition + distillation modules** (`selflearn/acquisition/`:
    `SourcePlugin` protocol, registry with allowlisted entry points, and the
    built-in `web`, `pdf`, `arxiv`, `youtube`, `local` plugins;
-   `knowledge/distillation/` with SchemaGuard and the injection screen;
-   `knowledge-scout` and `knowledge-distiller` agent archetypes; loud
-   failure paths throughout).
+   `selflearn/distillation/` with SchemaGuard and the injection screen; the
+   standalone `selflearn` CLI; `knowledge-scout` and `knowledge-distiller`
+   agent archetypes adapter-side; loud failure paths throughout).
 4. **M4 — Verification module + acquisition template**
-   (`knowledge/verification/`: reputability policy config, corroboration,
+   (`selflearn/verification/`: reputability policy config, corroboration,
    skill `check:` execution, `knowledge-judge` archetype; the
    `knowledge_acquisition` template wiring all modules with per-step role
    binding; the intra-phase fan-out decision; publishing runs in strict
@@ -379,7 +420,7 @@ with its contract types and tests.
    distinctness, eval-gated auto-publish as the default, pack-promotion
    paired go/no-go, model qualification runs recording (model, pack)
    capability evidence).
-6. **M6 — Learning module** (`knowledge/learning/`: gap detection from MAST
+6. **M6 — Learning module** (`selflearn/learning/`: gap detection from MAST
    clusters, console card with advisory suggestions, auto-deprecation,
    suite regression on pack updates).
 7. **M7 — Web UI** (pack browser, entry + probe diff view at the curate gate,
@@ -445,6 +486,16 @@ with its contract types and tests.
    worker identity + model comparison in the trust plane, not by prompt
    text. Phase→role binding rides the per-step agent preference from
    issue #29.
+10. **Standalone module** *(added 2026-07-17)*. The whole self-learning
+    system ships as its own distribution — `selflearn/` at the repo root
+    with its own pyproject, zero `metaharness` imports, and a standalone
+    CLI + built-in probe-suite runner — extractable to its own repo later,
+    like `youtube-distiller`. Hosts integrate through five ports
+    (`ModelPort`, `EmbeddingPort`, `ExecutionPort`, `ProvenancePort`,
+    `IdentityPort`); meta-harness consumes it via one adapter package
+    (`src/metaharness/knowledge/`) binding those ports to the runner layer,
+    sandbox, provenance log, trust plane, capability matrix, and the
+    `knowledge_acquisition` workflow template.
 
 ## Residual risks (tracked, not blocking)
 
