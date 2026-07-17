@@ -179,18 +179,96 @@ for:
 
 ## The learning loop (two-speed, mirroring `correction/`)
 
-1. **Fast (per-task)**: after a verified task outcome, retrieved entries get
-   `helpful`/`harmful` marks — exactly the ACE delta-update scheme the
-   playbook uses. Persistently harmful entries auto-deprecate; deprecation is
-   journaled and reversible.
-2. **Slow (offline)**: a *knowledge-acquisition* workflow run, triggered by
-   any of the acquisition modes (goal-directed, seeding, citation
-   expansion, watched sources, or a gap signal — see Acquisition modes). It
-   proposes new/amended entries and pushes them through verify → eval-gate
-   → publish.
-3. **Gap detection**: when the failure store shows a cluster whose plays
-   don't help, the harness suggests (never auto-runs) an acquisition run for
-   that topic on the console — same advisory-only posture as the tuning card.
+The learning module is deliberately the *dumbest* module in the system —
+counters, thresholds, and joins over externally verified events. Any model
+judgment inside the learning loop is self-assessment sneaking back in, so
+the only LLM appearance is cosmetic: optionally rendering a gap cluster as
+readable suggestion text, advisory-only.
+
+**Input contract.** One event type from the host: a verified task outcome
+carrying (a) the verdict from the external verification hierarchy, (b) the
+**retrieval attribution list** — which entries were actually injected into
+that task's prompt, from the run journal — and (c) the MAST failure label
+when it failed. Unverified outcomes never enter.
+
+**Fast loop — per-task marks with asymmetric credit assignment.** Injection
+is not use, so marking is asymmetric:
+
+- *Helpful marks are cheap and noisy-tolerant*: verified PASS → every
+  injected entry gets `helpful+1`. Undeserved credit washes out over
+  volume, and a false helpful mark only keeps an entry retrievable.
+- *Harmful marks require implication evidence*: verified FAIL marks an
+  entry `harmful+1` only when something implicates it — grounded reflection
+  cites it, or the failure mode lands in the domain the entry claims. A
+  false harmful mark can kill good knowledge, so the bar is higher.
+
+Marks feed a score (the `PlaybookBullet.score()` shape) that multiplies
+into retrieval ranking as a prior — doubtful entries sink *before* anything
+is deprecated. Ranking demotion is the soft continuous consequence;
+deprecation the hard discrete one: an entry deprecates when harmful marks
+persist past a threshold over a window and outweigh helpful ones —
+journaled, reversible, probes retired, nothing deleted (the evidence trail
+is pack provenance).
+
+**Slow loop — gap detection over the coverage map.** Offline, the module
+joins failure-store MAST clusters against each pack's coverage map and
+emits typed `GapSignal`s, each implying a different acquisition prompt:
+
+1. **Coverage gap** — failures cluster in a claimed topic where retrieval
+   surfaced little; the knowledge doesn't exist → acquire the topic.
+2. **Quality gap** — relevant entries were retrieved but carry poor marks;
+   the knowledge isn't working → re-verify/amend those entries.
+3. **Staleness** — an entry's helpful rate decays and its sources are old;
+   the world moved → re-fetch sources and refresh.
+
+**Guardrails (anti-runaway).** Gap signals never auto-launch acquisition —
+they surface advisory-only (✦ posture) for human approval, which breaks the
+thrash loop *acquire → publish → fail → deprecate → re-acquire*. A signal
+for a topic with a recent failed acquisition attempt is suppressed with
+backoff, so even suggestions can't nag in a loop.
+
+**Where honesty comes from.** Retrieval feedback is accepted as noisy; it
+only steers day-to-day ranking. The clean signal is the generated eval
+suite: promotion and regression run through the paired go/no-go, and a
+publish batch that degrades the suite rolls back regardless of its marks.
+Known weak point, stated: implication-based harmful marking depends on
+grounded-reflection quality and will miss subtly bad entries that are never
+cited in a failure analysis — the backstop is staleness decay plus suite
+regression, which such an entry still cannot survive.
+
+## How a specialist learns (lifecycle)
+
+The model's weights never change; everything the agent "knows" that it
+didn't know yesterday lives in the harness. The cycle: **act → get verified
+→ get marked → expose gaps → research → publish verified knowledge →
+retrieve it next time.**
+
+1. A new specialist is only its spec: archetype prompt, seeded-or-empty
+   packs, routing constraints. First tasks run on base-model competence.
+2. Every task is externally verified, and the verdict drives three channels
+   at three timescales: marks reweight retrieval immediately; failures gain
+   MAST labels and playbook lessons per run; failure clusters become gap
+   signals offline — the agent discovering *what it doesn't know*.
+3. Acquisition (any mode) turns goals and gaps into verified knowledge:
+   scout syllabus → reputable sources → distilled entries → corroboration,
+   executable checks, second-model-validated probes → eval-gated publish.
+   The agent is never allowed to believe its own study notes.
+4. New knowledge changes behavior through retrieval, not retraining — same
+   model, smarter prompt; skill entries carry procedures proven once.
+5. The exam grows with the textbook: probes accumulate with entries, so
+   promotion requires beating no-injection, and later changes cannot
+   silently make the agent worse (regression ratchet).
+6. Routing learns too: (model, pack) qualification evidence accumulates in
+   the capability matrix, and because learned state is spec + packs + suite
+   (plain files), expertise survives a model swap — requalify and go.
+
+Concretely: a FastAPI specialist ships a bug using deprecated `on_event`
+handlers → execution verification fails the task → coverage gap in the
+`fastapi` pack → an approved acquisition run distills the official lifespan
+docs into an entry plus probes → eval-gated publish → the next lifespan
+task retrieves it and passes → helpful marks rank it higher. Months later
+its helpful rate decays as FastAPI moves on → staleness signal → re-fetch
+and amend.
 
 ## Module architecture (decision 8)
 
