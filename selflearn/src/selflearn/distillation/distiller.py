@@ -94,42 +94,51 @@ class Distiller:
             raise DistillationError(
                 f"SchemaGuard: distiller returned no 'entries' list "
                 f"(got {type(result).__name__})")
+        return entries_from_specs(specs, docs, pack, topic)
 
-        sources = tuple(EntrySource(
-            url=d.provenance.url, fetched_at=d.provenance.fetched_at,
-            sha256=d.provenance.sha256, tier=d.tier,
-            locator=d.provenance.locator) for d in docs)
-        source_hit = injection_screen(source_text)
 
-        entries: list[CandidateEntry] = []
-        for spec in specs:
-            if not isinstance(spec, dict):
-                raise DistillationError(f"SchemaGuard: entry spec is "
-                                        f"{type(spec).__name__}, not object")
-            body = str(spec.get("body", "")).strip()
-            entry_topic = str(spec.get("topic") or topic).strip() or topic
-            hit = source_hit or injection_screen(
-                body + " " + " ".join(map(str, spec.get("claims", []))))
-            procedure = tuple(
-                ProcedureStep(
-                    id=str(s.get("id", "")), objective=str(s.get("objective", "")),
-                    task_type=str(s.get("task_type", "")),
-                    tools=tuple(s.get("tools", [])),
-                    depends_on=tuple(s.get("depends_on", [])),
-                    check=tuple(sorted(dict(s.get("check", {})).items())))
-                for s in spec.get("procedure", {}).get("steps", []))
-            try:
-                entry = CandidateEntry(
-                    id=_entry_id(pack, entry_topic, body),
-                    pack=pack, kind=str(spec.get("kind", "knowledge")),
-                    body=body, topic=entry_topic,
-                    claims=tuple(str(c) for c in spec.get("claims", [])),
-                    task_types=tuple(spec.get("task_types", [])),
-                    sources=sources, procedure=procedure,
-                    quarantined=bool(hit),
-                    quarantine_reason=f"injection screen: /{hit}/" if hit else "")
-            except ContractError as exc:
-                raise DistillationError(f"SchemaGuard: invalid entry from "
-                                        f"distiller: {exc}")
-            entries.append(entry)
-        return entries
+def entries_from_specs(specs: list, docs: Sequence[SourceDocument], pack: str,
+                       topic: str) -> list[CandidateEntry]:
+    """SchemaGuard + injection screen over raw entry specs. Shared by the
+    Distiller and by hosts whose *worker* produced the specs directly (the
+    harness distill phase submits its output through this same gate)."""
+    source_text = "\n\n".join(
+        chunk for doc in docs for chunk in (doc.chunks or doc.blocks))
+    sources = tuple(EntrySource(
+        url=d.provenance.url, fetched_at=d.provenance.fetched_at,
+        sha256=d.provenance.sha256, tier=d.tier,
+        locator=d.provenance.locator) for d in docs)
+    source_hit = injection_screen(source_text)
+
+    entries: list[CandidateEntry] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            raise DistillationError(f"SchemaGuard: entry spec is "
+                                    f"{type(spec).__name__}, not object")
+        body = str(spec.get("body", "")).strip()
+        entry_topic = str(spec.get("topic") or topic).strip() or topic
+        hit = source_hit or injection_screen(
+            body + " " + " ".join(map(str, spec.get("claims", []))))
+        procedure = tuple(
+            ProcedureStep(
+                id=str(s.get("id", "")), objective=str(s.get("objective", "")),
+                task_type=str(s.get("task_type", "")),
+                tools=tuple(s.get("tools", [])),
+                depends_on=tuple(s.get("depends_on", [])),
+                check=tuple(sorted(dict(s.get("check", {})).items())))
+            for s in spec.get("procedure", {}).get("steps", []))
+        try:
+            entry = CandidateEntry(
+                id=_entry_id(pack, entry_topic, body),
+                pack=pack, kind=str(spec.get("kind", "knowledge")),
+                body=body, topic=entry_topic,
+                claims=tuple(str(c) for c in spec.get("claims", [])),
+                task_types=tuple(spec.get("task_types", [])),
+                sources=sources, procedure=procedure,
+                quarantined=bool(hit),
+                quarantine_reason=f"injection screen: /{hit}/" if hit else "")
+        except ContractError as exc:
+            raise DistillationError(f"SchemaGuard: invalid entry from "
+                                    f"distiller: {exc}")
+        entries.append(entry)
+    return entries

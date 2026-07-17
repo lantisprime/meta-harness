@@ -22,7 +22,7 @@ meta-harness repository, including the executable plan simulation
 | M1 — package skeleton, contracts, five ports, store module, seed importers | shipped |
 | M2 — retrieval (semantic scorer, injection block), specialist spec, fast-loop marks, harness adapter | shipped |
 | M3 — acquisition plugin registry (local/web/arxiv/pdf/youtube), distillation with SchemaGuard + injection screen, CLI | shipped |
-| M4 — verification module + acquisition template | pending |
+| M4 — verification (corroboration/citations/skill-exec/judge), strict-mode pipeline + approve, acquisition template + knowledge tools, knowledge-driven planning | shipped |
 | M5 — evalgen + eval-gated publishing | pending |
 | M6 — learning module | pending |
 

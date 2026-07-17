@@ -48,7 +48,9 @@ from metaharness.knowledge.adapter import (  # noqa: E402
     OpenAICompatEmbedding,
     make_knowledge_hints,
 )
+from metaharness.knowledge.planning import plan_from_knowledge  # noqa: E402
+from metaharness.knowledge.tools import knowledge_tools  # noqa: E402
 
 __all__ = ["DEFAULT_KNOWLEDGE_ROOT", "SelflearnUnavailable", "require_selflearn",
            "open_store", "KNOWLEDGE_ARCHETYPES", "OpenAICompatEmbedding",
-           "make_knowledge_hints"]
+           "make_knowledge_hints", "knowledge_tools", "plan_from_knowledge"]

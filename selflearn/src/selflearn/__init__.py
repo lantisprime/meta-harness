@@ -40,6 +40,13 @@ from selflearn.acquisition import (
 )
 from selflearn.distillation import DistillationError, Distiller, injection_screen
 from selflearn.learning import MarkReport, apply_outcome
+from selflearn.pipeline import AcquisitionReport, approve_entry, run_acquisition
+from selflearn.verification import (
+    CorroborationRule,
+    VerificationError,
+    VerificationReport,
+    Verifier,
+)
 from selflearn.retrieval import (
     InjectionBlock,
     RetrievalResult,
@@ -64,5 +71,7 @@ __all__ = [
     "AcquireContext", "AcquisitionError", "PluginRegistry",
     "ReputabilityPolicy", "builtin_plugins",
     "DistillationError", "Distiller", "injection_screen",
+    "AcquisitionReport", "approve_entry", "run_acquisition",
+    "CorroborationRule", "VerificationError", "VerificationReport", "Verifier",
     "__version__",
 ]

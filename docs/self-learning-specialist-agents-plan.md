@@ -667,7 +667,11 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    `selflearn/distillation/` with SchemaGuard and the injection screen; the
    standalone `selflearn` CLI; `knowledge-scout` and `knowledge-distiller`
    agent archetypes adapter-side; loud failure paths throughout).
-4. **M4 — Verification module + acquisition template**
+4. **M4 — Verification module + acquisition template** *(shipped
+   2026-07-17: 101 selflearn + 14 adapter tests; fan-out decision:
+   sequential per-item with per-item provenance events, engine-level
+   parallelism can replace the loop without contract change; strict-mode
+   verify→approve loop proven end-to-end via CLI)*
    (`selflearn/verification/`: reputability policy config, corroboration,
    skill `check:` execution, `knowledge-judge` archetype; the
    `knowledge_acquisition` template wiring all modules with per-step role

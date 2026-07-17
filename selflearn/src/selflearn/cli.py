@@ -180,6 +180,72 @@ def cmd_distill(args) -> int:
     return 0
 
 
+def _verifier(args):
+    from selflearn.verification import Verifier
+    judge = None
+    if getattr(args, "judge_endpoint", ""):
+        judge = OpenAICompatChat(args.judge_endpoint, args.judge_model,
+                                 getattr(args, "api_key", ""))
+    return Verifier(judge=judge)
+
+
+def cmd_acquire(args) -> int:
+    """gather → distill → verify → hold (strict mode) in one run."""
+    from selflearn.pipeline import run_acquisition
+
+    ctx = AcquireContext(workdir=Path(args.workdir))
+    if not args.no_network:
+        ctx.fetcher = UrllibFetcher()
+    registry = PluginRegistry(
+        builtin_plugins(search_backend=_search_backend(args),
+                        embedder=_embedder(args)),
+        provenance=JsonlProvenance(Path(args.workdir) / "provenance.jsonl"))
+    model = OpenAICompatChat(args.endpoint, args.model, args.api_key)
+    report = run_acquisition(
+        [SourceRef(uri=r, hint=args.tier or "") for r in args.refs],
+        pack=args.pack, topic=args.topic, registry=registry, ctx=ctx,
+        distiller=Distiller(model), verifier=_verifier(args),
+        store=PackStore(Path(args.store)),
+        provenance=JsonlProvenance(Path(args.workdir) / "run.jsonl"))
+    print(report.summary())
+    for eid, reasons in report.rejected.items():
+        print(f"  rejected {eid}: {reasons[0]}")
+    if report.held_for_approval:
+        print("held for approval (strict mode) — publish with:")
+        for eid in report.held_for_approval:
+            print(f"  selflearn approve {eid} --store {args.store}")
+    return 0
+
+
+def cmd_verify(args) -> int:
+    store = PackStore(Path(args.store))
+    verifier = _verifier(args)
+    candidates = store.entries_for(args.pack, "candidate")
+    if not candidates:
+        print(f"no candidates in pack {args.pack!r}")
+        return 1
+    ok_n = 0
+    for stored in candidates:
+        report = verifier.verify(stored.cand)
+        state = "ELIGIBLE" if report.ok else "REJECTED"
+        ok_n += report.ok
+        detail = report.basis[0] if report.ok else report.rejected[0]
+        print(f"  [{state}] {stored.cand.id} — {detail}")
+    print(f"{ok_n}/{len(candidates)} eligible; publish each with "
+          f"'selflearn approve <id> --store {args.store}'")
+    return 0
+
+
+def cmd_approve(args) -> int:
+    from selflearn.pipeline import approve_entry
+
+    store = PackStore(Path(args.store))
+    approve_entry(store, _verifier(args), args.entry_id,
+                  approved_by=args.approved_by)
+    print(f"published {args.entry_id} (strict-mode human approval recorded)")
+    return 0
+
+
 def cmd_seed_kb(args) -> int:
     store = PackStore(Path(args.store))
     ids = seed_knowledge_base(store, Path(args.dir), pack=args.pack,
@@ -250,6 +316,47 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--embedding-model", default="")
     p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_gather)
+
+    p = sub.add_parser("acquire",
+                       help="full pipeline: gather → distill → verify → hold")
+    p.add_argument("refs", nargs="+")
+    p.add_argument("--pack", required=True)
+    p.add_argument("--topic", required=True)
+    p.add_argument("--store", required=True)
+    p.add_argument("--workdir", required=True)
+    p.add_argument("--endpoint", required=True)
+    p.add_argument("--model", required=True)
+    p.add_argument("--api-key", default="")
+    p.add_argument("--tier", default="")
+    p.add_argument("--no-network", action="store_true")
+    p.add_argument("--search-backend", default="auto",
+                   choices=["auto", "ddg", "wikipedia"])
+    p.add_argument("--brave-key", default="")
+    p.add_argument("--searxng", default="")
+    p.add_argument("--embedding-endpoint", default="")
+    p.add_argument("--embedding-model", default="")
+    p.add_argument("--judge-endpoint", default="",
+                   help="optional second endpoint for the knowledge-judge role")
+    p.add_argument("--judge-model", default="")
+    p.set_defaults(fn=cmd_acquire)
+
+    p = sub.add_parser("verify", help="verify a pack's candidates (strict mode)")
+    p.add_argument("--pack", required=True)
+    p.add_argument("--store", required=True)
+    p.add_argument("--judge-endpoint", default="")
+    p.add_argument("--judge-model", default="")
+    p.add_argument("--api-key", default="")
+    p.set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser("approve",
+                       help="human approval: re-verify then publish one entry")
+    p.add_argument("entry_id")
+    p.add_argument("--store", required=True)
+    p.add_argument("--approved-by", default="human")
+    p.add_argument("--judge-endpoint", default="")
+    p.add_argument("--judge-model", default="")
+    p.add_argument("--api-key", default="")
+    p.set_defaults(fn=cmd_approve)
 
     p = sub.add_parser("distill", help="distill gathered sources into candidates")
     p.add_argument("sources")
