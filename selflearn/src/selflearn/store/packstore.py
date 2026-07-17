@@ -52,6 +52,7 @@ class StoredEntry:
     status: str = "candidate"
     helpful: float = 0.0
     harmful: float = 0.0
+    marks_updated_at: str = ""       # ISO timestamp of the last mark event
     embedder_id: str = ""
     vector: tuple[float, ...] = ()
 
@@ -106,6 +107,7 @@ class PackStore:
                     cand=cand, status=status,
                     helpful=float(meta.get("helpful", 0.0)),
                     harmful=float(meta.get("harmful", 0.0)),
+                    marks_updated_at=meta.get("marks_updated_at", ""),
                     embedder_id=meta.get("embedder_id", ""),
                     vector=tuple(meta.get("vector", [])))
             probes_path = pack_dir / "evals" / "probes.jsonl"
@@ -194,10 +196,21 @@ class PackStore:
         self._event({"event": "entry.restored", "entry": entry_id,
                      "reason": reason})
 
-    def mark(self, entry_id: str, helpful: float = 0.0, harmful: float = 0.0) -> StoredEntry:
+    def mark(self, entry_id: str, helpful: float = 0.0, harmful: float = 0.0,
+             decay: float = 1.0, now_iso: str = "") -> StoredEntry:
+        """Apply marks. ``decay`` multiplies the EXISTING counters first
+        (recency decay: old evidence fades so recent evidence can win);
+        ``now_iso`` stamps the mark event for future decay computation."""
+        if not 0.0 <= decay <= 1.0:
+            raise StoreError(f"decay factor must be in [0, 1], got {decay}")
         stored = self._get(entry_id)
+        if decay != 1.0:
+            stored.helpful *= decay
+            stored.harmful *= decay
         stored.helpful += helpful
         stored.harmful += harmful
+        if now_iso:
+            stored.marks_updated_at = now_iso
         self._persist_entry(stored)
         return stored
 
@@ -285,6 +298,7 @@ class PackStore:
                     "status": e.status, "kind": e.cand.kind,
                     "topic": e.cand.topic,
                     "helpful": e.helpful, "harmful": e.harmful,
+                    "marks_updated_at": e.marks_updated_at,
                     "embedder_id": e.embedder_id,
                     "vector": list(e.vector),
                 }

@@ -22,12 +22,20 @@ gap joins rather than guessed.
 """
 from __future__ import annotations
 
+import dataclasses
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 from selflearn.contracts import GapSignal, TaskOutcome
-from selflearn.learning.marks import MarkReport, apply_outcome
+from selflearn.learning.marks import (
+    MARK_HALF_LIFE_DAYS,
+    MarkReport,
+    apply_outcome,
+    effective_counts,
+)
 from selflearn.store.packstore import PackStore
 
 ACTIONS = {
@@ -46,6 +54,8 @@ class LearningConfig:
     backoff_rounds: int = 2          # suppressed signal rounds after firing
     staleness_max_age_days: int = 180
     staleness_score_max: float = 0.45   # only aging entries that also stopped helping
+    mark_half_life_days: float = MARK_HALF_LIFE_DAYS   # recency decay on marks
+    max_failures: int = 500          # FIFO cap on retained failure evidence
 
 
 def label_topic(retriever, packs: list[str], text: str,
@@ -60,20 +70,59 @@ def label_topic(retriever, packs: list[str], text: str,
 
 
 class Learner:
-    """Facade over both loops: fast marks (M2) + slow gap detection (M6)."""
+    """Facade over both loops: fast marks (M2) + slow gap detection (M6).
 
-    def __init__(self, store: PackStore, config: LearningConfig = LearningConfig()):
+    Slow-loop state is DURABLE (review finding, 2026-07-17): retained
+    failures and backoff counters write through to ``learner-state.json``
+    under the store root and reload on construction, so a restart loses no
+    accumulated evidence. Failures that produced a signal are *consumed*
+    (pruned) — old failures cannot re-signal every time backoff expires.
+    """
+
+    def __init__(self, store: PackStore, config: LearningConfig = LearningConfig(),
+                 state_path: Optional[Path] = None):
         self.store = store
         self.config = config
+        self.state_path = Path(state_path) if state_path else \
+            store.root / "learner-state.json"
         self._failures: list[TaskOutcome] = []
         self._backoff: dict[str, int] = {}
+        self._load_state()
+
+    # -- durable state --------------------------------------------------
+
+    def _load_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        data = json.loads(self.state_path.read_text())
+        self._backoff = {str(k): int(v) for k, v in data.get("backoff", {}).items()}
+        self._failures = [
+            TaskOutcome(
+                task_id=f["task_id"], task_type=f["task_type"],
+                topic=f["topic"], verdict=f["verdict"],
+                injected=tuple(f.get("injected", [])),
+                applied=tuple(f.get("applied", [])),
+                failure_mode=f.get("failure_mode", ""),
+                implicated=tuple(f.get("implicated", [])),
+                step_id=f.get("step_id", ""))
+            for f in data.get("failures", [])]
+
+    def _save_state(self) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(json.dumps({
+            "failures": [dataclasses.asdict(f) for f in self._failures],
+            "backoff": self._backoff}, indent=1, sort_keys=True))
 
     # -- fast loop ------------------------------------------------------
 
     def observe(self, outcome: TaskOutcome) -> MarkReport:
-        report = apply_outcome(self.store, outcome)
+        report = apply_outcome(self.store, outcome,
+                               half_life_days=self.config.mark_half_life_days)
         if outcome.verdict == "fail":
             self._failures.append(outcome)
+            if len(self._failures) > self.config.max_failures:
+                self._failures = self._failures[-self.config.max_failures:]
+            self._save_state()
         return report
 
     # -- slow loop ------------------------------------------------------
@@ -84,13 +133,20 @@ class Learner:
             if f.topic:                         # unlabeled excluded, not guessed
                 by_topic.setdefault(f.topic, []).append(f)
         coverage = self.store.coverage(pack)
+        # backoff is round-based: every sweep ages all of this pack's
+        # counters, whether or not that topic has pending failures
+        suppressed: set[str] = set()
+        for key, rounds in list(self._backoff.items()):
+            if key.startswith(f"{pack}:") and rounds > 0:
+                self._backoff[key] = rounds - 1
+                suppressed.add(key)
         signals: list[GapSignal] = []
+        consumed_topics: set[str] = set()
         for topic, fails in sorted(by_topic.items()):
             if len(fails) < self.config.min_failures:
                 continue
             key = f"{pack}:{topic}"
-            if self._backoff.get(key, 0) > 0:
-                self._backoff[key] -= 1
+            if key in suppressed:
                 continue
             retrieved_any = any(f.injected for f in fails)
             if coverage.get(topic) != "covered" or not retrieved_any:
@@ -106,6 +162,12 @@ class Learner:
                              f"retrieval; implicated: "
                              f"{sorted({e for f in fails for e in f.implicated})}"))
             self._backoff[key] = self.config.backoff_rounds
+            consumed_topics.add(topic)
+        if consumed_topics:
+            # consumed failures produced their signal; they never re-signal
+            self._failures = [f for f in self._failures
+                              if f.topic not in consumed_topics]
+        self._save_state()
         return signals
 
     def staleness_signals(self, pack: str,
@@ -117,14 +179,20 @@ class Learner:
             fetched = _parse_when(stored.cand.sources[0].fetched_at)
             if fetched is None or fetched > horizon:
                 continue
-            if stored.score > self.config.staleness_score_max:
+            # time-decayed evidence, not lifetime counters: an entry helpful
+            # 100 times last year but silent since decays toward the prior
+            helpful, harmful = effective_counts(
+                stored, now, self.config.mark_half_life_days)
+            score = (helpful + 1.0) / (helpful + harmful + 2.0)
+            if score > self.config.staleness_score_max:
                 continue                        # old but still earning its keep
             age_days = (now - fetched).days
             signals.append(GapSignal(
                 pack=pack, topic=stored.cand.topic, kind="staleness",
                 evidence=f"{stored.cand.id}: sources {age_days}d old, "
-                         f"score {stored.score:.2f} "
-                         f"(helpful={stored.helpful}, harmful={stored.harmful})"))
+                         f"decayed score {score:.2f} "
+                         f"(decayed helpful={helpful:.1f}, "
+                         f"harmful={harmful:.1f})"))
         return signals
 
     def suggestions(self, pack: str,

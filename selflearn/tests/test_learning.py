@@ -96,14 +96,18 @@ def test_unlabeled_outcomes_are_excluded_not_guessed(store):
     assert learner.gap_signals("fastapi") == []
 
 
-def test_backoff_suppresses_repeat_signals(store):
+def test_backoff_suppresses_even_fresh_failures(store):
+    """Backoff is round-based: after a signal fires, the topic stays quiet
+    for backoff_rounds sweeps even when NEW failures keep arriving."""
     learner = Learner(store, LearningConfig(backoff_rounds=2))
     for i in range(2):
         learner.observe(fail("middleware", task_id=f"t{i}"))
-    assert learner.gap_signals("fastapi")           # fires
+    assert learner.gap_signals("fastapi")           # fires (and consumes)
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"n{i}"))
     assert learner.gap_signals("fastapi") == []     # suppressed round 1
     assert learner.gap_signals("fastapi") == []     # suppressed round 2
-    assert learner.gap_signals("fastapi")           # fires again
+    assert learner.gap_signals("fastapi")           # fresh failures fire
 
 
 def test_below_min_failures_no_signal(store):
@@ -154,6 +158,109 @@ def test_label_topic_deterministic_with_unlabeled_floor(store):
     assert label_topic(retriever, ["fastapi"],
                        "startup shutdown lifespan handler work") == "lifespan"
     assert label_topic(retriever, ["fastapi"], "zzz qqq unrelated") == ""
+
+
+# -- durable state + recency decay (review findings, 2026-07-17) ------------
+
+def test_learner_state_survives_restart(store):
+    learner = Learner(store)
+    learner.observe(fail("middleware", task_id="t0"))
+    learner.observe(fail("middleware", task_id="t1"))
+    assert learner.gap_signals("fastapi")            # fires, sets backoff
+    # a fresh Learner over the same store resumes failures AND backoff
+    reborn = Learner(store)
+    assert reborn._backoff == {"fastapi:middleware": 2}
+    assert reborn.gap_signals("fastapi") == []       # backoff persisted
+
+
+def test_consumed_failures_never_resignal(store):
+    """The review's re-signal bug: old failures must not fire again every
+    time backoff expires — a signal consumes its evidence."""
+    learner = Learner(store, LearningConfig(backoff_rounds=1))
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"t{i}"))
+    assert learner.gap_signals("fastapi")            # fires + consumes
+    for _ in range(4):                               # long after backoff expiry
+        assert learner.gap_signals("fastapi") == []
+    # fresh failures start a new cycle (one suppressed round, then fire)
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"n{i}"))
+    assert learner.gap_signals("fastapi")
+
+
+def test_failure_cap_is_fifo(store):
+    learner = Learner(store, LearningConfig(max_failures=3))
+    for i in range(5):
+        learner.observe(fail("middleware", task_id=f"t{i}"))
+    assert [f.task_id for f in learner._failures] == ["t2", "t3", "t4"]
+
+
+def test_decay_factor_half_life_math():
+    from selflearn.learning import decay_factor
+
+    a_year_ago = datetime(2025, 7, 17, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    assert decay_factor(a_year_ago.isoformat(), now, 90.0) == \
+        pytest.approx(0.5 ** (365 / 90), rel=1e-3)
+    assert decay_factor("", now) == 1.0                    # never marked
+    assert decay_factor("not-a-date", now) == 1.0          # unparseable
+    assert decay_factor(now.isoformat(), now) == 1.0       # no time passed
+
+
+def test_apply_outcome_decay_with_explicit_clock(store):
+    """helpful=100 a year ago decays to ~6 (half-life 90d): seven recent
+    harmful marks deprecate the entry — without decay it would take 101."""
+    from selflearn.learning import apply_outcome
+
+    a_year_ago = datetime(2025, 7, 17, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    store.mark("kn-f-lifespan", helpful=100.0, now_iso=a_year_ago.isoformat())
+    report = None
+    for i in range(7):
+        report = apply_outcome(store, TaskOutcome(
+            task_id=f"t{i}", task_type="code_edit", topic="lifespan",
+            verdict="fail", injected=("kn-f-lifespan",),
+            implicated=("kn-f-lifespan",)), now=now)
+        if report.deprecated:
+            break
+    stored = store.get("kn-f-lifespan")
+    assert stored.status == "deprecated"          # recent evidence won
+    assert report.deprecated == ("kn-f-lifespan",)
+    assert stored.helpful < 10.0                  # lifetime 100 decayed away
+    assert stored.harmful <= 7.0                  # nowhere near 101
+
+
+def test_marks_timestamp_survives_reload(store, tmp_path):
+    from selflearn.learning import apply_outcome
+
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    apply_outcome(store, TaskOutcome(
+        task_id="t", task_type="code_edit", topic="lifespan", verdict="pass",
+        injected=("kn-f-lifespan",)), now=now)
+    reloaded = PackStore(store.root)
+    assert reloaded.get("kn-f-lifespan").marks_updated_at == now.isoformat()
+
+
+def test_staleness_uses_decayed_score(store):
+    """Old sources + helpful history that decayed + recent harmful signal:
+    decayed score fires staleness where the lifetime score (~0.91) never
+    would — the review's 'no time decay, only ratio shift' fix."""
+    from selflearn.learning import decay_factor
+
+    old = "2025-01-01T00:00:00Z"
+    a_year_ago = datetime(2025, 7, 17, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    publish(store, "kn-f-was-loved", "Once loved, now failing.", "aging",
+            fetched_at=old)
+    store.mark("kn-f-was-loved", helpful=100.0, now_iso=a_year_ago.isoformat())
+    # recent harmful evidence arrives now: decay the old 100 first
+    factor = decay_factor(a_year_ago.isoformat(), now)      # ≈ 0.06
+    store.mark("kn-f-was-loved", harmful=8.0, decay=factor,
+               now_iso=now.isoformat())
+    learner = Learner(store)
+    signals = learner.staleness_signals("fastapi", now=now)
+    assert any("kn-f-was-loved" in s.evidence for s in signals)
+    # lifetime counters would read 101/111 ≈ 0.91 — far above the 0.45 bar
 
 
 # -- suite regression -------------------------------------------------------

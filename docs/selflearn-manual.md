@@ -343,6 +343,14 @@ learner.observe(TaskOutcome(
 - harmful ≥ 3 and > helpful → auto-deprecation (journaled, reversible,
   probes retired).
 
+**Recency decay**: marks are not lifetime counters. Every mark event first
+multiplies the entry's existing counters by
+`0.5 ** (days_since_last_mark / 90)` (`LearningConfig.mark_half_life_days`),
+so an entry helpful 100 times last year but wrong today decays to ~6
+effective helpful and a handful of recent harmful marks deprecate it —
+not 101. Decay is lazy (applied at mark time); staleness and other
+read-only consumers use `effective_counts()` for a current view.
+
 Marks multiply into retrieval ranking as a prior, so doubtful entries sink
 before anything is deprecated.
 
@@ -361,9 +369,26 @@ learner.suggestions("fastapi")        # advisory dicts with proposed actions
 - **staleness**: sources older than 180 days AND score ≤ 0.45 → propose
   re-fetch. Old entries still earning helpful marks are left alone.
 
-Guardrails: a topic that just signaled is backoff-suppressed for 2 rounds;
-unlabeled outcomes (empty topic) are excluded from joins, never guessed;
-suggestions are **advisory only** — nothing ever auto-runs acquisition.
+Guardrails: a topic that just signaled is backoff-suppressed for 2 sweeps
+(even if fresh failures keep arriving); a signal **consumes** its failure
+evidence, so old failures never re-signal after backoff expires; unlabeled
+outcomes (empty topic) are excluded from joins, never guessed; suggestions
+are **advisory only** — nothing ever auto-runs acquisition.
+
+**Durability**: slow-loop state (retained failures, backoff counters)
+writes through to `<store>/learner-state.json` and reloads on
+construction — a restart loses no evidence. Retained failures are FIFO-
+capped (`max_failures`, default 500).
+
+**Known limitations (by design):**
+- *Effectiveness is delegated to the host*: harmful marks depend on the
+  host populating `implicated` honestly (grounded reflection), and every
+  guarantee rests on the host supplying real external verdicts — that is
+  the never-trust-self-assessment contract, stated plainly.
+- *Learning granularity is coarse*: per-entry counters and per-topic gap
+  joins. The loop will not learn context-dependent nuance like "this entry
+  helps for task type A but misleads for B"; per-(entry, task-type) marks
+  are a possible future refinement.
 
 Topic labeling is deterministic:
 
