@@ -293,6 +293,55 @@ The distillation module additionally runs a deterministic injection-pattern
 screen over source text and candidate entries; a match quarantines the entry
 for human review regardless of eval results.
 
+### Agent topology — orchestrator–workers (decision 9)
+
+Each module's LLM step is served by a **named worker-agent role**, coordinated
+in the orchestrator–workers pattern — with the orchestrator being the
+existing deterministic `WorkflowEngine`, never an LLM. This is the layering
+the project's own research cache prescribes ("durable deterministic spine →
+LLM decomposition only *within* steps → workers behind a uniform runner
+interface") and it avoids the documented supervisor failure modes (context
+saturation after ~8–12 round trips, single point of failure).
+
+| Module | Agent? | Worker role(s) |
+|---|---|---|
+| Orchestration | No — journaled `WorkflowEngine` runs the template (retries, gates, resume) | — |
+| Acquisition | Plugins are tools, not agents; one agent up front | `knowledge-scout`: turns the goal into search queries, selects refs to acquire, effort-scaled |
+| Distillation | Yes — fan-out, one call per `SourceDocument` | `knowledge-distiller`: doc → candidate entries, SchemaGuard-forced |
+| Verification & evals | Yes — three roles, deliberately distinct | `knowledge-judge` (rubric fallback), `probe-author` (evalgen), `probe-validator` (second-model check) |
+| Store | No — deterministic code | — |
+| Retrieval | No — embedder endpoint call + deterministic scoring | — |
+| Learning | Deterministic (marks, MAST clustering); advisory read only | ✦ companion surfaces gap suggestions, never executes |
+
+Why this fits the existing machinery, not just the pattern:
+
+- **Roles, not models.** Each worker role is an `AgentConfig` archetype
+  (`roles`/`capabilities`/`system_prompt` already exist); the router assigns
+  the cheapest capable tier per role via the capability matrix. Platform
+  agnosticism holds — a "distiller" is a role any qualified worker can serve.
+- **Identity-enforced separation.** The second-model probe check stops being
+  a prompt convention: the engine verifies `probe-validator`'s Ed25519
+  worker identity and model differ from `probe-author`'s before accepting
+  the validation — a runtime check in the trust plane, aligned with
+  "policies enforced by the runtime, not prompt text".
+- **Delegation contracts + context isolation.** Workers get an explicit
+  contract (objective, output schema, source refs, boundaries) and return
+  schema-checked artifacts, not conversation — the orchestrator's context
+  never accumulates worker transcripts (contract in, summary out).
+- **Bounded dynamic decomposition.** The one place the classic LLM
+  orchestrator-workers shape appears is *inside* the gather phase: the
+  `knowledge-scout` may decompose a research goal into parallel sub-queries
+  with effort-scaling rules in its archetype prompt — bounded by the phase
+  budget, journaled like any other step.
+- **Per-step binding.** Pinning phases to roles uses the per-step agent
+  preference mechanism being added by issue #29 — the knowledge template
+  becomes its first internal consumer, with automatic routing as fallback.
+- **Fan-out caveat (implementation question for M4).** Distill-per-document
+  and validate-per-probe want intra-phase concurrency; whether that runs as
+  engine-level parallel steps or a concurrent loop inside one journaled
+  phase depends on what the engine supports today — decide at M4, journal
+  per-item either way so resume never re-does completed items.
+
 ## Milestones
 
 Each milestone is independently shippable and tested; later ones can be
@@ -317,16 +366,19 @@ with its contract types and tests.
    `SourcePlugin` protocol, registry with allowlisted entry points, and the
    built-in `web`, `pdf`, `arxiv`, `youtube`, `local` plugins;
    `knowledge/distillation/` with SchemaGuard and the injection screen;
-   loud failure paths throughout).
+   `knowledge-scout` and `knowledge-distiller` agent archetypes; loud
+   failure paths throughout).
 4. **M4 — Verification module + acquisition template**
    (`knowledge/verification/`: reputability policy config, corroboration,
-   skill `check:` execution; the `knowledge_acquisition` template wiring
-   all modules; publishing runs in strict human-gated mode until M5 lands
-   the eval gate).
-5. **M5 — Evalgen + eval-gated publishing** (verification module's evalgen,
-   second-model probe validation, eval-gated auto-publish as the default,
-   pack-promotion paired go/no-go, model qualification runs recording
-   (model, pack) capability evidence).
+   skill `check:` execution, `knowledge-judge` archetype; the
+   `knowledge_acquisition` template wiring all modules with per-step role
+   binding; the intra-phase fan-out decision; publishing runs in strict
+   human-gated mode until M5 lands the eval gate).
+5. **M5 — Evalgen + eval-gated publishing** (verification module's evalgen
+   with `probe-author` / `probe-validator` archetypes and identity-enforced
+   distinctness, eval-gated auto-publish as the default, pack-promotion
+   paired go/no-go, model qualification runs recording (model, pack)
+   capability evidence).
 6. **M6 — Learning module** (`knowledge/learning/`: gap detection from MAST
    clusters, console card with advisory suggestions, auto-deprecation,
    suite regression on pack updates).
@@ -382,6 +434,17 @@ with its contract types and tests.
    `pdf`, `arxiv`, `youtube`, `local`), third-party only via an explicit
    entry-point allowlist, plus an `mcp` adapter for tool-backed sources;
    per-plugin provenance makes any plugin's output revocable as a unit.
+9. **Agent topology — orchestrator–workers with a deterministic
+   orchestrator** *(added 2026-07-17)*. Module LLM steps are served by
+   named worker-agent roles (`knowledge-scout`, `knowledge-distiller`,
+   `knowledge-judge`, `probe-author`, `probe-validator`) implemented as
+   `AgentConfig` archetypes and routed by the capability matrix; the
+   orchestrator stays the journaled `WorkflowEngine`. Store and retrieval
+   remain pure code; the ✦ companion keeps the advisory-only learning
+   surface. `probe-author` / `probe-validator` distinctness is enforced by
+   worker identity + model comparison in the trust plane, not by prompt
+   text. Phase→role binding rides the per-step agent preference from
+   issue #29.
 
 ## Residual risks (tracked, not blocking)
 
