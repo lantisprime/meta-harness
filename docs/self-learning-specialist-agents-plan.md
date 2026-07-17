@@ -75,6 +75,50 @@ before promotion. Skills that can't be executed are verified like facts
 (corroboration/judge) and marked `check: none` so their lower evidence class
 is visible.
 
+### Workflow entry (plan-shaped: "how to structure the work")
+
+Knowledge and skill entries steer *single* LLM calls. Real tasks take
+multiple calls, and the plan that sequences them should itself come from
+knowledge — so a third kind, `kind: workflow`, carries a machine-readable
+`procedure:` block the planner can compile into workflow steps rather than
+prose a model reads:
+
+```markdown
+---
+id: wf-fastapi-endpoint-tdd
+pack: fastapi
+kind: workflow
+status: published
+sources: [...]
+procedure:
+  params: [endpoint_name, spec_ref]
+  steps:
+    - id: spec
+      objective: "Write failing tests for {endpoint_name} per {spec_ref}"
+      task_type: code_edit
+      tools: [read_file, write_file]
+      check: {kind: tests_fail, target: new_tests}
+    - id: implement
+      objective: "Implement {endpoint_name} until the new tests pass"
+      task_type: code_edit
+      depends_on: [spec]
+      check: {kind: tests_pass}
+    - id: review
+      task_type: review
+      depends_on: [implement]
+      check: {kind: rubric, rubric: security-checklist}
+---
+When to use this workflow, pitfalls, variants. (≤ ~400 tokens)
+```
+
+Each step declares an objective template, task type, suggested tools,
+dependencies, and a per-step check — the same vocabulary the workflow DSL
+already speaks, so an entry instantiates into the existing engine with
+deterministically derived checks. Workflow entries are distilled from the
+same sources as everything else (a lecture's method section, a vendor's
+recommended process, a paper's algorithm) and from skill harvesting when a
+verified multi-step run reveals a reusable shape.
+
 ### Knowledge pack
 
 A directory per specialty under `~/.metaharness/knowledge/<pack>/`:
@@ -324,11 +368,45 @@ self-publish would be self-assessment through the back door.
 
 One deliberate exception: **skill harvesting.** When a verified success
 contains a reusable procedure no existing skill entry covers, the harness
-may propose a *candidate* skill entry (Voyager-style). The proposal enters
-the acquisition pipeline exactly like external material: quarantined, its
-`check:` derived from the test that verified the original task, probes
-generated and second-model-validated, eval-gated before publish. The
-agent's own experience is treated as just another untrusted source.
+may propose a *candidate* skill entry (Voyager-style) — or, when the
+success was a multi-step run with a reusable shape, a candidate *workflow*
+entry. The proposal enters the acquisition pipeline exactly like external
+material: quarantined, its `check:` derived from the test that verified the
+original task, probes generated and second-model-validated, eval-gated
+before publish. The agent's own experience is treated as just another
+untrusted source.
+
+## Knowledge-driven planning (multi-call tasks)
+
+A task that needs multiple LLM calls needs a plan, and the plan should come
+from the knowledge — while the *execution* of that plan stays with the
+deterministic engine, never a free-running agent loop:
+
+1. **Planning-time retrieval.** The goal→WorkflowSpec planner queries the
+   specialist's bound packs *before* planning. A strong semantic match on a
+   `workflow` entry means the planner **instantiates** it: parameters
+   filled from the goal, `procedure:` steps compiled into the WorkflowSpec,
+   per-step checks derived through the existing deterministic machinery. A
+   weak match means the planner plans freehand with the entry's prose
+   injected as planning guidance — knowledge constrains the plan even when
+   it can't dictate it.
+2. **Step-scoped retrieval.** Each instantiated step then gets its own
+   knowledge/skill retrieval at execution time (scoped by the step's task
+   type and objective), with its own `applied_knowledge` report — so
+   multi-call tasks steer per call, not once at the top.
+3. **Plan attribution.** The WorkflowSpec records `seeded_by:` entry ids.
+   Run verdicts propagate to plan-level marks: a completed verified run is
+   helpful evidence for the workflow entry; repeated failures *at the same
+   step* implicate that step's definition specifically — a quality-gap
+   signal proposing an amendment to the entry, not just a mark.
+4. **Verification of workflow entries.** Beyond recall/application probes,
+   a workflow entry can carry a **golden-run probe**: instantiate the
+   procedure on a sandboxed micro-task and verify it completes — the
+   strongest and most expensive evidence class, so it runs at promotion
+   and qualification rather than on every publish.
+
+This keeps the division of power intact: knowledge proposes the plan, the
+deterministic engine owns the lifecycle, verification owns the verdict.
 
 ## Module architecture (decision 8)
 
@@ -358,7 +436,7 @@ orchestration — each phase calls exactly one module, keeping the
 deterministic spine intact: `scope → gather (acquisition) → distill
 (distillation) → verify + eval-gate (verification) → publish (store)`.
 
-### Ports: how a host plugs in (decision 10)
+### Ports: how a host plugs in (decision 11)
 
 `selflearn` is host-agnostic through five small Protocols; everything else
 is self-contained (stores are plain files):
@@ -586,8 +664,10 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    (`selflearn/verification/`: reputability policy config, corroboration,
    skill `check:` execution, `knowledge-judge` archetype; the
    `knowledge_acquisition` template wiring all modules with per-step role
-   binding; the intra-phase fan-out decision; publishing runs in strict
-   human-gated mode until M5 lands the eval gate).
+   binding; the intra-phase fan-out decision; adapter-side planner
+   integration — planning-time retrieval and `workflow`-entry
+   instantiation in the goal→WorkflowSpec planner; publishing runs in
+   strict human-gated mode until M5 lands the eval gate).
 5. **M5 — Evalgen + eval-gated publishing** (verification module's evalgen
    with `probe-author` / `probe-validator` archetypes and identity-enforced
    distinctness, eval-gated auto-publish as the default, pack-promotion
@@ -659,7 +739,16 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    worker identity + model comparison in the trust plane, not by prompt
    text. Phase→role binding rides the per-step agent preference from
    issue #29.
-10. **Standalone module** *(added 2026-07-17)*. The whole self-learning
+10. **Workflow-kind entries + knowledge-driven planning** *(added
+    2026-07-17)*. A third entry kind, `kind: workflow`, carries a
+    machine-readable `procedure:` block (steps with objective templates,
+    task types, tools, dependencies, per-step checks) that the
+    goal→WorkflowSpec planner instantiates at planning time; weak matches
+    inject as planning guidance instead. Specs record `seeded_by:` for
+    plan-level marks and step-specific quality gaps; golden-run probes
+    verify workflow entries at promotion. Knowledge proposes the plan, the
+    deterministic engine owns the lifecycle.
+11. **Standalone module** *(added 2026-07-17)*. The whole self-learning
     system ships as its own distribution — `selflearn/` at the repo root
     with its own pyproject, zero `metaharness` imports, and a standalone
     CLI + built-in probe-suite runner — extractable to its own repo later,
