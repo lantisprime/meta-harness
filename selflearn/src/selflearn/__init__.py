@@ -39,7 +39,16 @@ from selflearn.acquisition import (
     builtin_plugins,
 )
 from selflearn.distillation import DistillationError, Distiller, injection_screen
-from selflearn.learning import MarkReport, apply_outcome
+from selflearn.learning import (
+    Learner,
+    LearningConfig,
+    MarkReport,
+    RegressionReport,
+    apply_outcome,
+    check_regression,
+    label_topic,
+    snapshot_baseline,
+)
 from selflearn.pipeline import AcquisitionReport, approve_entry, run_acquisition
 from selflearn.verification import (
     CorroborationRule,
@@ -70,7 +79,8 @@ __all__ = [
     "PackStore", "StoredEntry", "StoreError",
     "InjectionBlock", "RetrievalResult", "Retriever", "render_injection_block",
     "SpecialistSpec", "load_spec", "save_spec",
-    "MarkReport", "apply_outcome",
+    "MarkReport", "apply_outcome", "Learner", "LearningConfig", "label_topic",
+    "RegressionReport", "check_regression", "snapshot_baseline",
     "AcquireContext", "AcquisitionError", "PluginRegistry",
     "ReputabilityPolicy", "builtin_plugins",
     "DistillationError", "Distiller", "injection_screen",

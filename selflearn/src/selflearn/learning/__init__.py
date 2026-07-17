@@ -1,5 +1,13 @@
-"""Learning module. M2 ships the fast-loop marks (asymmetric credit
-assignment + auto-deprecation); gap detection and staleness land in M6."""
+"""Learning module: fast-loop marks (M2) + slow-loop gap detection,
+staleness, advisory suggestions, and suite regression (M6)."""
+from selflearn.learning.gaps import Learner, LearningConfig, label_topic
 from selflearn.learning.marks import MarkReport, apply_outcome
+from selflearn.learning.regression import (
+    RegressionReport,
+    check_regression,
+    snapshot_baseline,
+)
 
-__all__ = ["MarkReport", "apply_outcome"]
+__all__ = ["MarkReport", "apply_outcome", "Learner", "LearningConfig",
+           "label_topic", "RegressionReport", "check_regression",
+           "snapshot_baseline"]

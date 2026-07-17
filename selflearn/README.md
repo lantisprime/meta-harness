@@ -1,21 +1,25 @@
 # selflearn
 
-Standalone self-learning knowledge system for LLM agents: acquire knowledge
-from sources (web, PDFs, arXiv, YouTube lectures), verify it externally,
-gate it with generated evals, retrieve it into prompts, and learn from
-verified task outcomes.
+Standalone self-learning knowledge system for LLM agents: **acquire**
+knowledge from sources (web search, pages, PDFs, arXiv, YouTube lectures),
+**verify** it externally, **gate** it with generated evals, **retrieve** it
+into prompts, and **learn** from verified task outcomes.
 
-**Host-agnostic by construction**: zero imports from any harness. Hosts
-integrate through five small Protocols (`ModelPort`, `EmbeddingPort`,
-`ExecutionPort`, `ProvenancePort`, `IdentityPort` — see
-`src/selflearn/ports.py`); every artifact is a plain file (Markdown entries
-with YAML frontmatter, JSON manifests, JSONL provenance).
+**Host-agnostic by construction**: zero imports from any harness, any
+OpenAI-compatible model endpoint works, and every artifact is a plain file
+(Markdown entries with YAML frontmatter, JSON manifests, JSONL provenance).
+Hosts integrate through five small Protocols (`ModelPort`, `EmbeddingPort`,
+`ExecutionPort`, `ProvenancePort`, `IdentityPort`).
 
-Design document: `../docs/self-learning-specialist-agents-plan.md` in the
-meta-harness repository, including the executable plan simulation
-(`../development/selflearn_simulation.py`).
+📖 **[Full user manual](../docs/selflearn-manual.md)** — concepts, CLI
+reference, plugin/backend guide, gates, learning loop, harness integration,
+troubleshooting.
 
-## Status
+Design document: [`../docs/self-learning-specialist-agents-plan.md`](../docs/self-learning-specialist-agents-plan.md)
+(11 recorded decisions + executable plan simulation in
+`../development/selflearn_simulation.py`).
+
+## Status — all six milestones shipped (2026-07-17)
 
 | Milestone | State |
 |---|---|
@@ -24,28 +28,36 @@ meta-harness repository, including the executable plan simulation
 | M3 — acquisition plugin registry (local/web/arxiv/pdf/youtube), distillation with SchemaGuard + injection screen, CLI | shipped |
 | M4 — verification (corroboration/citations/skill-exec/judge), strict-mode pipeline + approve, acquisition template + knowledge tools, knowledge-driven planning | shipped |
 | M5 — evalgen, second-model probe validation, eval-gated auto-publish (bootstrap rule), suite runner, model qualification | shipped |
-| M6 — learning module | pending |
+| M6 — gap detection over the coverage map, topic labeling, staleness, backoff, advisory suggestions, suite regression | shipped |
 
-## Quick start (M1 scope)
+Remaining plan milestone M7 (meta-harness Web UI surfaces) lives host-side.
+
+## 60-second tour
 
 ```bash
-pip install -e './selflearn[dev]'
-python -m pytest selflearn/tests -q
+pip install -e './selflearn[dev,pdf]'
+python -m pytest selflearn/tests -q          # 120 tests
+
+# Bulk-seed existing material (no model needed):
+selflearn seed-yt distilled/some-lecture --pack lectures --store ~/.selflearn --publish
+selflearn list --store ~/.selflearn
+
+# Full research pipeline (needs an OpenAI-compatible chat endpoint):
+selflearn acquire "search:how do fastapi lifespan handlers work" \
+    --pack fastapi --topic lifespan --store ~/.selflearn --workdir /tmp/sl \
+    --endpoint http://127.0.0.1:1234/v1 --model qwen3-coder \
+    --embedding-endpoint http://127.0.0.1:1234/v1 --embedding-model nomic-embed-text
+
+# Strict mode holds verified entries; a human publishes:
+selflearn verify --pack fastapi --store ~/.selflearn
+selflearn approve <entry-id> --store ~/.selflearn --approved-by you@example.com
+
+# Test what a specialist would be handed:
+selflearn retrieve "lifespan startup shutdown" --packs fastapi --store ~/.selflearn
 ```
 
-```python
-from pathlib import Path
-from selflearn import PackStore
-from selflearn.store import seed_knowledge_base, seed_ytdistill
-
-store = PackStore(Path("~/.selflearn/knowledge").expanduser())
-seed_knowledge_base(store, Path("memory/knowledge_base"), pack="meta-research",
-                    publish=True)
-seed_ytdistill(store, Path("distilled/ai-agent-memory-masterclass"),
-               pack="agent-memory", publish=True)
-```
-
-Seeded entries are candidates by default; `publish=True` records an explicit
-pre-gate seed basis in provenance (bulk seeding is a human-initiated
-acquisition mode). Once the verification module lands, seeded packs should
-be re-verified through the normal gate.
+Auto-publish (eval-gated, no human in the loop) activates when a distinct
+validator model is configured — see the manual's *Gates* chapter. Search is
+keyless by default (DuckDuckGo); Wikipedia, self-hosted SearXNG, and Brave
+are supported backends. An end-to-end offline demo lives in
+`examples/offline_course_demo.py`.

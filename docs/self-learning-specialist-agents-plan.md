@@ -687,7 +687,11 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    distinctness, eval-gated auto-publish as the default, pack-promotion
    paired go/no-go, model qualification runs recording (model, pack)
    capability evidence).
-6. **M6 — Learning module** (`selflearn/learning/`: gap detection from MAST
+6. **M6 — Learning module** *(shipped 2026-07-17: 120 selflearn tests;
+   Learner facade unifies fast marks + slow gap/staleness detection with
+   backoff and advisory-only suggestions; suite regression with model-
+   pinned baselines; deterministic topic labeling per finding 3)*
+   (`selflearn/learning/`: gap detection from MAST
    clusters, console card with advisory suggestions, auto-deprecation,
    suite regression on pack updates).
 7. **M7 — Web UI** (pack browser, entry + probe diff view at the curate gate,

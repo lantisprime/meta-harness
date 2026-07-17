@@ -1,0 +1,183 @@
+"""M6: gap detection, topic labeling, staleness, backoff, suite regression."""
+import hashlib
+import math
+import re
+from datetime import datetime, timezone
+
+import pytest
+
+from selflearn.contracts import (
+    CandidateEntry,
+    EntrySource,
+    Probe,
+    PublishDecision,
+    TaskOutcome,
+)
+from selflearn.learning import (
+    Learner,
+    LearningConfig,
+    check_regression,
+    label_topic,
+    snapshot_baseline,
+)
+from selflearn.retrieval import Retriever
+from selflearn.store import PackStore, StoreError
+from selflearn.verification.suite import SuiteResult, ProbeResult
+
+
+class HashEmbedder:
+    embedder_id = "hash-v1"
+
+    def embed(self, texts):
+        out = []
+        for t in texts:
+            v = [0.0] * 64
+            for tok in re.findall(r"[a-z0-9]{3,}", t.lower()):
+                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1.0
+            n = math.sqrt(sum(x * x for x in v)) or 1.0
+            out.append(tuple(x / n for x in v))
+        return out
+
+
+def src(fetched_at="2026-07-01T00:00:00Z"):
+    return EntrySource(url="https://docs.example.org/x", fetched_at=fetched_at,
+                       sha256="0" * 64, tier="official")
+
+
+def publish(store, eid, body, topic, fetched_at="2026-07-01T00:00:00Z"):
+    e = CandidateEntry(id=eid, pack="fastapi", kind="knowledge", body=body,
+                       claims=(body.split(".")[0],), sources=(src(fetched_at),),
+                       topic=topic)
+    store.add_candidate(e)
+    store.publish(e.id, PublishDecision(entry_id=e.id, publish=True,
+                                        basis=("t",), identity_basis="m"))
+    return e
+
+
+def fail(topic, injected=(), implicated=(), task_id="t"):
+    return TaskOutcome(task_id=task_id, task_type="code_edit", topic=topic,
+                       verdict="fail", injected=tuple(injected),
+                       implicated=tuple(implicated))
+
+
+@pytest.fixture()
+def store(tmp_path):
+    s = PackStore(tmp_path)
+    publish(s, "kn-f-lifespan", "Lifespan context manager replaces on_event "
+            "handlers for startup shutdown.", "lifespan")
+    s.claim_topics("fastapi", ["middleware"])       # claimed, never covered
+    return s
+
+
+def test_coverage_gap_for_claimed_uncovered_topic(store):
+    learner = Learner(store)
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"t{i}"))
+    signals = learner.gap_signals("fastapi")
+    assert len(signals) == 1
+    assert signals[0].kind == "coverage" and signals[0].topic == "middleware"
+    assert "claimed but not covered" in signals[0].evidence
+
+
+def test_quality_gap_when_retrieval_happened(store):
+    learner = Learner(store)
+    for i in range(2):
+        learner.observe(fail("lifespan", injected=["kn-f-lifespan"],
+                             implicated=["kn-f-lifespan"], task_id=f"t{i}"))
+    signals = learner.gap_signals("fastapi")
+    assert signals[0].kind == "quality"
+    assert "kn-f-lifespan" in signals[0].evidence
+
+
+def test_unlabeled_outcomes_are_excluded_not_guessed(store):
+    learner = Learner(store)
+    for i in range(3):
+        learner.observe(fail("", task_id=f"t{i}"))    # unlabeled bucket
+    assert learner.gap_signals("fastapi") == []
+
+
+def test_backoff_suppresses_repeat_signals(store):
+    learner = Learner(store, LearningConfig(backoff_rounds=2))
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"t{i}"))
+    assert learner.gap_signals("fastapi")           # fires
+    assert learner.gap_signals("fastapi") == []     # suppressed round 1
+    assert learner.gap_signals("fastapi") == []     # suppressed round 2
+    assert learner.gap_signals("fastapi")           # fires again
+
+
+def test_below_min_failures_no_signal(store):
+    learner = Learner(store)
+    learner.observe(fail("middleware"))
+    assert learner.gap_signals("fastapi") == []
+
+
+def test_staleness_needs_age_AND_decayed_score(store):
+    old = "2025-01-01T00:00:00Z"
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    publish(store, "kn-f-old-good", "Old but still earning helpful marks.",
+            "oldtopic", fetched_at=old)
+    publish(store, "kn-f-old-bad", "Old and no longer helping anyone.",
+            "oldtopic", fetched_at=old)
+    store.mark("kn-f-old-good", helpful=10.0)
+    store.mark("kn-f-old-bad", harmful=3.0)
+    learner = Learner(store)
+    signals = learner.staleness_signals("fastapi", now=now)
+    ids = " ".join(s.evidence for s in signals)
+    assert "kn-f-old-bad" in ids and "kn-f-old-good" not in ids
+    # fresh entries never stale regardless of score
+    assert all("kn-f-lifespan" not in s.evidence for s in signals)
+
+
+def test_suggestions_are_advisory_with_actions(store):
+    learner = Learner(store)
+    for i in range(2):
+        learner.observe(fail("middleware", task_id=f"t{i}"))
+    suggestions = learner.suggestions("fastapi")
+    assert suggestions[0]["proposed_action"].startswith("propose acquisition")
+    assert "never auto-run" in suggestions[0]["advisory"]
+
+
+def test_learner_facade_still_marks_and_deprecates(store):
+    learner = Learner(store)
+    for i in range(3):
+        report = learner.observe(fail("lifespan", injected=["kn-f-lifespan"],
+                                      implicated=["kn-f-lifespan"],
+                                      task_id=f"t{i}"))
+    assert report.deprecated == ("kn-f-lifespan",)
+    assert store.get("kn-f-lifespan").status == "deprecated"
+
+
+def test_label_topic_deterministic_with_unlabeled_floor(store):
+    retriever = Retriever(store, HashEmbedder())
+    retriever.index("fastapi")
+    assert label_topic(retriever, ["fastapi"],
+                       "startup shutdown lifespan handler work") == "lifespan"
+    assert label_topic(retriever, ["fastapi"], "zzz qqq unrelated") == ""
+
+
+# -- suite regression -------------------------------------------------------
+
+def suite(model_id, passed, total, pack="fastapi"):
+    s = SuiteResult(model_id=model_id, pack=pack, injected=True)
+    s.results = [ProbeResult(f"p{i}", "recall", i < passed)
+                 for i in range(total)]
+    return s
+
+
+def test_regression_snapshot_and_check(store):
+    snapshot_baseline(store, "fastapi", suite("m1", 8, 10))
+    ok = check_regression(store, "fastapi", suite("m1", 9, 10))
+    assert ok.ok() and ok.delta == pytest.approx(0.1)
+    bad = check_regression(store, "fastapi", suite("m1", 5, 10))
+    assert not bad.ok() and "REGRESSION" in bad.summary()
+
+
+def test_regression_loud_paths(store):
+    with pytest.raises(StoreError, match="no suite baseline"):
+        check_regression(store, "fastapi", suite("m1", 1, 2))
+    with pytest.raises(StoreError, match="empty suite"):
+        snapshot_baseline(store, "fastapi", suite("m1", 0, 0))
+    snapshot_baseline(store, "fastapi", suite("m1", 2, 2))
+    with pytest.raises(StoreError, match="same model"):
+        check_regression(store, "fastapi", suite("OTHER", 2, 2))

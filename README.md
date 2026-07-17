@@ -29,6 +29,7 @@ The full design (with subsystem detail and a component diagram) is in [`docs/arc
 | Learning | `src/metaharness/correction/` | Two-speed loop: per-task Reflexion + offline MAST failure clustering into an auto-curated playbook (delta updates, verified outcomes only) |
 | Evals | `src/metaharness/evals/` | Sandboxed workspace-test verification for signed `code_edit` results, then deterministic/judge fallback; golden sets, pass^k gating, paired go/no-go comparison |
 | Self-optimization | `src/metaharness/optimization/` | Meta-Harness outer loop (arXiv 2603.28052): proposer reads raw failure traces of prior candidates and searches harness configs; Pareto frontier (pass^k vs tokens); promotion only through the held-out eval gate |
+| Self-learning knowledge | `selflearn/` (standalone) + `src/metaharness/knowledge/` (adapter) | Specialist knowledge packs: plugin-based acquisition (web search, pages, PDF, arXiv, YouTube via yt-distill), SchemaGuard distillation with injection screen, corroboration/citation/skill-check verification, generated probes with second-model validation, eval-gated publishing, semantic retrieval + steering, marks/gap/staleness learning loop. Host-agnostic behind five ports; see [`docs/selflearn-manual.md`](docs/selflearn-manual.md) |
 | Observability | `src/metaharness/observability/` | OpenTelemetry spans across all layers; in-memory store feeds the WebUI live |
 | Web UI | `src/metaharness/web/` | Home landing (single next-action card + metrics), Run wizard (Agents → Goal → Plan → Run → Done, with ✦ prompt assistant), wizard-driven Settings, live console with Harness-tuning card (start searches, approve promotions), ✦ AI advisor panels (closed action vocabulary, advisory-only), Help manual |
 
@@ -105,6 +106,27 @@ Everything learned survives restarts, under `~/.metaharness/`:
 - `journals/` — per-run event journals; interrupted runs are auto-advanced at boot
 
 All stores are write-through and loaded at startup.
+
+### Self-learning specialist agents
+
+The `selflearn/` distribution (own package, zero `metaharness` imports)
+turns agents into specialists that research reputable sources into
+versioned knowledge packs, gate every entry through external verification
+and generated evals, and learn from verified task outcomes. Quick start:
+
+```bash
+pip install -e './selflearn[dev,pdf]'
+selflearn seed-kb memory/knowledge_base --pack meta-research --store ~/.selflearn --publish
+selflearn retrieve "context engineering rules" --packs meta-research --store ~/.selflearn
+```
+
+Full manual: [`docs/selflearn-manual.md`](docs/selflearn-manual.md). Design
+and decision record: [`docs/self-learning-specialist-agents-plan.md`](docs/self-learning-specialist-agents-plan.md).
+Harness side, `AgentConfig.knowledge_packs` binds packs to agents, the
+`knowledge_acquisition` workflow template drives research runs (workers
+have no publish tool — humans or the eval gate publish), and
+`plan_from_knowledge` instantiates workflow-kind entries into deterministic
+WorkflowSpecs.
 
 ## Development notes
 
