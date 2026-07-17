@@ -270,6 +270,48 @@ task retrieves it and passes → helpful marks rank it higher. Months later
 its helpful rate decays as FastAPI moves on → staleness signal → re-fetch
 and amend.
 
+## Steering: getting the model to actually use the knowledge
+
+Injection is not use — a model can ignore context. Usage can't be forced,
+so the harness makes it **cheap to use, costly to ignore, measurable, and
+self-optimizing**:
+
+1. **Injection mechanics** (context-engineering KB): the knowledge block
+   sits in a stable slot (KV-cache-friendly prefix ordering), under its own
+   budget slice, top-k entries at ≤ ~400 tokens each, ordered so the most
+   relevant entries land nearest the task statement — small and close
+   enough that nothing is "lost in the middle".
+2. **Addressability framing** (self-correction KB, arXiv 2606.05976:
+   external-role framing lifts correction 23–93 pp): entries are rendered
+   depersonalized, as *verified field notes from domain research* — never
+   "your memories" or "you previously learned", and no trust-me framing.
+   The block header is a directive: *ground your approach in the applicable
+   notes below, cite entry ids where used, say so if none apply.*
+3. **Structured usage report**: the delegation contract adds an
+   `applied_knowledge` field — entry ids used and how, or explicitly none.
+   This refines credit assignment (marks weight toward entries the worker
+   *cited as used*, not merely injected) but is self-report, so it is
+   **never a verification signal** — it tunes attribution, nothing else.
+4. **Skills as step contracts**: a retrieved skill entry's recipe becomes
+   an explicit checklist in the task contract; the worker reports
+   deviations. The skill's `check:` remains externally verified, so
+   "followed the recipe" is claimed but "the recipe worked" is proven.
+5. **Active lookup escape hatch** (RAG-MCP/MCP-Zero pattern in the KB):
+   besides the passive top-k, a `knowledge_lookup` tool in the registry
+   lets the worker pull additional entries mid-task — covering the case
+   where the need only becomes visible after work starts. Normal tool-cap
+   rules apply.
+6. **Verification pressure**: ignoring applicable knowledge surfaces as
+   verified failures, harmful-mark implication, and gap signals — and the
+   paired go/no-go means a pack only promotes when injection measurably
+   beats no-injection. If the steering format doesn't work, promotion
+   fails; nobody has to notice manually.
+7. **The steering format is itself searchable**: slot position, framing
+   text, k, and per-entry token caps are harness parameters — exactly what
+   the existing Meta-Harness optimization outer loop searches, scored on
+   pack suites through the same held-out gate. Steering gets tuned by
+   evidence, not taste.
+
 ## Module architecture (decision 8)
 
 The self-learning system is a **standalone distribution** — `selflearn/` at
