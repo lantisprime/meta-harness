@@ -1,4 +1,5 @@
 """Acquisition module: plugin-based source acquisition behind one registry."""
+from selflearn.acquisition.backends import BraveBackend, SearxngBackend
 from selflearn.acquisition.context import (
     AcquireContext,
     AcquisitionError,
@@ -28,6 +29,7 @@ from selflearn.acquisition.reputability import (
 )
 
 __all__ = [
+    "BraveBackend", "SearxngBackend",
     "AcquireContext", "AcquisitionError", "Fetcher", "UrllibFetcher",
     "ArxivPlugin", "LocalPlugin", "PdfPlugin", "SearchBackend", "WebPlugin",
     "YoutubePlugin", "builtin_plugins", "html_to_text", "rank_passages",

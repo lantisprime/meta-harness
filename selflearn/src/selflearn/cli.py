@@ -23,7 +23,9 @@ from pathlib import Path
 
 from selflearn.acquisition import (
     AcquireContext,
+    BraveBackend,
     PluginRegistry,
+    SearxngBackend,
     UrllibFetcher,
     builtin_plugins,
 )
@@ -71,6 +73,46 @@ class OpenAICompatChat:
         return json.loads(content)
 
 
+class OpenAICompatEmbeddingClient:
+    """Minimal EmbeddingPort over an OpenAI-compatible /embeddings endpoint."""
+
+    def __init__(self, base_url: str, model: str, api_key: str = "",
+                 timeout_s: float = 60.0):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+        self.embedder_id = f"openai-compat:{model}"
+
+    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        req = urllib.request.Request(
+            f"{self.base_url}/embeddings",
+            data=json.dumps({"model": self.model, "input": texts}).encode(),
+            headers={"Content-Type": "application/json",
+                     **({"Authorization": f"Bearer {self.api_key}"}
+                        if self.api_key else {})})
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+            payload = json.loads(resp.read())
+        data = sorted(payload["data"], key=lambda d: d["index"])
+        return [tuple(d["embedding"]) for d in data]
+
+
+def _search_backend(args):
+    if getattr(args, "searxng", ""):
+        return SearxngBackend(args.searxng)
+    if getattr(args, "brave_key", ""):
+        return BraveBackend(args.brave_key)
+    return None
+
+
+def _embedder(args):
+    if getattr(args, "embedding_endpoint", ""):
+        return OpenAICompatEmbeddingClient(args.embedding_endpoint,
+                                           args.embedding_model,
+                                           args.api_key or "")
+    return None
+
+
 def _doc_to_dict(doc) -> dict:
     return {"ref_uri": doc.ref.uri, "blocks": list(doc.blocks),
             "chunks": list(doc.chunks), "tier": doc.tier,
@@ -90,7 +132,8 @@ def cmd_gather(args) -> int:
     if not args.no_network:
         ctx.fetcher = UrllibFetcher()
     registry = PluginRegistry(
-        builtin_plugins(),
+        builtin_plugins(search_backend=_search_backend(args),
+                        embedder=_embedder(args)),
         provenance=JsonlProvenance(Path(args.workdir) / "provenance.jsonl"))
     docs = registry.gather([SourceRef(uri=r, hint=args.tier or "") for r in args.refs],
                            ctx)
@@ -178,6 +221,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="sources.json")
     p.add_argument("--tier", default="")
     p.add_argument("--no-network", action="store_true")
+    p.add_argument("--searxng", default="",
+                   help="SearXNG instance base url for search: refs")
+    p.add_argument("--brave-key", default="",
+                   help="Brave Search API key for search: refs")
+    p.add_argument("--embedding-endpoint", default="",
+                   help="OpenAI-compatible base url for SEMANTIC passage "
+                        "ranking (keyword fallback without it)")
+    p.add_argument("--embedding-model", default="")
+    p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_gather)
 
     p = sub.add_parser("distill", help="distill gathered sources into candidates")

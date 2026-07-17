@@ -157,13 +157,27 @@ def html_to_text(html: str) -> str:
 _QWORD = re.compile(r"[a-z0-9]{3,}")
 
 
-def rank_passages(query: str, chunks: tuple[str, ...], top: int = 8) -> tuple[str, ...]:
-    """Question-ranked passages, not raw order — the web-RAG step."""
-    qwords = set(_QWORD.findall(query.lower()))
-    scored = []
-    for c in chunks:
-        cwords = set(_QWORD.findall(c.lower()))
-        scored.append((len(qwords & cwords) / (len(cwords) ** 0.5 or 1.0), c))
+def rank_passages(query: str, chunks: tuple[str, ...], top: int = 8,
+                  embedder=None) -> tuple[str, ...]:
+    """Question-ranked passages, not raw order — the web-RAG step.
+
+    Semantic (embedding cosine) when an EmbeddingPort is supplied — the same
+    scorer family pack retrieval uses (decision 2) — keyword overlap as the
+    degraded fallback otherwise.
+    """
+    if not chunks:
+        return chunks
+    if embedder is not None:
+        vectors = embedder.embed([query, *chunks])
+        qv, cvs = vectors[0], vectors[1:]
+        scored = [(sum(a * b for a, b in zip(qv, cv)), c)
+                  for cv, c in zip(cvs, chunks)]
+    else:
+        qwords = set(_QWORD.findall(query.lower()))
+        scored = []
+        for c in chunks:
+            cwords = set(_QWORD.findall(c.lower()))
+            scored.append((len(qwords & cwords) / (len(cwords) ** 0.5 or 1.0), c))
     ranked = [c for s, c in sorted(scored, key=lambda t: -t[0]) if s > 0]
     return tuple(ranked[:top]) or chunks[:top]
 
@@ -174,9 +188,10 @@ class WebPlugin:
     requires: tuple[str, ...] = ()
 
     def __init__(self, backend: Optional[SearchBackend] = None,
-                 max_results: int = 4):
+                 max_results: int = 4, embedder=None):
         self.backend = backend
         self.max_results = max_results
+        self.embedder = embedder
 
     def can_handle(self, ref: SourceRef) -> bool:
         return (ref.uri.startswith(("http://", "https://"))
@@ -204,7 +219,7 @@ class WebPlugin:
             raise AcquisitionError(f"{url!r} yielded no extractable text")
         chunks = _chunk(text)
         if query:
-            chunks = rank_passages(query, chunks)
+            chunks = rank_passages(query, chunks, embedder=self.embedder)
         return SourceDocument(
             ref=ref, blocks=(text[:6000],), chunks=chunks, assets=(),
             provenance=Provenance(url=url, fetched_at=_now(), sha256=_sha(raw),
@@ -349,7 +364,8 @@ class YoutubePlugin:
         return docs
 
 
-def builtin_plugins(search_backend: Optional[SearchBackend] = None) -> list:
+def builtin_plugins(search_backend: Optional[SearchBackend] = None,
+                    embedder=None) -> list:
     """Registry order matters: specific handlers before the generic web one."""
     return [LocalPlugin(), ArxivPlugin(), PdfPlugin(), YoutubePlugin(),
-            WebPlugin(backend=search_backend)]
+            WebPlugin(backend=search_backend, embedder=embedder)]
