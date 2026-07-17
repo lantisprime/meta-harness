@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from dataclasses import asdict
@@ -98,10 +99,13 @@ class OpenAICompatEmbeddingClient:
 
 
 def _search_backend(args):
+    # Brave API is the preferred backend (--brave-key or BRAVE_API_KEY);
+    # SearXNG is the self-hosted, no-key alternative.
+    brave_key = getattr(args, "brave_key", "") or os.environ.get("BRAVE_API_KEY", "")
+    if brave_key:
+        return BraveBackend(brave_key)
     if getattr(args, "searxng", ""):
         return SearxngBackend(args.searxng)
-    if getattr(args, "brave_key", ""):
-        return BraveBackend(args.brave_key)
     return None
 
 
@@ -221,10 +225,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="sources.json")
     p.add_argument("--tier", default="")
     p.add_argument("--no-network", action="store_true")
-    p.add_argument("--searxng", default="",
-                   help="SearXNG instance base url for search: refs")
     p.add_argument("--brave-key", default="",
-                   help="Brave Search API key for search: refs")
+                   help="Brave Search API key for search: refs (preferred; "
+                        "also read from BRAVE_API_KEY)")
+    p.add_argument("--searxng", default="",
+                   help="SearXNG instance base url for search: refs "
+                        "(self-hosted, no-key alternative)")
     p.add_argument("--embedding-endpoint", default="",
                    help="OpenAI-compatible base url for SEMANTIC passage "
                         "ranking (keyword fallback without it)")

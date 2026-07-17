@@ -80,6 +80,24 @@ def test_brave_backend_sends_token_and_parses():
         BraveBackend("")
 
 
+def test_cli_prefers_brave_and_reads_env_key(monkeypatch):
+    from argparse import Namespace
+    from selflearn.cli import _search_backend
+
+    # explicit flag wins
+    backend = _search_backend(Namespace(brave_key="flag-key", searxng=""))
+    assert isinstance(backend, BraveBackend) and backend.api_key == "flag-key"
+    # BRAVE_API_KEY env var picked up automatically, preferred over searxng
+    monkeypatch.setenv("BRAVE_API_KEY", "env-key")
+    backend = _search_backend(Namespace(brave_key="", searxng="https://sx.local"))
+    assert isinstance(backend, BraveBackend) and backend.api_key == "env-key"
+    # searxng only when no brave key anywhere
+    monkeypatch.delenv("BRAVE_API_KEY")
+    backend = _search_backend(Namespace(brave_key="", searxng="https://sx.local"))
+    assert isinstance(backend, SearxngBackend)
+    assert _search_backend(Namespace(brave_key="", searxng="")) is None
+
+
 def test_web_plugin_search_end_to_end_with_semantic_ranking(tmp_path):
     page = (b"<html><body><p>pasta cooking methods and boiling water tips "
             b"for the home chef today</p><p>the lifespan context manager "
