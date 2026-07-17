@@ -649,7 +649,9 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    machine, provenance, boot loading). Import `memory/knowledge_base/*.md`
    and one `yt-distill` `distilled/` lecture as seed packs to prove the
    format.
-2. **M2 — Retrieval module + specialist binding** (`selflearn/retrieval/`
+2. **M2 — Retrieval module + specialist binding** *(shipped 2026-07-17:
+   45 selflearn tests + 5 adapter tests; meta-harness suite 1067 passed;
+   real-lecture retrieval/injection/marks demo)* (`selflearn/retrieval/`
    semantic scorer — embedding cosine primary with keyword prefilter,
    manifest vectors keyed by embedder model with re-index on embedder swap,
    loud keyword-only degradation when no embedder is configured —

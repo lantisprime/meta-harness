@@ -31,6 +31,14 @@ from selflearn.ports import (
     ModelPort,
     ProvenancePort,
 )
+from selflearn.learning import MarkReport, apply_outcome
+from selflearn.retrieval import (
+    InjectionBlock,
+    RetrievalResult,
+    Retriever,
+    render_injection_block,
+)
+from selflearn.specialist import SpecialistSpec, load_spec, save_spec
 from selflearn.store import PackStore, StoredEntry, StoreError
 
 __version__ = "0.1.0"
@@ -42,5 +50,8 @@ __all__ = [
     "EmbeddingPort", "ExecutionPort", "ExecutionResult", "IdentityPort",
     "JsonlProvenance", "ModelIdIdentity", "ModelPort", "ProvenancePort",
     "PackStore", "StoredEntry", "StoreError",
+    "InjectionBlock", "RetrievalResult", "Retriever", "render_injection_block",
+    "SpecialistSpec", "load_spec", "save_spec",
+    "MarkReport", "apply_outcome",
     "__version__",
 ]

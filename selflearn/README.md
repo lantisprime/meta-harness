@@ -20,7 +20,7 @@ meta-harness repository, including the executable plan simulation
 | Milestone | State |
 |---|---|
 | M1 — package skeleton, contracts, five ports, store module, seed importers | shipped |
-| M2 — retrieval module + specialist binding | pending |
+| M2 — retrieval (semantic scorer, injection block), specialist spec, fast-loop marks, harness adapter | shipped |
 | M3 — acquisition plugins + distillation + CLI | pending |
 | M4 — verification module + acquisition template | pending |
 | M5 — evalgen + eval-gated publishing | pending |
