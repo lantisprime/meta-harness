@@ -28,19 +28,25 @@ from selflearn.verification import Verifier
 class AcquisitionReport:
     pack: str
     topic: str
+    mode: str = "strict"
     gathered: int = 0
     distilled: int = 0
     quarantined: list[str] = field(default_factory=list)
     verified: list[str] = field(default_factory=list)
     rejected: dict[str, list[str]] = field(default_factory=dict)
     held_for_approval: list[str] = field(default_factory=list)
+    published: list[str] = field(default_factory=list)
     skipped_existing: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        return (f"pack={self.pack} topic={self.topic}: {self.gathered} docs → "
-                f"{self.distilled} entries ({len(self.quarantined)} "
-                f"quarantined), {len(self.verified)} verified and held for "
-                f"approval, {len(self.rejected)} rejected, "
+        tail = (f"{len(self.published)} auto-published (eval-gated)"
+                if self.mode == "auto"
+                else f"{len(self.held_for_approval)} held for approval")
+        return (f"pack={self.pack} topic={self.topic} [{self.mode}]: "
+                f"{self.gathered} docs → {self.distilled} entries "
+                f"({len(self.quarantined)} quarantined), "
+                f"{len(self.verified)} verified, {tail}, "
+                f"{len(self.rejected)} rejected, "
                 f"{len(self.skipped_existing)} already known")
 
 
@@ -55,8 +61,17 @@ def run_acquisition(
     verifier: Verifier,
     store: PackStore,
     provenance: Optional[ProvenancePort] = None,
+    evalgen=None,
+    answer_model=None,
 ) -> AcquisitionReport:
-    report = AcquisitionReport(pack=pack, topic=topic)
+    """``evalgen`` + ``answer_model`` switch the run to **auto mode**
+    (decision 3): entries that pass verification AND whose second-model-
+    validated probes pass with the entry injected publish without a human,
+    under the bootstrap rule. Without them the run is strict: verified
+    entries are held for explicit approval."""
+    auto = evalgen is not None and answer_model is not None
+    report = AcquisitionReport(pack=pack, topic=topic,
+                               mode="auto" if auto else "strict")
 
     def event(payload: dict) -> None:
         if provenance is not None:
@@ -87,16 +102,40 @@ def run_acquisition(
                    "reason": entry.quarantine_reason})
             continue
         vreport = verifier.verify(entry, source_excerpts=source_excerpts)
-        if vreport.ok:
-            report.verified.append(entry.id)
+        if not vreport.ok:
+            report.rejected[entry.id] = vreport.rejected
+            event({"event": "acquisition.item.rejected", "entry": entry.id,
+                   "reasons": vreport.rejected})
+            continue
+        report.verified.append(entry.id)
+        if not auto:
             report.held_for_approval.append(entry.id)
             event({"event": "acquisition.item.verified", "entry": entry.id,
                    "basis": vreport.basis,
                    "held": "strict mode: awaiting human approval"})
+            continue
+        # auto mode: evalgen -> second-model validation -> eval gate
+        from selflearn.verification.suite import eval_gated_decision
+
+        probes = evalgen.generate(entry)
+        genreport = evalgen.validate(probes, source_excerpts)
+        decision = eval_gated_decision(
+            entry, vreport, genreport.validated, answer_model,
+            suite_size=store.suite_size(pack),
+            identity_basis=evalgen.identity.basis,
+            execution=verifier.execution)
+        if decision.publish:
+            store.publish(entry.id, decision, probes=genreport.validated)
+            report.published.append(entry.id)
+            event({"event": "acquisition.item.published", "entry": entry.id,
+                   "basis": list(decision.basis),
+                   "probes": [p.id for p in genreport.validated],
+                   "probes_rejected_by_validator": list(genreport.rejected)})
         else:
-            report.rejected[entry.id] = vreport.rejected
-            event({"event": "acquisition.item.rejected", "entry": entry.id,
-                   "reasons": vreport.rejected})
+            report.held_for_approval.append(entry.id)
+            event({"event": "acquisition.item.gate_failed", "entry": entry.id,
+                   "basis": list(decision.basis),
+                   "held": "eval gate not passed: held for human approval"})
 
     event({"event": "acquisition.finished", "pack": pack,
            "summary": report.summary()})

@@ -100,3 +100,53 @@ def test_approval_reverifies_and_refuses(tmp_path, source_file):
     eid = report.quarantined[0]
     with pytest.raises(StoreError, match="refusing approval"):
         approve_entry(store, Verifier(), eid)
+
+
+def test_auto_mode_publishes_through_eval_gate(tmp_path, source_file):
+    from selflearn.ports import ModelIdIdentity
+    from selflearn.verification import EvalGen
+
+    class Author:
+        model_id = "author-a"
+
+        def complete(self, role, prompt, context):
+            return {"probes": [
+                {"kind": "recall",
+                 "question": "What replaces on_event handlers?",
+                 "expected": "lifespan"}]}
+
+    class Validator:
+        model_id = "validator-b"
+
+        def complete(self, role, prompt, context):
+            ok = "on_event" in context["question"]
+            return {"answer": "lifespan" if ok else "cannot determine"}
+
+    class Answerer:
+        model_id = "answerer-c"
+
+        def complete(self, role, prompt, context):
+            has = "lifespan" in context.get("knowledge_block", "").lower()
+            return {"answer": "lifespan" if has else "unsure"}
+
+    store = PackStore(tmp_path / "store")
+    report = run_acquisition(
+        [SourceRef(uri=f"file://{source_file}", hint="official")],
+        pack="fastapi", topic="lifespan",
+        registry=PluginRegistry([LocalPlugin()]),
+        ctx=AcquireContext(workdir=tmp_path / "w"),
+        distiller=Distiller(ScriptedModel([GOOD, HOSTILE])),
+        verifier=Verifier(), store=store,
+        evalgen=EvalGen(Author(), Validator(), ModelIdIdentity()),
+        answer_model=Answerer(),
+        provenance=JsonlProvenance(tmp_path / "run.jsonl"))
+    assert report.mode == "auto"
+    assert len(report.published) == 1          # eval-gated auto-publish
+    assert len(report.quarantined) == 1        # hostile still quarantined
+    eid = report.published[0]
+    assert store.get(eid).status == "published"
+    assert store.probes_for(eid)               # probes entered the suite
+    published_event = json.loads(
+        [l for l in (tmp_path / "run.jsonl").read_text().splitlines()
+         if "item.published" in l][0])
+    assert any("BOOTSTRAP" in b for b in published_event["basis"])

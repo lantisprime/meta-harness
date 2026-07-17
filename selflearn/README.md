@@ -23,7 +23,7 @@ meta-harness repository, including the executable plan simulation
 | M2 — retrieval (semantic scorer, injection block), specialist spec, fast-loop marks, harness adapter | shipped |
 | M3 — acquisition plugin registry (local/web/arxiv/pdf/youtube), distillation with SchemaGuard + injection screen, CLI | shipped |
 | M4 — verification (corroboration/citations/skill-exec/judge), strict-mode pipeline + approve, acquisition template + knowledge tools, knowledge-driven planning | shipped |
-| M5 — evalgen + eval-gated publishing | pending |
+| M5 — evalgen, second-model probe validation, eval-gated auto-publish (bootstrap rule), suite runner, model qualification | shipped |
 | M6 — learning module | pending |
 
 ## Quick start (M1 scope)

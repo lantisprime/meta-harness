@@ -94,6 +94,21 @@ def test_knowledge_archetypes_exist_for_acquisition_roles():
     assert "traceable to the sources" in KNOWLEDGE_ARCHETYPES["knowledge-distiller"]
 
 
+def test_record_qualification_feeds_capability_matrix():
+    from metaharness.core.types import TaskType
+    from metaharness.knowledge import record_qualification
+    from metaharness.routing.router import CapabilityMatrix
+    from selflearn.verification import QualificationResult
+
+    matrix = CapabilityMatrix()
+    q = QualificationResult(model_id="local-qwen", pack="fastapi",
+                            with_injection=0.9, without_injection=0.2,
+                            total_probes=10)
+    assert q.qualified
+    record_qualification(matrix, q, task_types=("code_edit",))
+    assert matrix._stats[("local-qwen", TaskType.CODE_EDIT)] == [1, 1]
+
+
 def test_embedding_binding_validates_config():
     with pytest.raises(ValueError, match="base_url and model"):
         OpenAICompatEmbedding(base_url="", model="")

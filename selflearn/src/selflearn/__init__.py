@@ -43,9 +43,12 @@ from selflearn.learning import MarkReport, apply_outcome
 from selflearn.pipeline import AcquisitionReport, approve_entry, run_acquisition
 from selflearn.verification import (
     CorroborationRule,
+    EvalGen,
+    QualificationResult,
     VerificationError,
     VerificationReport,
     Verifier,
+    qualify_model,
 )
 from selflearn.retrieval import (
     InjectionBlock,
@@ -73,5 +76,6 @@ __all__ = [
     "DistillationError", "Distiller", "injection_screen",
     "AcquisitionReport", "approve_entry", "run_acquisition",
     "CorroborationRule", "VerificationError", "VerificationReport", "Verifier",
+    "EvalGen", "QualificationResult", "qualify_model",
     "__version__",
 ]

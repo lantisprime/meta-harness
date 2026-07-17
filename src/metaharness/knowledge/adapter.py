@@ -70,6 +70,19 @@ class OpenAICompatEmbedding:
         return [tuple(d["embedding"]) for d in data]
 
 
+def record_qualification(matrix, qualification, task_types=("general",)) -> None:
+    """Record a selflearn QualificationResult as capability evidence.
+
+    The matrix keys evidence by (model, task_type); a pack qualification
+    lands as evidence for the task types the pack's specialists serve, so
+    routing learns which models are worth handing that domain."""
+    from metaharness.core.types import TaskType
+
+    for task_type in task_types:
+        matrix.record(qualification.model_id, TaskType(task_type),
+                      qualification.qualified)
+
+
 def make_knowledge_hints(
     store,
     specs: Sequence,

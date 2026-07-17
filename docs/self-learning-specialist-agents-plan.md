@@ -679,7 +679,10 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    integration — planning-time retrieval and `workflow`-entry
    instantiation in the goal→WorkflowSpec planner; publishing runs in
    strict human-gated mode until M5 lands the eval gate).
-5. **M5 — Evalgen + eval-gated publishing** (verification module's evalgen
+5. **M5 — Evalgen + eval-gated publishing** *(shipped 2026-07-17: 109
+   selflearn + 15 adapter tests; offline AI-course demo proves auto-publish
+   with the bootstrap→post-bootstrap transition, 16-probe suite, and
+   qualification delta ±100%)* (verification module's evalgen
    with `probe-author` / `probe-validator` archetypes and identity-enforced
    distinctness, eval-gated auto-publish as the default, pack-promotion
    paired go/no-go, model qualification runs recording (model, pack)
