@@ -139,9 +139,10 @@ The design must not assume any particular LLM or vendor:
 
 ## Eval generation from acquired knowledge (requirement)
 
-Every published entry must also *teach the harness how to test for it*. A new
-`knowledge/evalgen.py` step runs inside the acquisition workflow and derives
-eval items from each candidate entry, reusing the existing suite machinery
+Every published entry must also *teach the harness how to test for it*. The
+verification module's **evalgen** step runs inside the acquisition workflow
+and derives eval items from each candidate entry, reusing the existing suite
+machinery
 (`evals/gate.py: run_suite / compare_suites`, pass^k, sign test):
 
 - **Recall probes** (knowledge entries): fact questions whose answer keys are
@@ -188,101 +189,147 @@ for:
    don't help, the harness suggests (never auto-runs) an acquisition run for
    that topic on the console — same advisory-only posture as the tuning card.
 
-## Ingestion pipeline
+## Module architecture (decision 8)
 
-New `src/metaharness/knowledge/` subsystem:
+`src/metaharness/knowledge/` is a package of six modules with **typed
+contracts** between them. Modules never import each other's internals — they
+exchange frozen value objects — so each is independently testable,
+replaceable, and reusable outside this harness (the platform-agnosticism
+requirement applied to the code itself):
 
-| Module | Responsibility |
-|---|---|
-| `ingest.py` | Fetchers: web page (upgrade `_web_fetch`: HTML→text extraction, size caps, robots/rate-limit courtesy), PDF (text layer + figures/charts/equations, below), arXiv LaTeX-source fast path, YouTube lectures via `yt-distill` (below), local `.md`/`.json` drop-in directory |
-| `distill.py` | LLM step: source text → candidate entries against the schema; SchemaGuard-enforced |
-| `verify.py` | Corroboration checker (deterministic), skill `check:` execution via the sandboxed runner, rubric-judge fallback |
-| `store.py` | Pack CRUD, manifest, quarantine/promotion state machine, provenance |
-| `retrieve.py` | Semantic scoring (embedding cosine primary, keyword prefilter/fallback) + budgeted selection for context injection |
+| Module | Package | Consumes → Produces |
+|---|---|---|
+| Acquisition | `knowledge/acquisition/` | `SourceRef` → `SourceDocument` — plugin-based, below |
+| Distillation | `knowledge/distillation/` | `SourceDocument[]` → `CandidateEntry[]` — SchemaGuard-enforced, injection screen |
+| Verification & evals | `knowledge/verification/` | `CandidateEntry` → `VerifiedEntry + ProbeSet + PublishDecision` — reputability policy, corroboration, skill `check:` execution, evalgen, second-model probe validation, eval gate |
+| Store | `knowledge/store/` | packs on disk — entries, manifests, embedding index, assets, quarantine/promotion state machine, provenance |
+| Retrieval | `knowledge/retrieval/` | `Task` + bound packs → budgeted, fenced injection block — semantic scoring |
+| Learning | `knowledge/learning/` | verified task outcomes → helpful/harmful marks, auto-deprecation; MAST failure clusters → gap signals / acquisition suggestions |
 
-Plus a `knowledge_acquisition` workflow template in
-`workflows/templates.py`: `scope → gather → distill → verify → eval-gate →
-publish`. Publishing is **eval-gated** (decision 3): the deterministic
+Contract flow: `SourceRef → SourceDocument → CandidateEntry →
+(VerifiedEntry, ProbeSet, PublishDecision)`. The store is the only shared
+state, and the `knowledge_acquisition` workflow template is pure
+orchestration — each phase calls exactly one module, keeping the
+deterministic spine intact: `scope → gather (acquisition) → distill
+(distillation) → verify + eval-gate (verification) → publish (store)`.
+
+Publishing is **eval-gated** (decision 3): the deterministic
 reputability/citation policy must pass, the entry's second-model-validated
 probes must pass with the entry injected, and the pack-level paired
 go/no-go delta must be non-negative. A per-pack **strict mode** reinstates a
 human curate ⛔ gate (post-artifact, the PR #21 UX) — the entry-by-entry pack
 diff with sources remains the review surface either way.
 
-**Semantic web-search tool** (decision 2): a builtin `web_search` that takes
-a natural-language research question, pulls candidate URLs from a pluggable
-backend (Brave API, self-hosted SearXNG, or any connected MCP search server
-acting as a backend), fetches and extracts the pages, then chunks and ranks
-passages against the question with the same hybrid scorer used for pack
-retrieval. It returns top passages with URL + fetch-time provenance — a
-web-RAG step ready for distillation, not a raw hit list.
+### Acquisition plugins
 
-**Rich PDF extraction** (decision 5): prose from the text layer (`pypdf`);
-embedded figures/charts rendered via a permissively-licensed renderer
-(`pdfium`); a vision-qualified worker (provider-neutral, capability-keyed)
-converts figure → description, chart → description + underlying data table
-when legible, equation → LaTeX. arXiv URLs prefer the published LaTeX source
-tarball — exact equations and captioned figures with no vision call.
-Vision-derived content carries a lower evidence class (`extraction: vision`)
-and needs corroboration or second-worker agreement before it can support a
-published claim. Image assets live in the pack with provenance; prompts
-always receive the textual rendering, so serving models never need vision.
+Acquisition is a **plugin registry**: adding a source type never touches the
+pipeline. A plugin implements one small protocol:
 
-**YouTube lecture ingestion** (decision 7): the `youtube` fetcher drives the
-existing `yt-distill` CLI ([lantisprime/youtube-distiller](https://github.com/lantisprime/youtube-distiller),
-optional `[youtube]` extra) rather than reimplementing acquisition.
-`yt-distill analyze` yields `chunks.jsonl` — timestamped, source-linked,
-embedding-sized chunks plus a structured summary record — which enters
-*gather* as pre-chunked source material. `yt-distill slides` yields
-OpenCV-cropped slide/diagram/code frames with ±12 s transcript context
-(`slides.json` + `frames/*.jpg`), which flow into the same vision-worker
-path as PDF figures (figure → description, chart → data table, equation →
-LaTeX; all `extraction: vision` evidence class). Everything upstream of the
-vision step is deterministic — yt-dlp captions / local faster-whisper,
-extractive scoring, classical CV, no LLM — which fits the evidence model:
-raw chunks are the citable source, and entry-writing happens only in
-meta-harness's own distill step. Provenance: entry sources gain an optional
-`locator` (timestamp range / page number), and the reputability tiers gain
-**channel identities** alongside domains (a conference or university channel
-can be `official`/`primary`). The tool already rate-limits and never
-bypasses access controls; cookie-based access stays a user-supplied,
-never-stored input.
+```python
+class SourcePlugin(Protocol):
+    id: str                       # "web", "pdf", "arxiv", "youtube", …
+    requires: tuple[str, ...]     # optional extras / external CLIs, checked up front
+    def can_handle(self, ref: SourceRef) -> bool: ...      # scheme/URL/mime match
+    async def acquire(self, ref: SourceRef, ctx: AcquireContext) -> SourceDocument: ...
+```
 
-Distillation additionally runs a deterministic injection-pattern screen over
-source text and candidate entries; a match quarantines the entry for human
-review regardless of eval results.
+`SourceDocument` is the normalized envelope every plugin must emit: text
+blocks and/or pre-chunked segments, assets (images tagged
+figure/chart/equation for the vision path), and full provenance (url,
+fetched_at, sha256, `locator`, producing plugin + version). Resolution is
+deterministic: explicit registration order in config, first `can_handle`
+match wins, and a ref no plugin claims fails the gather step loudly. The
+`AcquireContext` hands plugins rate-limit budgets and the workspace jail —
+plugins never carry their own filesystem or network policy.
+
+Registration: built-in plugins ship in-tree; third-party plugins load only
+from a config **allowlist** of Python entry points
+(`metaharness.knowledge.sources` group). A plugin is code, and installing
+one is a trust decision — provenance records which plugin (and version)
+produced every document, so a bad plugin's output is traceable and revocable
+as a unit. An `mcp` adapter plugin can wrap any connected MCP server that
+exposes fetch/search tools, covering one-off sources without new code.
+
+Built-in plugins:
+
+- **`web`** (decision 2): the semantic search path. A natural-language
+  research question goes to a pluggable search backend (Brave API,
+  self-hosted SearXNG, or an MCP search server); pages are fetched and
+  extracted (size caps, robots/rate-limit courtesy); passages are ranked
+  against the question with the retrieval module's scorer. Emits
+  question-ranked passages with provenance, not raw hits. Plain page-URL
+  refs go through the same extraction (the `_web_fetch` upgrade).
+- **`pdf`** (decision 5): prose from the text layer (`pypdf`); embedded
+  figures/charts rendered via a permissively-licensed renderer (`pdfium`);
+  vision-qualified workers convert figure → description, chart →
+  description + data table when legible, equation → LaTeX. Vision-derived
+  content carries the lower `extraction: vision` evidence class and needs
+  corroboration or second-worker agreement. Assets live in the pack;
+  prompts always receive the textual rendering, so serving models never
+  need vision.
+- **`arxiv`**: prefers the published LaTeX source tarball over the PDF —
+  exact equations and captioned figures with no vision call; falls back to
+  the `pdf` plugin.
+- **`youtube`** (decision 7): drives the existing `yt-distill` CLI
+  ([lantisprime/youtube-distiller](https://github.com/lantisprime/youtube-distiller),
+  optional `[youtube]` extra). `analyze` yields `chunks.jsonl` —
+  timestamped, source-linked, embedding-sized chunks plus a structured
+  summary record — emitted as pre-chunked segments; `slides` yields
+  OpenCV-cropped slide/diagram/code frames with ±12 s transcript context
+  (`slides.json` + `frames/*.jpg`), emitted as assets for the same vision
+  path as PDF figures. Everything upstream of the vision step is
+  deterministic (yt-dlp captions / local faster-whisper, extractive
+  scoring, classical CV — no LLM), which fits the evidence model: raw
+  chunks are the citable source; entry-writing happens only in the
+  distillation module. Channel identities join the reputability tiers (a
+  conference or university channel can be `official`/`primary`); timestamp
+  ranges become source `locator`s. The tool already rate-limits and never
+  bypasses access controls; cookie-based access stays a user-supplied,
+  never-stored input.
+- **`local`**: drop-in directory of `.md`/`.json` files — including
+  `memory/knowledge_base/` and existing `yt-distill` `distilled/` folders.
+
+The distillation module additionally runs a deterministic injection-pattern
+screen over source text and candidate entries; a match quarantines the entry
+for human review regardless of eval results.
 
 ## Milestones
 
 Each milestone is independently shippable and tested; later ones can be
 re-scoped after we see the earlier ones work.
 
-1. **M1 — Knowledge store + schemas** (`knowledge/store.py`, entry/manifest
-   models, quarantine state machine, provenance, boot loading). Import
+Milestones map one-to-one onto modules, so each ships as a bounded package
+with its contract types and tests.
+
+1. **M1 — Store module** (`knowledge/store/`: entry/manifest models,
+   quarantine state machine, provenance, boot loading). Import
    `memory/knowledge_base/*.md` and one `yt-distill` `distilled/` lecture
    as seed packs to prove the format.
-2. **M2 — Retrieval + specialist binding** (`retrieve.py` semantic scorer —
-   embedding cosine primary with keyword prefilter, manifest vectors keyed
-   by embedder model with re-index on embedder swap, loud keyword-only
-   degradation when no embedder is configured — declarative specialist
-   spec, `AgentConfig.knowledge_packs`, context-budget slice, fenced
-   injection, helpful/harmful feedback wiring). Value ships here even with
-   hand-authored packs, against any configured worker.
-3. **M3 — Ingestion** (semantic `web_search` tool with pluggable backends,
-   `ingest.py` web/PDF/md fetchers with rich PDF extraction and the arXiv
-   source fast path, `youtube` fetcher over `yt-distill` artifacts,
-   `distill.py` with the injection screen, SchemaGuard on output, loud
-   failure paths).
-4. **M4 — Verification + acquisition template** (`verify.py`, reputability
-   policy config, `knowledge_acquisition` template; publishing runs in
-   strict human-gated mode until M5 lands the eval gate).
-5. **M5 — Eval generation + eval-gated publishing** (`evalgen.py`,
+2. **M2 — Retrieval module + specialist binding** (`knowledge/retrieval/`
+   semantic scorer — embedding cosine primary with keyword prefilter,
+   manifest vectors keyed by embedder model with re-index on embedder swap,
+   loud keyword-only degradation when no embedder is configured —
+   declarative specialist spec, `AgentConfig.knowledge_packs`,
+   context-budget slice, fenced injection, helpful/harmful feedback
+   wiring). Value ships here even with hand-authored packs, against any
+   configured worker.
+3. **M3 — Acquisition + distillation modules** (`knowledge/acquisition/`:
+   `SourcePlugin` protocol, registry with allowlisted entry points, and the
+   built-in `web`, `pdf`, `arxiv`, `youtube`, `local` plugins;
+   `knowledge/distillation/` with SchemaGuard and the injection screen;
+   loud failure paths throughout).
+4. **M4 — Verification module + acquisition template**
+   (`knowledge/verification/`: reputability policy config, corroboration,
+   skill `check:` execution; the `knowledge_acquisition` template wiring
+   all modules; publishing runs in strict human-gated mode until M5 lands
+   the eval gate).
+5. **M5 — Evalgen + eval-gated publishing** (verification module's evalgen,
    second-model probe validation, eval-gated auto-publish as the default,
    pack-promotion paired go/no-go, model qualification runs recording
    (model, pack) capability evidence).
-6. **M6 — Learning-loop closure** (gap detection from MAST clusters, console
-   card with advisory suggestions, auto-deprecation, suite regression on
-   pack updates).
+6. **M6 — Learning module** (`knowledge/learning/`: gap detection from MAST
+   clusters, console card with advisory suggestions, auto-deprecation,
+   suite regression on pack updates).
 7. **M7 — Web UI** (pack browser, entry + probe diff view at the curate gate,
    specialist wizard step in Settings, qualification results per model).
 
@@ -325,6 +372,16 @@ re-scoped after we see the earlier ones work.
    provenance as `locator`s. Its existing `distilled/` corpus (a dozen
    agent-engineering lectures) is additional seed material for M1 alongside
    `memory/knowledge_base/`.
+8. **Architecture — six modules, plugin acquisition** *(added 2026-07-17)*.
+   `knowledge/` splits into acquisition / distillation / verification-and-
+   evals / store / retrieval / learning, exchanging frozen value objects
+   (`SourceRef → SourceDocument → CandidateEntry → VerifiedEntry + ProbeSet
+   + PublishDecision`) with the store as the only shared state and the
+   workflow template as pure orchestration. Acquisition is a plugin
+   registry behind the `SourcePlugin` protocol — built-ins in-tree (`web`,
+   `pdf`, `arxiv`, `youtube`, `local`), third-party only via an explicit
+   entry-point allowlist, plus an `mcp` adapter for tool-backed sources;
+   per-plugin provenance makes any plugin's output revocable as a unit.
 
 ## Residual risks (tracked, not blocking)
 
@@ -340,3 +397,8 @@ re-scoped after we see the earlier ones work.
   calls; per-acquisition-run budgets are enforced by the existing `Budget`
   machinery, and the qualification suite runs on demand (model swap or pack
   promotion), not continuously.
+- **Plugin trust.** Acquisition plugins are code. The entry-point
+  allowlist, the jailed `AcquireContext`, and per-plugin provenance bound
+  the blast radius, but a malicious third-party plugin remains a
+  supply-chain risk — the same class as any installed dependency, and worth
+  stating on the Settings surface that enables one.
