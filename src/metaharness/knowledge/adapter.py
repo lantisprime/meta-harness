@@ -112,7 +112,8 @@ def make_knowledge_hints(
             return []
         results = retriever.retrieve(list(spec.packs), task.objective,
                                      k=spec.retrieval_k,
-                                     budget_tokens=spec.retrieval_budget_tokens)
+                                     budget_tokens=spec.retrieval_budget_tokens,
+                                     task_type=task_type)
         block = render_injection_block(results)
         return [] if block.empty else [block.text]
 

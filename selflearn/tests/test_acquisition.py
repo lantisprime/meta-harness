@@ -101,7 +101,7 @@ def test_local_ytdistill_chunks_old_and_new_schema(tmp_path):
     docs = LocalPlugin().acquire(SourceRef(uri=f"file://{f}"), ctx_with(tmp_path)[0])
     assert docs[0].chunks == ("chunk one", "old-schema chunk")
     assert docs[0].provenance.url == "https://youtu.be/x"
-    assert docs[0].provenance.locator == "t=3s"
+    assert docs[0].provenance.locator == "t=3-9s"    # whole span, not first start
 
 
 # -- web plugin -------------------------------------------------------------

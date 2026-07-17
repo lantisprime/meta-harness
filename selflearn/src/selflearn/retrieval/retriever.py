@@ -84,7 +84,11 @@ class Retriever:
     # ------------------------------------------------------------------
 
     def retrieve(self, packs: list[str], query: str, k: int = 5,
-                 budget_tokens: int = 1200) -> list[RetrievalResult]:
+                 budget_tokens: int = 1200,
+                 task_type: str = "") -> list[RetrievalResult]:
+        """``task_type`` sharpens the learning prior per task type
+        (score_for): an entry that helps for code_edit but misleads for
+        review ranks differently for each."""
         candidates = [e for pack in packs for e in self.store.published(pack)]
         if not candidates:
             return []
@@ -97,7 +101,8 @@ class Retriever:
                     "degraded keyword-only scoring (decision 1 wants semantic "
                     "scoring — configure an EmbeddingPort)", stacklevel=2)
                 self._warned = True
-            scored = [(_keyword_overlap(query_words, e) * e.score, e)
+            scored = [(_keyword_overlap(query_words, e)
+                       * e.score_for(task_type), e)
                       for e in candidates]
         else:
             if len(candidates) > PREFILTER_THRESHOLD:
@@ -114,7 +119,8 @@ class Retriever:
                     "run Retriever.index() first — refusing silent partial "
                     "retrieval")
             qv = self.embedder.embed([query])[0]
-            scored = [(cosine(qv, e.vector) * e.score, e) for e in candidates]
+            scored = [(cosine(qv, e.vector) * e.score_for(task_type), e)
+                      for e in candidates]
 
         ranked = sorted(scored, key=lambda t: -t[0])
         out: list[RetrievalResult] = []

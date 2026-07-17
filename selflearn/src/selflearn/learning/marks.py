@@ -92,7 +92,8 @@ def apply_outcome(store: PackStore, outcome: TaskOutcome,
     def _mark(entry_id: str, **counts) -> StoredEntry:
         factor = decay_factor(store.get(entry_id).marks_updated_at, now,
                               half_life_days)
-        return store.mark(entry_id, decay=factor, now_iso=now_iso, **counts)
+        return store.mark(entry_id, decay=factor, now_iso=now_iso,
+                          task_type=outcome.task_type, **counts)
 
     if outcome.verdict == "pass":
         for entry_id in outcome.injected:

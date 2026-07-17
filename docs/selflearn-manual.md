@@ -336,12 +336,25 @@ learner.observe(TaskOutcome(
 ))
 ```
 
+The contract is validated, not just trusted: `applied` and `implicated`
+must be subsets of `injected` (an entry absent from the prompt cannot have
+been used or caused the failure — *missing* knowledge is a gap signal, not
+a mark), a passing outcome cannot implicate, and unknown entry ids fail
+loudly.
+
 **Fast loop (per outcome, automatic):**
 - verified PASS → `helpful+1` per injected entry, `+2` when cited as applied;
 - verified FAIL → `harmful+1` **only** for entries listed in `implicated`
   (grounded reflection cited them) — injection alone never harms;
 - harmful ≥ 3 and > helpful → auto-deprecation (journaled, reversible,
   probes retired).
+
+**Per-task-type granularity**: every mark also lands in a per-task bucket
+(`marks_by_task`), and retrieval takes a `task_type` so the prior comes
+from `score_for(task_type)` — the task bucket's evidence shrunk toward the
+global score. An entry that helps for `code_edit` but misleads for
+`reasoning` ranks up for the first and sinks for the second; with no
+bucket evidence the global score applies unchanged.
 
 **Recency decay**: marks are not lifetime counters. Every mark event first
 multiplies the entry's existing counters by
@@ -380,15 +393,13 @@ writes through to `<store>/learner-state.json` and reloads on
 construction — a restart loses no evidence. Retained failures are FIFO-
 capped (`max_failures`, default 500).
 
-**Known limitations (by design):**
-- *Effectiveness is delegated to the host*: harmful marks depend on the
-  host populating `implicated` honestly (grounded reflection), and every
-  guarantee rests on the host supplying real external verdicts — that is
-  the never-trust-self-assessment contract, stated plainly.
-- *Learning granularity is coarse*: per-entry counters and per-topic gap
-  joins. The loop will not learn context-dependent nuance like "this entry
-  helps for task type A but misleads for B"; per-(entry, task-type) marks
-  are a possible future refinement.
+**Known limitation (by design):**
+- *Verdicts come from the host*: the library never invents outcomes — every
+  guarantee rests on the host supplying real external verdicts and honest
+  implication evidence. That is the never-trust-self-assessment contract.
+  What the library now enforces mechanically: attribution coherence
+  (`applied`/`implicated` ⊆ `injected`), known entry ids, and no
+  implication on passing outcomes.
 
 Topic labeling is deterministic:
 

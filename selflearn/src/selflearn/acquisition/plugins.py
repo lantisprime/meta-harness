@@ -91,7 +91,9 @@ class LocalPlugin:
         return docs
 
     def _ytdistill_chunks(self, ref: SourceRef, f: Path, text: str) -> SourceDocument:
-        chunks, url, locators = [], f"file://{f}", []
+        chunks, url = [], f"file://{f}"
+        starts: list[float] = []
+        ends: list[float] = []
         for line in text.splitlines():
             rec = json.loads(line)
             # schema tolerance (simulation finding 6): absent record_type => chunk
@@ -100,14 +102,22 @@ class LocalPlugin:
             chunks.append(str(rec.get("text", "")))
             url = str(rec.get("source_url", url))
             if rec.get("start") is not None:
-                locators.append(f"t={rec['start']:.0f}s")
+                starts.append(float(rec["start"]))
+            if rec.get("end") is not None:
+                ends.append(float(rec["end"]))
         if not chunks:
             raise AcquisitionError(f"{f} contains no transcript chunks")
+        # locator covers the whole span, not the first chunk's start (a
+        # real-data finding: doc-level t=0s lost the range entirely)
+        locator = ""
+        if starts:
+            hi = max(ends) if ends else max(starts)
+            locator = f"t={min(starts):.0f}-{hi:.0f}s"
         return SourceDocument(
             ref=ref, blocks=("\n".join(chunks),), chunks=tuple(chunks), assets=(),
             provenance=Provenance(url=url, fetched_at=_now(), sha256=_sha(text),
                                   plugin=self.id, plugin_version=self.version,
-                                  locator=locators[0] if locators else ""),
+                                  locator=locator),
             tier="primary")
 
 

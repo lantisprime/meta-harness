@@ -52,6 +52,10 @@ class StoredEntry:
     status: str = "candidate"
     helpful: float = 0.0
     harmful: float = 0.0
+    # per-task-type evidence: task_type -> [helpful, harmful]. Lets the
+    # loop learn "helps for code_edit but misleads for review" instead of
+    # one coarse counter (review finding 4).
+    marks_by_task: dict[str, list[float]] = field(default_factory=dict)
     marks_updated_at: str = ""       # ISO timestamp of the last mark event
     embedder_id: str = ""
     vector: tuple[float, ...] = ()
@@ -60,6 +64,16 @@ class StoredEntry:
     def score(self) -> float:
         """Laplace-smoothed retrieval prior from the learning marks."""
         return (self.helpful + 1.0) / (self.helpful + self.harmful + 2.0)
+
+    def score_for(self, task_type: str = "", smoothing: float = 2.0) -> float:
+        """Task-type-aware prior: the task bucket's evidence shrunk toward
+        the global score (hierarchical smoothing — `smoothing` pseudo-counts
+        of the global prior). No bucket evidence -> global score."""
+        if not task_type or task_type not in self.marks_by_task:
+            return self.score
+        bucket_helpful, bucket_harmful = self.marks_by_task[task_type]
+        return ((bucket_helpful + smoothing * self.score)
+                / (bucket_helpful + bucket_harmful + smoothing))
 
 
 @dataclass
@@ -107,6 +121,9 @@ class PackStore:
                     cand=cand, status=status,
                     helpful=float(meta.get("helpful", 0.0)),
                     harmful=float(meta.get("harmful", 0.0)),
+                    marks_by_task={
+                        str(k): [float(v[0]), float(v[1])]
+                        for k, v in meta.get("marks_by_task", {}).items()},
                     marks_updated_at=meta.get("marks_updated_at", ""),
                     embedder_id=meta.get("embedder_id", ""),
                     vector=tuple(meta.get("vector", [])))
@@ -197,18 +214,28 @@ class PackStore:
                      "reason": reason})
 
     def mark(self, entry_id: str, helpful: float = 0.0, harmful: float = 0.0,
-             decay: float = 1.0, now_iso: str = "") -> StoredEntry:
-        """Apply marks. ``decay`` multiplies the EXISTING counters first
-        (recency decay: old evidence fades so recent evidence can win);
-        ``now_iso`` stamps the mark event for future decay computation."""
+             decay: float = 1.0, now_iso: str = "",
+             task_type: str = "") -> StoredEntry:
+        """Apply marks. ``decay`` multiplies ALL existing counters first —
+        global and per-task buckets, one clock (recency decay: old evidence
+        fades so recent evidence can win); ``now_iso`` stamps the mark event
+        for future decay computation; ``task_type`` additionally credits
+        that task bucket so retrieval can rank per task type."""
         if not 0.0 <= decay <= 1.0:
             raise StoreError(f"decay factor must be in [0, 1], got {decay}")
         stored = self._get(entry_id)
         if decay != 1.0:
             stored.helpful *= decay
             stored.harmful *= decay
+            for bucket in stored.marks_by_task.values():
+                bucket[0] *= decay
+                bucket[1] *= decay
         stored.helpful += helpful
         stored.harmful += harmful
+        if task_type:
+            bucket = stored.marks_by_task.setdefault(task_type, [0.0, 0.0])
+            bucket[0] += helpful
+            bucket[1] += harmful
         if now_iso:
             stored.marks_updated_at = now_iso
         self._persist_entry(stored)
@@ -298,6 +325,8 @@ class PackStore:
                     "status": e.status, "kind": e.cand.kind,
                     "topic": e.cand.topic,
                     "helpful": e.helpful, "harmful": e.harmful,
+                    "marks_by_task": {k: list(v)
+                                      for k, v in e.marks_by_task.items()},
                     "marks_updated_at": e.marks_updated_at,
                     "embedder_id": e.embedder_id,
                     "vector": list(e.vector),

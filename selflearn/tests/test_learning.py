@@ -263,6 +263,76 @@ def test_staleness_uses_decayed_score(store):
     # lifetime counters would read 101/111 ≈ 0.91 — far above the 0.45 bar
 
 
+# -- per-task-type granularity (review finding 4) ---------------------------
+
+def test_contract_rejects_incoherent_attribution():
+    from selflearn.contracts import ContractError
+
+    with pytest.raises(ContractError, match="applied .* subset"):
+        TaskOutcome(task_id="t", task_type="code_edit", topic="x",
+                    verdict="pass", injected=("a",), applied=("b",))
+    with pytest.raises(ContractError, match="implicated .* subset"):
+        TaskOutcome(task_id="t", task_type="code_edit", topic="x",
+                    verdict="fail", injected=(), implicated=("ghost",))
+
+
+def test_marks_land_in_task_buckets_and_persist(store):
+    learner = Learner(store)
+    learner.observe(TaskOutcome(
+        task_id="t1", task_type="code_edit", topic="lifespan", verdict="pass",
+        injected=("kn-f-lifespan",), applied=("kn-f-lifespan",)))
+    learner.observe(TaskOutcome(
+        task_id="t2", task_type="reasoning", topic="lifespan", verdict="fail",
+        injected=("kn-f-lifespan",), implicated=("kn-f-lifespan",)))
+    stored = store.get("kn-f-lifespan")
+    # approx: consecutive wall-clock marks decay by a sliver of elapsed time
+    assert stored.marks_by_task["code_edit"][0] == pytest.approx(2.0, abs=1e-3)
+    assert stored.marks_by_task["reasoning"][1] == pytest.approx(1.0, abs=1e-3)
+    reloaded = PackStore(store.root)
+    assert reloaded.get("kn-f-lifespan").marks_by_task == stored.marks_by_task
+
+
+def test_score_for_learns_helps_A_misleads_B(store):
+    """The review's exact nuance: helpful for task type A, harmful for B."""
+    for i in range(4):
+        store.mark("kn-f-lifespan", helpful=1.0, task_type="code_edit")
+    for i in range(4):
+        store.mark("kn-f-lifespan", harmful=1.0, task_type="reasoning")
+    stored = store.get("kn-f-lifespan")
+    assert stored.score_for("code_edit") > stored.score       # boosted for A
+    assert stored.score_for("reasoning") < stored.score       # sunk for B
+    assert stored.score_for("") == stored.score               # no type -> global
+    assert stored.score_for("never_seen") == stored.score     # no evidence -> global
+
+
+def test_retrieval_ranks_per_task_type(store):
+    publish(store, "kn-f-alt", "Lifespan context manager replaces on_event "
+            "handlers for startup shutdown.", "lifespan")   # near-identical body
+    for _ in range(6):
+        store.mark("kn-f-lifespan", helpful=1.0, task_type="code_edit")
+        store.mark("kn-f-lifespan", harmful=1.0, task_type="reasoning")
+    retriever = Retriever(store, HashEmbedder())
+    retriever.index("fastapi")
+    query = "lifespan startup shutdown handlers"
+    top_code = retriever.retrieve(["fastapi"], query, task_type="code_edit")
+    top_reason = retriever.retrieve(["fastapi"], query, task_type="reasoning")
+    assert top_code[0].entry_id == "kn-f-lifespan"      # helps for A: first
+    assert top_reason[0].entry_id == "kn-f-alt"         # misleads for B: sunk
+
+
+def test_decay_applies_to_task_buckets_too(store):
+    a_year_ago = datetime(2025, 7, 17, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 17, tzinfo=timezone.utc)
+    store.mark("kn-f-lifespan", helpful=10.0, task_type="code_edit",
+               now_iso=a_year_ago.isoformat())
+    from selflearn.learning import apply_outcome
+    apply_outcome(store, TaskOutcome(
+        task_id="t", task_type="code_edit", topic="lifespan", verdict="pass",
+        injected=("kn-f-lifespan",)), now=now)
+    bucket = store.get("kn-f-lifespan").marks_by_task["code_edit"]
+    assert bucket[0] < 2.0        # 10 decayed to ~0.6, +1 new
+
+
 # -- suite regression -------------------------------------------------------
 
 def suite(model_id, passed, total, pack="fastapi"):

@@ -242,3 +242,14 @@ class TaskOutcome:
         _require(self.verdict in VERDICTS, f"verdict {self.verdict!r} invalid")
         _require(not (self.verdict == "pass" and self.implicated),
                  "a passing outcome cannot implicate entries")
+        # Host-discipline made checkable (review finding 3): the host's
+        # attribution must at least be coherent — an entry that was never in
+        # the prompt cannot have been applied, and cannot have caused the
+        # failure. Domain-level "knowledge was missing" belongs to gap
+        # signals, not harmful marks.
+        _require(set(self.applied) <= set(self.injected),
+                 "applied entries must be a subset of injected entries")
+        _require(set(self.implicated) <= set(self.injected),
+                 "implicated entries must be a subset of injected entries — "
+                 "an entry absent from the prompt cannot have caused the "
+                 "failure (missing knowledge is a gap signal, not a mark)")
