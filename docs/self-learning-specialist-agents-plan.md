@@ -1,6 +1,7 @@
 # Plan: Self-Learning Specialist Agents
 
-Status: **draft for discussion** — not yet scheduled into the workplan.
+Status: **design decisions resolved 2026-07-17** (see Decisions at the end)
+— not yet scheduled into the workplan.
 
 ## The idea
 
@@ -22,10 +23,11 @@ keeping every existing design principle intact.
 - **Never trust self-assessment.** An agent's own summary of a web page is not
   knowledge. Every candidate entry must pass an external verification signal
   before it can influence future prompts: source-corroboration for facts,
-  execution for skills, rubric judge as fallback, human gate for promotion.
+  execution for skills, rubric judge as fallback, second-model-validated eval
+  probes for promotion (human curate ⛔ gate in per-pack strict mode).
   Unverified entries stay quarantined as candidates and are never retrieved.
 - **Deterministic spine.** Acquisition runs as a journaled workflow template
-  (gather → distill → verify → curate ⛔ → publish). The lifecycle — retries,
+  (gather → distill → verify → eval-gate → publish). The lifecycle — retries,
   quarantine, promotion, rollback — is deterministic code. LLM intelligence
   lives inside the distill/verify steps only.
 - **Failures are loud.** A fetch that 404s, a PDF that won't parse, or an entry
@@ -103,8 +105,9 @@ archetype, the pack-derived eval suite that qualifies a model to serve the
 role, and routing constraints (minimum tier). `AgentConfig` gains
 `knowledge_packs: [fastapi, security]`; which LLM actually serves the
 specialist is decided by the router/config at runtime, exactly as today. At
-task time, the context builder retrieves top-k published entries (keyword
-scoring like `Playbook.bullets_for`, embeddings later) under a dedicated
+task time, the context builder retrieves top-k published entries (hybrid
+scoring: keyword always, cosine blend when an embedding endpoint is
+configured) under a dedicated
 per-tier context budget slice, injected fenced and untrusted-marked —
 advisory context, same treatment as the ✦ companion's inputs. The router's
 capability matrix keeps working unchanged; specialists simply earn better
@@ -115,9 +118,10 @@ them.
 
 The design must not assume any particular LLM or vendor:
 
-- **All LLM steps route through the runner layer.** Distillation,
-  judge-verification, and eval generation are ordinary tiered worker calls —
-  they work against anything the harness can already drive: local
+- **All model steps route through the runner layer.** Distillation,
+  judge-verification, eval generation, vision extraction, and optional
+  embeddings are ordinary capability-keyed worker/endpoint calls — they work
+  against anything the harness can already drive: local
   OpenAI-compatible endpoints (LM Studio, Ollama), remote providers
   (Anthropic, OpenAI, Groq, …), and coding CLIs. `knowledge/` imports no
   provider SDK and contains no provider-specific prompt features; injection
@@ -152,10 +156,14 @@ eval items from each candidate entry, reusing the existing suite machinery
   into an executable eval task run by the sandboxed execution verifier — the
   strongest evidence class.
 
-Lifecycle coupling is strict: eval items ride through the same curate ⛔ gate
-as their entries (the human reviews entry + probes together), an amended entry
-regenerates its items, and a deprecated entry retires them. Items live in the
-pack under `evals/` with a suite manifest.
+Lifecycle coupling is strict: a probe may gate publishing only after passing
+**second-model validation** — a different qualified model must answer it
+correctly given only the verified sources, so the generator never grades
+itself (in strict mode a human additionally reviews entry + probes together).
+An amended entry regenerates its items; a deprecated entry retires them.
+Items live in the pack under `evals/` with a suite manifest. Default density:
+1 recall + 1 application probe per entry (skills carry their executable
+`check:` for free), configurable per pack.
 
 The generated suite is what makes the rest of the system honest. It is used
 for:
@@ -175,7 +183,7 @@ for:
 2. **Slow (offline)**: a *knowledge-acquisition* workflow run, triggered
    manually or by a gap signal (repeated verified failures clustered by MAST
    in a domain a pack claims to cover). It proposes new/amended entries and
-   pushes them through verify → curate ⛔ → publish.
+   pushes them through verify → eval-gate → publish.
 3. **Gap detection**: when the failure store shows a cluster whose plays
    don't help, the harness suggests (never auto-runs) an acquisition run for
    that topic on the console — same advisory-only posture as the tuning card.
@@ -186,21 +194,43 @@ New `src/metaharness/knowledge/` subsystem:
 
 | Module | Responsibility |
 |---|---|
-| `ingest.py` | Fetchers: web page (upgrade `_web_fetch`: HTML→text extraction, size caps, robots/rate-limit courtesy), PDF (`pypdf` extra), local `.md`/`.json` drop-in directory |
+| `ingest.py` | Fetchers: web page (upgrade `_web_fetch`: HTML→text extraction, size caps, robots/rate-limit courtesy), PDF (text layer + figures/charts/equations, below), arXiv LaTeX-source fast path, local `.md`/`.json` drop-in directory |
 | `distill.py` | LLM step: source text → candidate entries against the schema; SchemaGuard-enforced |
 | `verify.py` | Corroboration checker (deterministic), skill `check:` execution via the sandboxed runner, rubric-judge fallback |
 | `store.py` | Pack CRUD, manifest, quarantine/promotion state machine, provenance |
-| `retrieve.py` | Scoring + budgeted selection for context injection |
+| `retrieve.py` | Hybrid scoring (keyword + optional embedding cosine) + budgeted selection for context injection |
 
 Plus a `knowledge_acquisition` workflow template in
-`workflows/templates.py`: `scope → gather → distill → verify → curate ⛔
-(hitl_timing: after) → publish`. Curation shows the human the diff of the
-pack, entry-by-entry, with sources — the same post-artifact gate UX shipped
-for Software Engineering in PR #21.
+`workflows/templates.py`: `scope → gather → distill → verify → eval-gate →
+publish`. Publishing is **eval-gated** (decision 3): the deterministic
+reputability/citation policy must pass, the entry's second-model-validated
+probes must pass with the entry injected, and the pack-level paired
+go/no-go delta must be non-negative. A per-pack **strict mode** reinstates a
+human curate ⛔ gate (post-artifact, the PR #21 UX) — the entry-by-entry pack
+diff with sources remains the review surface either way.
 
-A `web_search` tool is a prerequisite for real research (current `web_fetch`
-needs an exact URL). The MCP Brave Search preset already exists in Settings —
-the template can require it, keeping search API keys out of core.
+**Semantic web-search tool** (decision 2): a builtin `web_search` that takes
+a natural-language research question, pulls candidate URLs from a pluggable
+backend (Brave API, self-hosted SearXNG, or any connected MCP search server
+acting as a backend), fetches and extracts the pages, then chunks and ranks
+passages against the question with the same hybrid scorer used for pack
+retrieval. It returns top passages with URL + fetch-time provenance — a
+web-RAG step ready for distillation, not a raw hit list.
+
+**Rich PDF extraction** (decision 5): prose from the text layer (`pypdf`);
+embedded figures/charts rendered via a permissively-licensed renderer
+(`pdfium`); a vision-qualified worker (provider-neutral, capability-keyed)
+converts figure → description, chart → description + underlying data table
+when legible, equation → LaTeX. arXiv URLs prefer the published LaTeX source
+tarball — exact equations and captioned figures with no vision call.
+Vision-derived content carries a lower evidence class (`extraction: vision`)
+and needs corroboration or second-worker agreement before it can support a
+published claim. Image assets live in the pack with provenance; prompts
+always receive the textual rendering, so serving models never need vision.
+
+Distillation additionally runs a deterministic injection-pattern screen over
+source text and candidate entries; a match quarantines the entry for human
+review regardless of eval results.
 
 ## Milestones
 
@@ -210,45 +240,65 @@ re-scoped after we see the earlier ones work.
 1. **M1 — Knowledge store + schemas** (`knowledge/store.py`, entry/manifest
    models, quarantine state machine, provenance, boot loading). Import
    `memory/knowledge_base/*.md` as the seed pack to prove the format.
-2. **M2 — Retrieval + specialist binding** (`retrieve.py`, declarative
-   specialist spec, `AgentConfig.knowledge_packs`, context-budget slice,
-   fenced injection, helpful/harmful feedback wiring). Value ships here even
-   with hand-authored packs, against any configured worker.
-3. **M3 — Ingestion** (`ingest.py` web/PDF/md fetchers, `distill.py`,
-   SchemaGuard on output, loud failure paths).
+2. **M2 — Retrieval + specialist binding** (`retrieve.py` hybrid scorer —
+   keyword always, cosine blend when an embedding endpoint is configured —
+   declarative specialist spec, `AgentConfig.knowledge_packs`,
+   context-budget slice, fenced injection, helpful/harmful feedback wiring).
+   Value ships here even with hand-authored packs, against any configured
+   worker.
+3. **M3 — Ingestion** (semantic `web_search` tool with pluggable backends,
+   `ingest.py` web/PDF/md fetchers with rich PDF extraction and the arXiv
+   source fast path, `distill.py` with the injection screen, SchemaGuard on
+   output, loud failure paths).
 4. **M4 — Verification + acquisition template** (`verify.py`, reputability
-   policy config, `knowledge_acquisition` template with the curate gate,
-   MCP web-search integration).
-5. **M5 — Eval generation + qualification** (`evalgen.py`, probe types wired
-   into the acquisition template and curate gate, pack-promotion paired
-   go/no-go, model qualification runs recording (model, pack) capability
-   evidence).
+   policy config, `knowledge_acquisition` template; publishing runs in
+   strict human-gated mode until M5 lands the eval gate).
+5. **M5 — Eval generation + eval-gated publishing** (`evalgen.py`,
+   second-model probe validation, eval-gated auto-publish as the default,
+   pack-promotion paired go/no-go, model qualification runs recording
+   (model, pack) capability evidence).
 6. **M6 — Learning-loop closure** (gap detection from MAST clusters, console
    card with advisory suggestions, auto-deprecation, suite regression on
    pack updates).
 7. **M7 — Web UI** (pack browser, entry + probe diff view at the curate gate,
    specialist wizard step in Settings, qualification results per model).
 
-## Risks / open questions (for discussion)
+## Decisions (resolved 2026-07-17)
 
-1. **Retrieval quality**: start with keyword scoring (proven in
-   `Playbook.bullets_for`) or bring embeddings in from day one? Keyword-first
-   keeps M2 dependency-free; embeddings likely needed once packs exceed ~100
-   entries.
-2. **Search provider**: standardize on the MCP Brave preset, or add a
-   built-in `web_search` tool with a pluggable backend?
-3. **Prompt-injection surface**: web text flows through distillation into
-   future prompts. Fencing + untrusted-marking + human curation gate is the
-   proposed mitigation; is curate-gate-always-on acceptable friction, or do
-   we want an auto-publish tier for `official`-only corroborated entries?
-4. **Pack scope granularity**: per-technology (fastapi), per-role
-   (security-reviewer), or both with pack composition?
-5. **PDF fidelity**: text-layer extraction only (cheap, `pypdf`) vs OCR
-   fallback (heavy). Proposal: text-layer only, loud failure otherwise.
-6. **Eval density and cost**: how many probes per entry (proposal: 1 recall +
-   1 application, skills get their `check:` for free), and does the
-   qualification suite run on every model swap or only on demand? Generated
-   probes are themselves LLM output — the curate gate is what keeps a bad
-   probe from poisoning the promotion signal; is that sufficient, or should
-   probes additionally require a second model to answer them correctly from
-   sources before acceptance?
+1. **Retrieval — hybrid, embeddings optional.** Keyword scoring always
+   works; when the config declares an embedding endpoint, scores blend
+   keyword + cosine similarity. The embedding endpoint joins the provider
+   abstraction — qualified, never assumed.
+2. **Web search — native semantic search tool.** Builtin `web_search` with
+   pluggable backends (Brave API, self-hosted SearXNG, MCP search servers as
+   backends) returning question-ranked passages with provenance, not raw
+   hits.
+3. **Curation — eval-gated auto-publish.** Reputability policy + validated
+   probes passing with the entry injected + non-negative pack-level paired
+   delta ⇒ publish. Per-pack strict mode reinstates the human curate ⛔ gate.
+4. **Granularity — tech packs, roles compose.** Packs are per-technology/
+   domain; a specialist role is a spec composing several packs + an
+   archetype prompt.
+5. **PDF — rich extraction.** Text layer for prose; diagrams, charts, and
+   equations via vision-qualified workers (lower evidence class, agreement
+   check required); arXiv LaTeX-source fast path; loud failure when a
+   document yields nothing usable.
+6. **Probe QC — second-model check.** A probe gates publishing only after a
+   different qualified model answers it correctly from the sources alone;
+   deterministic answer keys wherever the fact allows. Density default:
+   1 recall + 1 application per entry, configurable per pack.
+
+## Residual risks (tracked, not blocking)
+
+- **Prompt injection through published entries.** Eval gates verify truth,
+  not intent — a factually correct entry could still carry a steering
+  payload. Mitigations: distill-time injection screen, fenced
+  untrusted-marked advisory-only injection, strict mode for sensitive packs.
+- **Vision extraction fidelity.** Chart→data and equation→LaTeX are
+  model-dependent; second-worker agreement is required but not infallible —
+  the `extraction: vision` evidence class stays visible on every derived
+  claim.
+- **Eval-gate cost.** Probe validation and paired suite runs are model
+  calls; per-acquisition-run budgets are enforced by the existing `Budget`
+  machinery, and the qualification suite runs on demand (model swap or pack
+  promotion), not continuously.
