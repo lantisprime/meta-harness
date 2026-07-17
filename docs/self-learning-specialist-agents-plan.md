@@ -759,6 +759,42 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
     sandbox, provenance log, trust plane, capability matrix, and the
     `knowledge_acquisition` workflow template.
 
+## Simulation findings (2026-07-17)
+
+`development/selflearn_simulation.py` is an executable mock-ported prototype
+of this plan — every contract, module, port, plugin, gate, and guardrail —
+driven through 11 scenarios including real `yt-distill` lecture chunks.
+**26/26 checks pass**: the contracts compose, the eval gate rejects
+under-corroborated entries, the injection screen quarantines hostile
+sources, identity enforcement blocks same-model probe validation,
+asymmetric marks/deprecation/probe-retirement/backoff all fire, workflow
+entries instantiate into multi-call runs with per-step retrieval, and the
+degraded-retrieval and embedder-swap paths behave. The run also surfaced
+six under-specifications, resolved as follows:
+
+1. **Cold-start bootstrap rule.** The pack-level paired go/no-go is
+   undefined on a near-empty suite. Resolution: entries publish on
+   reputability + validated probes alone while the pack suite has < 5
+   probes; the paired gate applies to *pack promotion to default-on*, not
+   to first publishes.
+2. **Corroboration independence.** "≥2 independent sources" now means
+   distinct registrable domains (distinct channel identities for video
+   sources).
+3. **Topic labeling for gap detection.** `TaskOutcome.topic` is assigned
+   deterministically by semantic match of the task/failure text against
+   the pack's coverage-map topics (threshold below which it lands in an
+   `unlabeled` bucket rather than guessing).
+4. **Step-level implication.** The `TaskOutcome` contract gains `step_id`,
+   so workflow-entry quality gaps target the failing step's definition,
+   not the whole entry.
+5. **Workflow param filling.** Extracting `procedure.params` values from
+   the goal is a named `knowledge-scout` LLM step in the planner,
+   SchemaGuard-validated — not an unspecified side effect.
+6. **Artifact schema versioning.** The real `distilled/` corpus predates
+   `record_type` in `chunks.jsonl`; the `youtube`/`local` plugins must
+   tolerate yt-distill schema versions (absent `record_type` ⇒ transcript
+   chunk).
+
 ## Residual risks (tracked, not blocking)
 
 - **Prompt injection through published entries.** Eval gates verify truth,
