@@ -97,14 +97,74 @@ A configurable, deterministic policy — not model judgment:
 
 ### Specialist agent
 
-An `AgentConfig` extension: `knowledge_packs: [fastapi, security]` plus an
-optional specialty system-prompt archetype. At task time, the context builder
-retrieves top-k published entries (keyword scoring like
-`Playbook.bullets_for`, embeddings later) under a dedicated per-tier context
-budget slice, injected fenced and untrusted-marked — advisory context, same
-treatment as the ✦ companion's inputs. The router's capability matrix keeps
-working unchanged; specialists simply earn better verified outcomes in their
-domain, so pre-routing naturally starts favoring them.
+A specialist is a **declarative spec, not a model binding**: a JSON/YAML
+document naming knowledge packs, an optional specialty system-prompt
+archetype, the pack-derived eval suite that qualifies a model to serve the
+role, and routing constraints (minimum tier). `AgentConfig` gains
+`knowledge_packs: [fastapi, security]`; which LLM actually serves the
+specialist is decided by the router/config at runtime, exactly as today. At
+task time, the context builder retrieves top-k published entries (keyword
+scoring like `Playbook.bullets_for`, embeddings later) under a dedicated
+per-tier context budget slice, injected fenced and untrusted-marked —
+advisory context, same treatment as the ✦ companion's inputs. The router's
+capability matrix keeps working unchanged; specialists simply earn better
+verified outcomes in their domain, so pre-routing naturally starts favoring
+them.
+
+## Platform agnosticism (requirement)
+
+The design must not assume any particular LLM or vendor:
+
+- **All LLM steps route through the runner layer.** Distillation,
+  judge-verification, and eval generation are ordinary tiered worker calls —
+  they work against anything the harness can already drive: local
+  OpenAI-compatible endpoints (LM Studio, Ollama), remote providers
+  (Anthropic, OpenAI, Groq, …), and coding CLIs. `knowledge/` imports no
+  provider SDK and contains no provider-specific prompt features; injection
+  is plain fenced text that renders identically everywhere.
+- **Artifacts are plain files.** Packs are MD + JSON directories — readable,
+  git-diffable, and usable by any harness, not just this one. A pack can
+  optionally be exported as an integrity-addressed archive via the existing
+  `portable/` packaging for distribution to other deployments.
+- **Models are qualified, not assumed.** Any model becomes eligible to serve
+  a specialist by passing the pack's generated eval suite (below).
+  Qualification results are recorded as capability evidence keyed by
+  (model, pack) — extending the matrix's per-model evidence principle — so
+  swapping LLMs is: point at the new endpoint, re-run the suite, done. No
+  pack content or specialist spec changes.
+
+## Eval generation from acquired knowledge (requirement)
+
+Every published entry must also *teach the harness how to test for it*. A new
+`knowledge/evalgen.py` step runs inside the acquisition workflow and derives
+eval items from each candidate entry, reusing the existing suite machinery
+(`evals/gate.py: run_suite / compare_suites`, pass^k, sign test):
+
+- **Recall probes** (knowledge entries): fact questions whose answer keys are
+  extracted from the *verified sources* — never from model memory — checked
+  deterministically (equals/contains/regex) where the fact allows, rubric
+  judge with the entry as ground truth otherwise.
+- **Application probes** (knowledge entries): a novel scenario that requires
+  the knowledge to solve, judge-scored. These measure transfer, not parroting;
+  reported separately from recall so a pack that only enables regurgitation is
+  visible as such.
+- **Skill probes** (skill entries): the entry's `check:` block wraps directly
+  into an executable eval task run by the sandboxed execution verifier — the
+  strongest evidence class.
+
+Lifecycle coupling is strict: eval items ride through the same curate ⛔ gate
+as their entries (the human reviews entry + probes together), an amended entry
+regenerates its items, and a deprecated entry retires them. Items live in the
+pack under `evals/` with a suite manifest.
+
+The generated suite is what makes the rest of the system honest. It is used
+for:
+
+1. **Pack promotion** — a pack version is promoted only if injection beats
+   no-injection on the suite through the existing paired go/no-go gate.
+2. **Model qualification** — the platform-agnostic serving contract above.
+3. **Regression** — the suite reruns after any pack update; a knowledge
+   change that silently degrades the specialist fails loudly.
 
 ## The learning loop (two-speed, mirroring `correction/`)
 
@@ -150,20 +210,24 @@ re-scoped after we see the earlier ones work.
 1. **M1 — Knowledge store + schemas** (`knowledge/store.py`, entry/manifest
    models, quarantine state machine, provenance, boot loading). Import
    `memory/knowledge_base/*.md` as the seed pack to prove the format.
-2. **M2 — Retrieval + specialist binding** (`retrieve.py`, `AgentConfig.
-   knowledge_packs`, context-budget slice, fenced injection, helpful/harmful
-   feedback wiring). Value ships here even with hand-authored packs.
+2. **M2 — Retrieval + specialist binding** (`retrieve.py`, declarative
+   specialist spec, `AgentConfig.knowledge_packs`, context-budget slice,
+   fenced injection, helpful/harmful feedback wiring). Value ships here even
+   with hand-authored packs, against any configured worker.
 3. **M3 — Ingestion** (`ingest.py` web/PDF/md fetchers, `distill.py`,
    SchemaGuard on output, loud failure paths).
 4. **M4 — Verification + acquisition template** (`verify.py`, reputability
    policy config, `knowledge_acquisition` template with the curate gate,
    MCP web-search integration).
-5. **M5 — Learning-loop closure** (gap detection from MAST clusters, console
-   card with advisory suggestions, auto-deprecation, eval: paired go/no-go —
-   does pack injection beat no-injection on a held-out suite before a pack
-   version is promoted to default-on?).
-6. **M6 — Web UI** (pack browser, entry diff view at the curate gate,
-   specialist wizard step in Settings).
+5. **M5 — Eval generation + qualification** (`evalgen.py`, probe types wired
+   into the acquisition template and curate gate, pack-promotion paired
+   go/no-go, model qualification runs recording (model, pack) capability
+   evidence).
+6. **M6 — Learning-loop closure** (gap detection from MAST clusters, console
+   card with advisory suggestions, auto-deprecation, suite regression on
+   pack updates).
+7. **M7 — Web UI** (pack browser, entry + probe diff view at the curate gate,
+   specialist wizard step in Settings, qualification results per model).
 
 ## Risks / open questions (for discussion)
 
@@ -181,3 +245,10 @@ re-scoped after we see the earlier ones work.
    (security-reviewer), or both with pack composition?
 5. **PDF fidelity**: text-layer extraction only (cheap, `pypdf`) vs OCR
    fallback (heavy). Proposal: text-layer only, loud failure otherwise.
+6. **Eval density and cost**: how many probes per entry (proposal: 1 recall +
+   1 application, skills get their `check:` for free), and does the
+   qualification suite run on every model swap or only on demand? Generated
+   probes are themselves LLM output — the curate gate is what keeps a bad
+   probe from poisoning the promotion signal; is that sufficient, or should
+   probes additionally require a second model to answer them correctly from
+   sources before acceptance?
