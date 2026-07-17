@@ -183,10 +183,11 @@ for:
    `helpful`/`harmful` marks — exactly the ACE delta-update scheme the
    playbook uses. Persistently harmful entries auto-deprecate; deprecation is
    journaled and reversible.
-2. **Slow (offline)**: a *knowledge-acquisition* workflow run, triggered
-   manually or by a gap signal (repeated verified failures clustered by MAST
-   in a domain a pack claims to cover). It proposes new/amended entries and
-   pushes them through verify → eval-gate → publish.
+2. **Slow (offline)**: a *knowledge-acquisition* workflow run, triggered by
+   any of the acquisition modes (goal-directed, seeding, citation
+   expansion, watched sources, or a gap signal — see Acquisition modes). It
+   proposes new/amended entries and pushes them through verify → eval-gate
+   → publish.
 3. **Gap detection**: when the failure store shows a cluster whose plays
    don't help, the harness suggests (never auto-runs) an acquisition run for
    that topic on the console — same advisory-only posture as the tuning card.
@@ -329,6 +330,40 @@ Built-in plugins:
 The distillation module additionally runs a deterministic injection-pattern
 screen over source text and candidate entries; a match quarantines the entry
 for human review regardless of eval results.
+
+### Acquisition modes: how knowledge gets in
+
+Gap-driven study is the *reactive* trigger, not the main one — packs are
+built and grown proactively. Five entry points feed the same pipeline
+(gather → distill → verify → eval-gate → publish); how knowledge arrives
+never changes what it takes to publish:
+
+1. **Goal-directed research (primary).** A human gives a pack-building goal
+   ("build a FastAPI pack", "make a security-review specialist"). The
+   `knowledge-scout`'s scope phase turns it into a **syllabus**: subtopics →
+   research questions → a source-type strategy per subtopic (official docs,
+   papers, lectures), effort-scaled to the run budget. The syllabus persists
+   in the pack manifest as a **coverage map** — topics claimed vs. covered —
+   which later powers dedupe (don't re-acquire covered ground) and makes
+   coverage-gap detection concrete.
+2. **Bulk seeding.** Point the pipeline at an existing corpus: a directory
+   of `.md`/PDF files, a URL reading list, an arXiv query, a YouTube
+   playlist or channel (`yt-distill` `distilled/` folders load directly via
+   the `local` plugin). Refs fan out through normal plugin resolution.
+3. **Citation expansion.** Distilled entries surface adjacent references —
+   papers cite papers, docs link docs, lectures name tools. The scout may
+   propose follow-up refs from those citations (bounded depth,
+   budget-capped, reputability-filtered), so a pack deepens from what it
+   just learned rather than only from failures.
+4. **Watched sources.** A pack can watch sources (a docs site, an arXiv
+   category, a YouTube channel): scheduled runs propose acquisition for new
+   or changed material, and staleness signals trigger re-fetch of aging
+   entries.
+5. **Gap-driven (reactive).** Failure clusters → gap signals, per the
+   learning loop.
+
+Modes 1–2 are human-initiated; modes 3–5 only *propose* runs (advisory,
+human-approved, with backoff) — nothing self-triggers acquisition.
 
 ### Agent topology — orchestrator–workers (decision 9)
 
