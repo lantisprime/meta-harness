@@ -105,9 +105,9 @@ archetype, the pack-derived eval suite that qualifies a model to serve the
 role, and routing constraints (minimum tier). `AgentConfig` gains
 `knowledge_packs: [fastapi, security]`; which LLM actually serves the
 specialist is decided by the router/config at runtime, exactly as today. At
-task time, the context builder retrieves top-k published entries (hybrid
-scoring: keyword always, cosine blend when an embedding endpoint is
-configured) under a dedicated
+task time, the context builder retrieves top-k published entries (semantic
+scoring: embedding cosine as the primary signal, keyword as a cheap
+prefilter and loudly-flagged degraded fallback) under a dedicated
 per-tier context budget slice, injected fenced and untrusted-marked —
 advisory context, same treatment as the ✦ companion's inputs. The router's
 capability matrix keeps working unchanged; specialists simply earn better
@@ -119,8 +119,8 @@ them.
 The design must not assume any particular LLM or vendor:
 
 - **All model steps route through the runner layer.** Distillation,
-  judge-verification, eval generation, vision extraction, and optional
-  embeddings are ordinary capability-keyed worker/endpoint calls — they work
+  judge-verification, eval generation, vision extraction, and embeddings
+  are ordinary capability-keyed worker/endpoint calls — they work
   against anything the harness can already drive: local
   OpenAI-compatible endpoints (LM Studio, Ollama), remote providers
   (Anthropic, OpenAI, Groq, …), and coding CLIs. `knowledge/` imports no
@@ -194,11 +194,11 @@ New `src/metaharness/knowledge/` subsystem:
 
 | Module | Responsibility |
 |---|---|
-| `ingest.py` | Fetchers: web page (upgrade `_web_fetch`: HTML→text extraction, size caps, robots/rate-limit courtesy), PDF (text layer + figures/charts/equations, below), arXiv LaTeX-source fast path, local `.md`/`.json` drop-in directory |
+| `ingest.py` | Fetchers: web page (upgrade `_web_fetch`: HTML→text extraction, size caps, robots/rate-limit courtesy), PDF (text layer + figures/charts/equations, below), arXiv LaTeX-source fast path, YouTube lectures via `yt-distill` (below), local `.md`/`.json` drop-in directory |
 | `distill.py` | LLM step: source text → candidate entries against the schema; SchemaGuard-enforced |
 | `verify.py` | Corroboration checker (deterministic), skill `check:` execution via the sandboxed runner, rubric-judge fallback |
 | `store.py` | Pack CRUD, manifest, quarantine/promotion state machine, provenance |
-| `retrieve.py` | Hybrid scoring (keyword + optional embedding cosine) + budgeted selection for context injection |
+| `retrieve.py` | Semantic scoring (embedding cosine primary, keyword prefilter/fallback) + budgeted selection for context injection |
 
 Plus a `knowledge_acquisition` workflow template in
 `workflows/templates.py`: `scope → gather → distill → verify → eval-gate →
@@ -228,6 +228,26 @@ and needs corroboration or second-worker agreement before it can support a
 published claim. Image assets live in the pack with provenance; prompts
 always receive the textual rendering, so serving models never need vision.
 
+**YouTube lecture ingestion** (decision 7): the `youtube` fetcher drives the
+existing `yt-distill` CLI ([lantisprime/youtube-distiller](https://github.com/lantisprime/youtube-distiller),
+optional `[youtube]` extra) rather than reimplementing acquisition.
+`yt-distill analyze` yields `chunks.jsonl` — timestamped, source-linked,
+embedding-sized chunks plus a structured summary record — which enters
+*gather* as pre-chunked source material. `yt-distill slides` yields
+OpenCV-cropped slide/diagram/code frames with ±12 s transcript context
+(`slides.json` + `frames/*.jpg`), which flow into the same vision-worker
+path as PDF figures (figure → description, chart → data table, equation →
+LaTeX; all `extraction: vision` evidence class). Everything upstream of the
+vision step is deterministic — yt-dlp captions / local faster-whisper,
+extractive scoring, classical CV, no LLM — which fits the evidence model:
+raw chunks are the citable source, and entry-writing happens only in
+meta-harness's own distill step. Provenance: entry sources gain an optional
+`locator` (timestamp range / page number), and the reputability tiers gain
+**channel identities** alongside domains (a conference or university channel
+can be `official`/`primary`). The tool already rate-limits and never
+bypasses access controls; cookie-based access stays a user-supplied,
+never-stored input.
+
 Distillation additionally runs a deterministic injection-pattern screen over
 source text and candidate entries; a match quarantines the entry for human
 review regardless of eval results.
@@ -239,17 +259,20 @@ re-scoped after we see the earlier ones work.
 
 1. **M1 — Knowledge store + schemas** (`knowledge/store.py`, entry/manifest
    models, quarantine state machine, provenance, boot loading). Import
-   `memory/knowledge_base/*.md` as the seed pack to prove the format.
-2. **M2 — Retrieval + specialist binding** (`retrieve.py` hybrid scorer —
-   keyword always, cosine blend when an embedding endpoint is configured —
-   declarative specialist spec, `AgentConfig.knowledge_packs`,
-   context-budget slice, fenced injection, helpful/harmful feedback wiring).
-   Value ships here even with hand-authored packs, against any configured
-   worker.
+   `memory/knowledge_base/*.md` and one `yt-distill` `distilled/` lecture
+   as seed packs to prove the format.
+2. **M2 — Retrieval + specialist binding** (`retrieve.py` semantic scorer —
+   embedding cosine primary with keyword prefilter, manifest vectors keyed
+   by embedder model with re-index on embedder swap, loud keyword-only
+   degradation when no embedder is configured — declarative specialist
+   spec, `AgentConfig.knowledge_packs`, context-budget slice, fenced
+   injection, helpful/harmful feedback wiring). Value ships here even with
+   hand-authored packs, against any configured worker.
 3. **M3 — Ingestion** (semantic `web_search` tool with pluggable backends,
    `ingest.py` web/PDF/md fetchers with rich PDF extraction and the arXiv
-   source fast path, `distill.py` with the injection screen, SchemaGuard on
-   output, loud failure paths).
+   source fast path, `youtube` fetcher over `yt-distill` artifacts,
+   `distill.py` with the injection screen, SchemaGuard on output, loud
+   failure paths).
 4. **M4 — Verification + acquisition template** (`verify.py`, reputability
    policy config, `knowledge_acquisition` template; publishing runs in
    strict human-gated mode until M5 lands the eval gate).
@@ -265,10 +288,14 @@ re-scoped after we see the earlier ones work.
 
 ## Decisions (resolved 2026-07-17)
 
-1. **Retrieval — hybrid, embeddings optional.** Keyword scoring always
-   works; when the config declares an embedding endpoint, scores blend
-   keyword + cosine similarity. The embedding endpoint joins the provider
-   abstraction — qualified, never assumed.
+1. **Retrieval — semantic scoring with embeddings** *(revised 2026-07-17)*.
+   Embedding cosine over stored entry vectors is the primary retrieval
+   signal; keyword matching is a cheap prefilter and the loudly-flagged
+   degraded fallback when no embedding endpoint is configured. The embedder
+   is part of the provider abstraction (any OpenAI-compatible embeddings
+   endpoint, local or remote — qualified, never assumed). Pack manifests
+   record which embedder produced each vector; swapping embedders triggers
+   re-indexing, since vectors are never portable across models.
 2. **Web search — native semantic search tool.** Builtin `web_search` with
    pluggable backends (Brave API, self-hosted SearXNG, MCP search servers as
    backends) returning question-ranked passages with provenance, not raw
@@ -287,6 +314,17 @@ re-scoped after we see the earlier ones work.
    different qualified model answers it correctly from the sources alone;
    deterministic answer keys wherever the fact allows. Density default:
    1 recall + 1 application per entry, configurable per pack.
+7. **YouTube lectures — reuse `yt-distill`** *(added 2026-07-17)*. The
+   `youtube-distiller` repo already solves acquisition and deterministic
+   distillation: captions/whisper → timestamped retrieval chunks +
+   extractive summary (`chunks.jsonl`), and classical-CV slide/diagram/code
+   frame extraction with transcript context (`slides.json`, `frames/`).
+   meta-harness consumes those artifacts through a `youtube` fetcher instead
+   of reimplementing; slide images ride the decision-5 vision path. Channel
+   identities extend the reputability tiers; timestamp ranges extend source
+   provenance as `locator`s. Its existing `distilled/` corpus (a dozen
+   agent-engineering lectures) is additional seed material for M1 alongside
+   `memory/knowledge_base/`.
 
 ## Residual risks (tracked, not blocking)
 
