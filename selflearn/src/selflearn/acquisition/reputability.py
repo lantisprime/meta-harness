@@ -51,5 +51,6 @@ DEFAULT_POLICY = ReputabilityPolicy(
                         "rfc-editor.org"}),
     primary=frozenset({"github.com", "anthropic.com", "www.anthropic.com",
                        "openai.com", "www.youtube.com", "youtube.com"}),
-    community=frozenset({"stackoverflow.com", "news.ycombinator.com"}),
+    community=frozenset({"stackoverflow.com", "news.ycombinator.com",
+                         "en.wikipedia.org", "wikipedia.org"}),
 )

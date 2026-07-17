@@ -25,9 +25,11 @@ from pathlib import Path
 from selflearn.acquisition import (
     AcquireContext,
     BraveBackend,
+    DuckDuckGoBackend,
     PluginRegistry,
     SearxngBackend,
     UrllibFetcher,
+    WikipediaBackend,
     builtin_plugins,
 )
 from selflearn.contracts import SourceRef
@@ -99,14 +101,21 @@ class OpenAICompatEmbeddingClient:
 
 
 def _search_backend(args):
-    # Brave API is the preferred backend (--brave-key or BRAVE_API_KEY);
-    # SearXNG is the self-hosted, no-key alternative.
+    """Selection: explicit choice > Brave key > SearXNG url > DuckDuckGo.
+
+    DuckDuckGo is the zero-config default — no key, no subscription.
+    """
+    choice = getattr(args, "search_backend", "auto")
+    if choice == "wikipedia":
+        return WikipediaBackend()
+    if choice == "ddg":
+        return DuckDuckGoBackend()
     brave_key = getattr(args, "brave_key", "") or os.environ.get("BRAVE_API_KEY", "")
     if brave_key:
         return BraveBackend(brave_key)
     if getattr(args, "searxng", ""):
         return SearxngBackend(args.searxng)
-    return None
+    return DuckDuckGoBackend()
 
 
 def _embedder(args):
@@ -225,12 +234,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="sources.json")
     p.add_argument("--tier", default="")
     p.add_argument("--no-network", action="store_true")
+    p.add_argument("--search-backend", default="auto",
+                   choices=["auto", "ddg", "wikipedia"],
+                   help="auto = Brave if keyed, else SearXNG if given, else "
+                        "DuckDuckGo (keyless default); 'wikipedia' uses the "
+                        "official MediaWiki API")
     p.add_argument("--brave-key", default="",
-                   help="Brave Search API key for search: refs (preferred; "
-                        "also read from BRAVE_API_KEY)")
+                   help="optional Brave Search API key (also read from "
+                        "BRAVE_API_KEY)")
     p.add_argument("--searxng", default="",
-                   help="SearXNG instance base url for search: refs "
-                        "(self-hosted, no-key alternative)")
+                   help="self-hosted SearXNG instance base url (free, no key)")
     p.add_argument("--embedding-endpoint", default="",
                    help="OpenAI-compatible base url for SEMANTIC passage "
                         "ranking (keyword fallback without it)")

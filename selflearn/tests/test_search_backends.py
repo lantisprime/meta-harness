@@ -10,7 +10,9 @@ from selflearn.acquisition import (
     AcquireContext,
     AcquisitionError,
     BraveBackend,
+    DuckDuckGoBackend,
     SearxngBackend,
+    WikipediaBackend,
     rank_passages,
 )
 from selflearn.acquisition.plugins import WebPlugin
@@ -80,22 +82,68 @@ def test_brave_backend_sends_token_and_parses():
         BraveBackend("")
 
 
-def test_cli_prefers_brave_and_reads_env_key(monkeypatch):
+DDG_HTML = (
+    '<div><a class="result__a" href="//duckduckgo.com/l/?uddg='
+    'https%3A%2F%2Ffastapi.tiangolo.com%2Fadvanced%2Fevents%2F&amp;rut=x">'
+    'FastAPI events</a>'
+    '<a class="result__a" href="https://direct.example.org/page">direct</a>'
+    '<a class="result__a" href="//duckduckgo.com/l/?uddg='
+    'https%3A%2F%2Ffastapi.tiangolo.com%2Fadvanced%2Fevents%2F">dupe</a></div>'
+).encode()
+
+
+def test_duckduckgo_backend_decodes_redirects_and_dedupes():
+    backend = DuckDuckGoBackend(transport=lambda u, h: DDG_HTML)
+    urls = backend.search("fastapi lifespan", 5)
+    assert urls == ["https://fastapi.tiangolo.com/advanced/events/",
+                    "https://direct.example.org/page"]
+
+
+def test_duckduckgo_no_results_is_loud():
+    backend = DuckDuckGoBackend(transport=lambda u, h: b"<html>captcha</html>")
+    with pytest.raises(AcquisitionError, match="no parseable results"):
+        backend.search("anything", 3)
+
+
+def test_wikipedia_backend_builds_article_urls():
+    def transport(url, headers):
+        assert "srsearch=" in url and "list=search" in url
+        return json.dumps({"query": {"search": [
+            {"title": "FastAPI"}, {"title": "Web framework"}]}}).encode()
+
+    backend = WikipediaBackend(transport=transport)
+    assert backend.search("fastapi", 2) == [
+        "https://en.wikipedia.org/wiki/FastAPI",
+        "https://en.wikipedia.org/wiki/Web_framework"]
+
+
+def test_cli_backend_selection(monkeypatch):
     from argparse import Namespace
     from selflearn.cli import _search_backend
 
-    # explicit flag wins
-    backend = _search_backend(Namespace(brave_key="flag-key", searxng=""))
-    assert isinstance(backend, BraveBackend) and backend.api_key == "flag-key"
-    # BRAVE_API_KEY env var picked up automatically, preferred over searxng
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    def ns(**kw):
+        base = dict(search_backend="auto", brave_key="", searxng="")
+        base.update(kw)
+        return Namespace(**base)
+
+    # zero-config default: DuckDuckGo, no subscription needed
+    assert isinstance(_search_backend(ns()), DuckDuckGoBackend)
+    # explicit choices
+    assert isinstance(_search_backend(ns(search_backend="wikipedia")),
+                      WikipediaBackend)
+    assert isinstance(_search_backend(ns(search_backend="ddg",
+                                         brave_key="ignored")),
+                      DuckDuckGoBackend)
+    # auto honors brave key (flag or env) then searxng
+    b = _search_backend(ns(brave_key="flag-key"))
+    assert isinstance(b, BraveBackend) and b.api_key == "flag-key"
     monkeypatch.setenv("BRAVE_API_KEY", "env-key")
-    backend = _search_backend(Namespace(brave_key="", searxng="https://sx.local"))
-    assert isinstance(backend, BraveBackend) and backend.api_key == "env-key"
-    # searxng only when no brave key anywhere
+    assert isinstance(_search_backend(ns()), BraveBackend)
     monkeypatch.delenv("BRAVE_API_KEY")
-    backend = _search_backend(Namespace(brave_key="", searxng="https://sx.local"))
-    assert isinstance(backend, SearxngBackend)
-    assert _search_backend(Namespace(brave_key="", searxng="")) is None
+    assert isinstance(_search_backend(ns(searxng="https://sx.local")),
+                      SearxngBackend)
 
 
 def test_web_plugin_search_end_to_end_with_semantic_ranking(tmp_path):
