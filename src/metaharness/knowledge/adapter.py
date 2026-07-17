@@ -19,6 +19,26 @@ import httpx
 from metaharness.core.types import Task
 
 
+# Worker-agent archetype system prompts for the acquisition workflow roles
+# (plan decision 9). Registered as AgentConfig.system_prompt presets; the
+# router still decides which model serves each role.
+KNOWLEDGE_ARCHETYPES: dict[str, str] = {
+    "knowledge-scout": (
+        "You are a knowledge scout. Turn a research goal into a syllabus: "
+        "subtopics, the key questions each must answer, and a source-type "
+        "strategy per subtopic (official docs, papers, lectures). Propose "
+        "concrete source refs (URLs, arXiv ids, search queries). Scale "
+        "effort to the stated budget. Output JSON only; never fetch "
+        "anything yourself."),
+    "knowledge-distiller": (
+        "You are a knowledge distiller. Given source material, produce "
+        "compact entries whose every claim is traceable to the sources — "
+        "never add facts from memory. Prefer few high-value entries over "
+        "many thin ones. Output JSON matching the requested schema; bodies "
+        "under 400 words."),
+}
+
+
 class OpenAICompatEmbedding:
     """selflearn EmbeddingPort over an OpenAI-compatible embeddings endpoint."""
 

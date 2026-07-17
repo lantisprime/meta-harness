@@ -9,6 +9,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+pdf = ["pypdf>=4"]
+
+[project.scripts]
+selflearn = "selflearn.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -31,6 +31,14 @@ from selflearn.ports import (
     ModelPort,
     ProvenancePort,
 )
+from selflearn.acquisition import (
+    AcquireContext,
+    AcquisitionError,
+    PluginRegistry,
+    ReputabilityPolicy,
+    builtin_plugins,
+)
+from selflearn.distillation import DistillationError, Distiller, injection_screen
 from selflearn.learning import MarkReport, apply_outcome
 from selflearn.retrieval import (
     InjectionBlock,
@@ -53,5 +61,8 @@ __all__ = [
     "InjectionBlock", "RetrievalResult", "Retriever", "render_injection_block",
     "SpecialistSpec", "load_spec", "save_spec",
     "MarkReport", "apply_outcome",
+    "AcquireContext", "AcquisitionError", "PluginRegistry",
+    "ReputabilityPolicy", "builtin_plugins",
+    "DistillationError", "Distiller", "injection_screen",
     "__version__",
 ]

@@ -44,9 +44,11 @@ def open_store(root: Path | None = None):
 
 
 from metaharness.knowledge.adapter import (  # noqa: E402
+    KNOWLEDGE_ARCHETYPES,
     OpenAICompatEmbedding,
     make_knowledge_hints,
 )
 
 __all__ = ["DEFAULT_KNOWLEDGE_ROOT", "SelflearnUnavailable", "require_selflearn",
-           "open_store", "OpenAICompatEmbedding", "make_knowledge_hints"]
+           "open_store", "KNOWLEDGE_ARCHETYPES", "OpenAICompatEmbedding",
+           "make_knowledge_hints"]

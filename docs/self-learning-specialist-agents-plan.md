@@ -659,7 +659,9 @@ trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
    context-budget slice, fenced injection, helpful/harmful feedback
    wiring). Value ships here even with hand-authored packs, against any
    configured worker.
-3. **M3 — Acquisition + distillation modules** (`selflearn/acquisition/`:
+3. **M3 — Acquisition + distillation modules** *(shipped 2026-07-17:
+   73 selflearn tests + 6 adapter tests; CLI end-to-end on real corpora;
+   finding 7 fixed live)* (`selflearn/acquisition/`:
    `SourcePlugin` protocol, registry with allowlisted entry points, and the
    built-in `web`, `pdf`, `arxiv`, `youtube`, `local` plugins;
    `selflearn/distillation/` with SchemaGuard and the injection screen; the
@@ -799,6 +801,12 @@ six under-specifications, resolved as follows:
    `record_type` in `chunks.jsonl`; the `youtube`/`local` plugins must
    tolerate yt-distill schema versions (absent `record_type` ⇒ transcript
    chunk).
+7. **Injection-screen vocabulary false positives** *(M3 real-data
+   finding)*. AI-engineering sources legitimately discuss "system prompt"
+   and "instructions" — a naive topic pattern quarantined a clean
+   harness-engineering lecture. Screen patterns must target imperative
+   injection phrasing ("reveal your system prompt", "ignore previous
+   instructions"), never domain vocabulary; pinned by regression test.
 
 ## Residual risks (tracked, not blocking)
 

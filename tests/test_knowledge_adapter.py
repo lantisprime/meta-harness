@@ -88,6 +88,12 @@ def test_knowledge_hints_flow_into_executor_advice(store):
     assert "kn-fastapi-lifespan" in boundaries
 
 
+def test_knowledge_archetypes_exist_for_acquisition_roles():
+    from metaharness.knowledge import KNOWLEDGE_ARCHETYPES
+    assert set(KNOWLEDGE_ARCHETYPES) == {"knowledge-scout", "knowledge-distiller"}
+    assert "traceable to the sources" in KNOWLEDGE_ARCHETYPES["knowledge-distiller"]
+
+
 def test_embedding_binding_validates_config():
     with pytest.raises(ValueError, match="base_url and model"):
         OpenAICompatEmbedding(base_url="", model="")
