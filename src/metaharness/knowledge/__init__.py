@@ -1,0 +1,40 @@
+"""meta-harness adapter for the standalone ``selflearn`` library (M1 stub).
+
+This package is the ONLY place harness and library meet
+(docs/self-learning-specialist-agents-plan.md, decision 11). As milestones
+land it will bind the five selflearn ports to harness machinery:
+
+- ``ModelPort``      -> runner layer / tier router          (M2+)
+- ``EmbeddingPort``  -> configured embedding endpoint       (M2)
+- ``ExecutionPort``  -> evals/execution.py sandbox          (M4)
+- ``ProvenancePort`` -> hash-chained provenance log         (M2)
+- ``IdentityPort``   -> Ed25519 worker identities           (M5)
+
+For M1 it only locates the library and its default store path, loudly.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+DEFAULT_KNOWLEDGE_ROOT = Path.home() / ".metaharness" / "knowledge"
+
+
+class SelflearnUnavailable(RuntimeError):
+    """selflearn is not installed in this environment."""
+
+
+def require_selflearn():
+    """Import and return the selflearn package, or fail loudly with the fix."""
+    try:
+        import selflearn
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise SelflearnUnavailable(
+            "the selflearn library is not installed; run "
+            "`pip install -e ./selflearn` from the repository root") from exc
+    return selflearn
+
+
+def open_store(root: Path | None = None):
+    """Open the harness's knowledge store at the default location."""
+    selflearn = require_selflearn()
+    return selflearn.PackStore(root or DEFAULT_KNOWLEDGE_ROOT)

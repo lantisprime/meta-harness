@@ -640,7 +640,10 @@ with its contract types and tests. Module paths live in the standalone
 `selflearn` distribution; anything touching `AgentConfig`, templates, the
 trust plane, or the UI is adapter-side (`src/metaharness/knowledge/`).
 
-1. **M1 — Package skeleton + store module** (`selflearn/` distribution:
+1. **M1 — Package skeleton + store module** *(shipped 2026-07-17:
+   `selflearn/` with 26 passing tests; both real corpora seeded and
+   round-tripped; meta-harness suite unaffected at 1062 passed)*
+   (`selflearn/` distribution:
    pyproject, contract value objects, the five port Protocols, adapter
    stub; `selflearn/store/`: entry/manifest models, quarantine state
    machine, provenance, boot loading). Import `memory/knowledge_base/*.md`
