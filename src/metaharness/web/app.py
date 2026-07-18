@@ -216,6 +216,9 @@ class AddWorkerRequest(BaseModel):
     task_types: list[str] = []
     roles: list[str] = []
     capabilities: list[str] = []
+    # selflearn packs retrieved into this agent's task prompts (the
+    # self-learning specialist binding; see the Knowledge tab)
+    knowledge_packs: list[str] = []
     temperature: float = 0.2
     thinking: Optional[bool] = None
     max_tokens: Optional[int] = 4000
@@ -1612,6 +1615,7 @@ def create_app(state: HarnessState) -> FastAPI:
             model=req.model, system_prompt=req.system_prompt,
             task_types=req.task_types, temperature=req.temperature,
             roles=req.roles, capabilities=req.capabilities,
+            knowledge_packs=req.knowledge_packs,
             max_tokens=req.max_tokens, thinking=req.thinking, cli=req.cli,
             # mock has no timeout to apply it to; a direct API caller bypasses
             # the wizard's JS guards, so drop it server-side too (issue #2
@@ -1662,6 +1666,11 @@ def create_app(state: HarnessState) -> FastAPI:
         if req.persist:
             state.config.upsert_agent(agent)
             state.save_config()
+        elif req.knowledge_packs:
+            state.ephemeral_knowledge_bindings[req.worker_id] = (
+                tuple(req.knowledge_packs), tuple(req.task_types))
+        if req.knowledge_packs:
+            state.refresh_knowledge_hints()
         return state.registry.get(req.worker_id).model_dump(mode="json")
 
     @app.delete("/api/workers/{worker_id}")
@@ -1688,6 +1697,8 @@ def create_app(state: HarnessState) -> FastAPI:
         removed = state.config.remove_agent(worker_id)
         if removed:
             state.save_config()
+        if state.ephemeral_knowledge_bindings.pop(worker_id, None) or removed:
+            state.refresh_knowledge_hints()
         return {"worker_id": worker_id, "deactivated": True, "config_removed": removed}
 
     @app.post("/api/test_worker")
@@ -1931,6 +1942,48 @@ def create_app(state: HarnessState) -> FastAPI:
              "annotations": t.annotations}
             for t in state.tools.all()
         ]
+
+    # -- knowledge (selflearn) --------------------------------------------------------
+
+    @app.get("/api/knowledge/graph")
+    async def knowledge_graph(packs: Optional[str] = None) -> dict[str, Any]:
+        """Read-only graph projection of the selflearn knowledge store:
+        packs, topics, entries, procedure steps, source domains, and task
+        types with their edges. Degrades to {"available": false, reason}
+        instead of erroring when selflearn or a store is absent, so the
+        dashboard can render setup guidance."""
+        def project() -> dict[str, Any]:
+            try:
+                from metaharness.knowledge import (
+                    DEFAULT_KNOWLEDGE_ROOT,
+                    open_store,
+                )
+                from selflearn.graph import build_graph, to_json
+            except Exception as exc:
+                return {"available": False,
+                        "reason": f"selflearn is not installed: {exc}"}
+            if not DEFAULT_KNOWLEDGE_ROOT.exists():
+                return {"available": False,
+                        "reason": "no knowledge store yet at "
+                                  f"{DEFAULT_KNOWLEDGE_ROOT} — seed or "
+                                  "acquire a pack first (try: selflearn "
+                                  "wizard)"}
+            try:
+                store = open_store()
+            except Exception as exc:
+                return {"available": False,
+                        "reason": f"store failed to load: {exc}; run "
+                                  f"'selflearn doctor --store "
+                                  f"{DEFAULT_KNOWLEDGE_ROOT} --fix'"}
+            selected = [p for p in (packs or "").split(",") if p] or None
+            try:
+                graph = build_graph(store, packs=selected)
+            except ValueError as exc:      # unknown pack filter
+                return {"available": False, "reason": str(exc)}
+            return {"available": True,
+                    "root": str(DEFAULT_KNOWLEDGE_ROOT),
+                    "packs": store.packs(), **to_json(graph)}
+        return await asyncio.to_thread(project)
 
     # -- routing / learning -----------------------------------------------------------
 

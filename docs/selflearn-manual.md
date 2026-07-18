@@ -197,13 +197,28 @@ deleted); regenerable artifacts (vectors) are reset; unvalidated probes
 are retired. The run ends with a real `PackStore` load to prove the store
 boots — exit 0 only when everything is repaired and the store loads.
 
+### `selflearn graph [--packs P ...] [--format json|dot|mermaid] [--out FILE]`
+Export a **read-only graph projection** of the store — the graph that is
+already implicit in the pack files, materialized on demand (nothing is
+written, nothing mutates). Nodes: packs, topics, entries, workflow
+procedure steps, registrable source domains, and task types. Edges:
+`claims` (pack→topic, with coverage state), `contains` (topic→entry),
+`cites` (entry→domain, with source tier), `applies_to` (entry→task type,
+carrying helpful/harmful evidence weights), `has_step` and `depends_on`
+(the executable plan DAG inside workflow entries). Formats: `json` for
+machines (this feeds the meta-harness web UI's Knowledge tab), `dot` for
+Graphviz, `mermaid` for docs. Uses: blast-radius questions ("which
+published claims rest on this one domain?"), cross-pack shared sources
+and topics, and spotting graph-isolated entries (single source, no
+marks) as deprecation candidates. Empty store exits 1.
+
 ### `selflearn wizard [--store PATH]`
 Interactive, wizard-driven front door to everything above: shows a store
 status snapshot with the top `next` suggestions, then walks each workflow
 (acquire/gather/distill, seeding, verify/approve/release, retrieve,
-status, next, doctor) prompting for every parameter with defaults. Before
-running anything it prints the exact equivalent non-interactive command,
-so the wizard teaches the plain CLI rather than replacing it.
+status, next, doctor, graph) prompting for every parameter with defaults.
+Before running anything it prints the exact equivalent non-interactive
+command, so the wizard teaches the plain CLI rather than replacing it.
 
 ---
 
@@ -486,6 +501,15 @@ from metaharness.knowledge import (
   the hints callable from `SpecialistSpec`s and pass it to `TaskExecutor`
   alongside `playbook_hints`. Injected blocks land in task boundaries,
   fenced and marked untrusted-advisory.
+- **Binding from the web UI**: the Settings → agent wizard has a
+  *Knowledge packs* field (comma-separated pack names). `metaharness serve`
+  wires every bound agent's packs into the executor's advice path
+  automatically — retrieval runs per task against the store at
+  `~/.metaharness/knowledge` and re-wires live when agents are added or
+  removed. Keyword mode by default; set the
+  `knowledge_embedding_endpoint` and `knowledge_embedding_model` settings
+  in config.json for semantic scoring. Bound packs with no store degrade
+  loudly (a warning, no injection) instead of failing tasks.
 - **The `knowledge_acquisition` workflow template**: scope → gather →
   distill → verify, with a post-artifact HITL gate on the verification
   report. Workers drive it through `knowledge_gather`,
@@ -497,6 +521,13 @@ from metaharness.knowledge import (
   into a WorkflowSpec (with `seeded_by` attribution in step boundaries for
   plan-level marks); a weak match returns the entry's prose as planner
   guidance.
+- **The web UI Knowledge tab**: `metaharness serve` exposes
+  `GET /api/knowledge/graph` (the `selflearn graph` JSON projection of the
+  store at `~/.metaharness/knowledge`) and renders it as an interactive
+  map in the dashboard's **Knowledge** view — packs, topics, entries,
+  source domains, and task types, with a pack filter and per-node detail
+  on click. Read-only; when selflearn or the store is absent it shows
+  setup guidance instead of erroring.
 
 ---
 

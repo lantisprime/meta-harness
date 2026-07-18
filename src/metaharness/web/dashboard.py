@@ -352,6 +352,7 @@ dialog::backdrop{background:rgba(20,24,34,.28)}
     <button id="nav-wizard" onclick="showView('wizard')">Run</button>
     <button id="nav-settings" onclick="showView('settings')">Settings</button>
     <button id="nav-console" onclick="showView('console')">Console</button>
+    <button id="nav-knowledge" onclick="showView('knowledge')">Knowledge</button>
     <button id="nav-help" onclick="showView('help')">Help</button>
   </nav>
   <div class="spacer"></div>
@@ -437,6 +438,32 @@ dialog::backdrop{background:rgba(20,24,34,.28)}
     <div class="card wide"><h2>Under the hood</h2>
       <div class="sub">Live timing of recent operations, straight from the tracer — intentionally technical</div>
       <div id="spans" class="empty">loading…</div></div>
+  </div>
+</div>
+
+<!-- ================= KNOWLEDGE ================= -->
+<div id="view-knowledge" class="view" style="display:none">
+  <div class="eyebrow">Knowledge graph</div>
+  <h1 class="greet">What the specialists know, as a map.</h1>
+  <div class="guide"><div class="fx">ƒ</div><div><b>Why this page exists</b>
+    <p>Every entry in the selflearn store, the packs and topics it lives in, the web
+    domains its claims rest on, and the task types it serves — projected read-only,
+    nothing here mutates the store. Click a node to inspect it. Use it to spot
+    single-source claims, shared sources across packs, and isolated entries.</p></div></div>
+  <div id="kg-tiles" class="tiles" style="grid-template-columns:repeat(4,1fr)"></div>
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <label class="small" style="display:flex;gap:6px;align-items:center">Pack
+        <select id="kg-pack" onchange="renderKnowledge(true)"
+          style="font-family:var(--mono);font-size:12.5px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:#fff">
+          <option value="">all packs</option></select></label>
+      <button class="btn ghost" onclick="renderKnowledge(true)">Refresh</button>
+      <span class="small dim mono" id="kg-stats"></span>
+      <div class="spacer"></div>
+      <span id="kg-legend" class="small dim"></span>
+    </div>
+    <div id="kg-canvas"><div class="empty">loading…</div></div>
+    <div id="kg-detail" class="small" style="margin-top:12px"></div>
   </div>
 </div>
 
@@ -669,13 +696,14 @@ function showView(v, force=false){
   }
   if(!force && currentView === 'wizard' && v !== 'wizard' && wiz.dirty) resetWizard(false, true);
   currentView = v;
-  for(const name of ['home','library','wizard','settings','console','help']){
+  for(const name of ['home','library','wizard','settings','console','knowledge','help']){
     document.getElementById('view-' + name).style.display = v === name ? '' : 'none';
     document.getElementById('nav-' + name).classList.toggle('on', v === name);
   }
   if(v === 'home') renderHome();
   if(v === 'library') renderLibrary();
   if(v === 'console') refreshConsole();
+  if(v === 'knowledge') renderKnowledge();
   if(v === 'settings') renderSettings(true);
   document.getElementById('settings-return').style.display = v === 'settings' && wiz.repairReturn ? '' : 'none';
   if(v === 'wizard' && wiz.step === 0) renderAgentsStep();  // agents may have changed
@@ -2930,7 +2958,7 @@ function renderSettingsHome(){
       <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
         ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}
         ${a.timeout_s ? ' · timeout ' + a.timeout_s + 's' : ''}</div>
-      <div class="small dim">Roles: ${esc((a.roles || []).join(', ') || 'any')} · Capabilities: ${esc((a.capabilities || []).join(', ') || 'general')}</div></div>
+      <div class="small dim">Roles: ${esc((a.roles || []).join(', ') || 'any')} · Capabilities: ${esc((a.capabilities || []).join(', ') || 'general')}${(a.knowledge_packs || []).length ? ' · 📚 knowledge: ' + esc(a.knowledge_packs.join(', ')) : ''}</div></div>
       <button class="pill" data-act="agent_edit" data-id="${i}">Edit</button>
       <button class="pill" data-act="agent_del" data-id="${esc(a.worker_id)}">Remove</button></div>`).join('')
     : '<div class="empty">no saved agents — the ones running now were auto-discovered and vanish when the server restarts</div>';
@@ -3445,6 +3473,7 @@ function startAgentWizard(a){
     system_prompt: a ? a.system_prompt : '', archetype: '',
     roles: a ? (a.roles || []).slice() : [],
     capabilities: a ? (a.capabilities || []).slice() : [],
+    knowledge_packs: a ? (a.knowledge_packs || []).slice() : [],
     timeout_s: a ? (a.timeout_s ?? null) : null,
     probed: [], test: null };
   if(SET.cfg) renderSettings(); else showView('settings');
@@ -3530,6 +3559,12 @@ function renderAgentWizard(){
         <span style="flex:1"><label for="aw-roles">Roles this agent can take</label><input id="aw-roles" value="${esc(w.roles.join(', '))}" placeholder="reviewer, implementer"></span>
         <span style="flex:1"><label for="aw-capabilities">Capability IDs</label><input id="aw-capabilities" value="${esc(w.capabilities.join(', '))}" placeholder="workspace.write, tests.run"></span></div>
       <div class="small dim">Comma-separated. Automatic assignment uses these exact IDs to match a stage's role and capability requirements.</div>
+      <div class="field"><label for="aw-packs">Knowledge packs — make this a self-learning specialist</label>
+        <input id="aw-packs" value="${esc(w.knowledge_packs.join(', '))}" placeholder="fastapi, security-hardening">
+        <span class="small dim">Comma-separated selflearn pack names. Published entries are retrieved
+        per task and injected as fenced, untrusted-advisory field notes; verified outcomes mark them
+        helpful/harmful so the packs keep learning. Build packs with
+        <span class="mono">selflearn wizard</span>; browse them in the Knowledge tab.</span></div>
       <div class="field"><label>System prompt — start from an archetype, then tailor it</label>
         <div class="pillrow">${Object.entries(PROMPT_ARCHETYPES).map(([k, a]) =>
           `<button class="pill ${w.archetype === k ? 'on' : ''}" onclick="agentArchetype('${k}')">${a.label}</button>`).join('')}</div>
@@ -3552,7 +3587,8 @@ function renderAgentWizard(){
       <div class="hint-panel"><b>About to ${w.editing ? 'update' : 'register'}</b>
         <span class="kv">${esc(w.worker_id)} · ${esc(w.tier)} · ${esc(w.kind)}
         ${w.kind === 'coding_cli' ? '· ' + esc(w.cli) : '· ' + esc(w.provider || w.base_url) + (w.model ? ' · ' + esc(w.model) : '')}
-        ${w.timeout_s ? ' · timeout ' + w.timeout_s + 's' : ''}</span></div>
+        ${w.timeout_s ? ' · timeout ' + w.timeout_s + 's' : ''}
+        ${w.knowledge_packs.length ? ' · knowledge: ' + esc(w.knowledge_packs.join(', ')) : ''}</span></div>
       <div style="display:flex;gap:10px;align-items:center">
         <button class="btn ghost" onclick="agentTest()">Test</button>
         <span class="small" id="aw-test">${w.test === null ? '' : w.test.ok
@@ -3609,6 +3645,7 @@ function agentCapture(){
   const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
   const roles=grab('aw-roles'); if(roles !== null) w.roles=roles.split(',').map(x=>x.trim()).filter(Boolean);
   const capabilities=grab('aw-capabilities'); if(capabilities !== null) w.capabilities=capabilities.split(',').map(x=>x.trim()).filter(Boolean);
+  const packs=grab('aw-packs'); if(packs !== null) w.knowledge_packs=packs.split(',').map(x=>x.trim()).filter(Boolean);
   const timeout = grab('aw-timeout');
   if(timeout !== null){
     const n = parseFloat(timeout);
@@ -3667,7 +3704,8 @@ async function agentSave(){
   }
   const r = await post('/api/workers', {worker_id: w.worker_id, tier: w.tier, kind: w.kind,
     provider: w.provider, base_url: w.provider ? '' : w.base_url, model: w.model,
-    system_prompt: w.system_prompt, cli: w.cli, roles:w.roles, capabilities:w.capabilities, persist: true,
+    system_prompt: w.system_prompt, cli: w.cli, roles:w.roles, capabilities:w.capabilities,
+    knowledge_packs: w.knowledge_packs, persist: true,
     // a timeout entered before a kind switch to mock must not silently
     // reach a kind that has no timeout to apply it to (issue #2)
     ...(w.timeout_s && w.kind !== 'mock' ? {timeout_s: w.timeout_s} : {})});
@@ -3676,6 +3714,137 @@ async function agentSave(){
   ASSIGNMENT_WORKERS=[]; ASSIGNMENT_WORKERS_LOADED=false;
   SET.agentWiz = null;
   renderSettings(true);
+}
+
+/* ---------- knowledge graph (read-only selflearn projection) ---------- */
+const KG = {data: null};
+const KG_COLORS = {pack:'#0071e3', topic:'#8b5cf6', entry:'#248a3d',
+                   step:'#b0670a', domain:'#c1121f', task_type:'#0e7490'};
+
+async function renderKnowledge(force=false){
+  const canvas = document.getElementById('kg-canvas');
+  if(!KG.data || force){
+    const pack = document.getElementById('kg-pack').value;
+    canvas.innerHTML = '<div class="empty">loading…</div>';
+    document.getElementById('kg-detail').innerHTML = '';
+    try{
+      KG.data = await get('/api/knowledge/graph' + (pack ? '?packs=' + encodeURIComponent(pack) : ''));
+    }catch(e){ KG.data = {available:false, reason:'request failed: ' + e}; }
+  }
+  const d = KG.data;
+  if(!d || !d.available){
+    document.getElementById('kg-tiles').innerHTML = '';
+    document.getElementById('kg-stats').textContent = '';
+    canvas.innerHTML = `<div class="empty">${esc((d && d.reason) || 'knowledge store unavailable')}</div>`;
+    return;
+  }
+  const sel = document.getElementById('kg-pack');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">all packs</option>' +
+    (d.packs || []).map(p => `<option${p === cur ? ' selected' : ''}>${esc(p)}</option>`).join('');
+  const s = d.stats || {};
+  document.getElementById('kg-tiles').innerHTML = [
+    ['Packs', s.pack || 0], ['Entries', s.entry || 0],
+    ['Source domains', s.domain || 0], ['Task types', s.task_type || 0],
+  ].map(([l, v]) => `<div class="card" style="padding:14px 18px"><div class="eyebrow">${l}</div>` +
+       `<div class="mono" style="font-size:24px;margin-top:3px">${v}</div></div>`).join('');
+  document.getElementById('kg-stats').textContent = `${s.nodes || 0} nodes · ${s.edges || 0} edges`;
+  document.getElementById('kg-legend').innerHTML = Object.entries(KG_COLORS).map(([k, c]) =>
+    `<span style="margin-left:10px;white-space:nowrap"><span style="display:inline-block;width:9px;height:9px;` +
+    `border-radius:99px;background:${c};margin-right:4px"></span>${k.replace('_', ' ')}</span>`).join('');
+  drawKnowledgeGraph(d);
+}
+
+function drawKnowledgeGraph(d){
+  const canvas = document.getElementById('kg-canvas');
+  const nodes = d.nodes, edges = d.edges;
+  if(!nodes.length){
+    canvas.innerHTML = '<div class="empty">the store is empty — seed or acquire a pack first (try: selflearn wizard)</div>';
+    return;
+  }
+  if(nodes.length > 700){
+    canvas.innerHTML = `<div class="empty">${nodes.length} nodes is too many to draw at once — ` +
+      `filter to one pack above, or export with <span class="mono">selflearn graph</span></div>`;
+    return;
+  }
+  const W = Math.max(640, canvas.clientWidth || 980);
+  const H = Math.max(440, Math.min(760, 300 + nodes.length * 2));
+  const idx = {}; nodes.forEach((n, i) => idx[n.id] = i);
+  const deg = nodes.map(() => 0);
+  const links = [];
+  for(const e of edges){
+    const a = idx[e.src], b = idx[e.dst];
+    if(a === undefined || b === undefined) continue;
+    links.push([a, b, e]); deg[a]++; deg[b]++;
+  }
+  // deterministic layout: seeded start + a small force relaxation
+  let seed = 42;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const px = nodes.map(() => W * (.12 + .76 * rnd()));
+  const py = nodes.map(() => H * (.12 + .76 * rnd()));
+  const vx = nodes.map(() => 0), vy = nodes.map(() => 0);
+  const iters = nodes.length > 250 ? 130 : 230, rep = 1900, spring = .03, len = 72;
+  for(let it = 0; it < iters; it++){
+    const cool = 1 - it / iters;
+    for(let i = 0; i < nodes.length; i++) for(let j = i + 1; j < nodes.length; j++){
+      let dx = px[i] - px[j], dy = py[i] - py[j];
+      const d2 = dx * dx + dy * dy || .01;
+      if(d2 > 36000) continue;
+      const dd = Math.sqrt(d2), f = rep / d2;
+      dx /= dd; dy /= dd;
+      vx[i] += dx * f; vy[i] += dy * f; vx[j] -= dx * f; vy[j] -= dy * f;
+    }
+    for(const [a, b] of links){
+      let dx = px[b] - px[a], dy = py[b] - py[a];
+      const dd = Math.sqrt(dx * dx + dy * dy) || .01, f = spring * (dd - len);
+      dx /= dd; dy /= dd;
+      vx[a] += dx * f; vy[a] += dy * f; vx[b] -= dx * f; vy[b] -= dy * f;
+    }
+    for(let i = 0; i < nodes.length; i++){
+      vx[i] += (W / 2 - px[i]) * .0025; vy[i] += (H / 2 - py[i]) * .0025;
+      px[i] += Math.max(-14, Math.min(14, vx[i])) * cool;
+      py[i] += Math.max(-14, Math.min(14, vy[i])) * cool;
+      vx[i] *= .5; vy[i] *= .5;
+      px[i] = Math.max(16, Math.min(W - 16, px[i]));
+      py[i] = Math.max(16, Math.min(H - 16, py[i]));
+    }
+  }
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--hair);border-radius:12px">`;
+  for(const [a, b, e] of links){
+    const dash = (e.kind === 'cites' || e.kind === 'applies_to') ? ' stroke-dasharray="3 3"' : '';
+    svg += `<line x1="${px[a].toFixed(1)}" y1="${py[a].toFixed(1)}" x2="${px[b].toFixed(1)}" ` +
+           `y2="${py[b].toFixed(1)}" stroke="#c9c9ce" stroke-width="1"${dash}/>`;
+  }
+  nodes.forEach((n, i) => {
+    const r = n.kind === 'pack' ? 13 : n.kind === 'entry' ? 8 : 5.5 + Math.min(4, deg[i] * .3);
+    const muted = n.status === 'deprecated' || n.quarantined;
+    svg += `<circle cx="${px[i].toFixed(1)}" cy="${py[i].toFixed(1)}" r="${r}" ` +
+           `fill="${KG_COLORS[n.kind] || '#6e6e73'}" opacity="${muted ? .35 : .92}" ` +
+           `stroke="#fff" stroke-width="1.5" style="cursor:pointer" onclick="kgSelect(${i})">` +
+           `<title>${esc(n.label)} (${n.kind.replace('_', ' ')})</title></circle>`;
+    if(n.kind === 'pack' || n.kind === 'domain' || n.kind === 'task_type')
+      svg += `<text x="${px[i].toFixed(1)}" y="${(py[i] - r - 4).toFixed(1)}" text-anchor="middle" ` +
+             `font-size="10" fill="#6e6e73" font-family="IBM Plex Mono,monospace">${esc(n.label)}</text>`;
+  });
+  svg += '</svg>';
+  canvas.innerHTML = svg;
+}
+
+function kgSelect(i){
+  const d = KG.data, n = d.nodes[i];
+  const label = id => { const m = d.nodes.find(x => x.id === id); return m ? `${m.label} (${m.kind.replace('_',' ')})` : id; };
+  const nb = [];
+  for(const e of d.edges){
+    if(e.src === n.id) nb.push(`${e.kind.replace('_', ' ')} → ${label(e.dst)}`);
+    else if(e.dst === n.id) nb.push(`${label(e.src)} → ${e.kind.replace('_', ' ')}`);
+  }
+  const attrs = Object.entries(n).filter(([k]) => !['id', 'kind', 'label'].includes(k))
+    .map(([k, v]) => `${k.replace('_', ' ')}: ${v}`).join(' · ');
+  document.getElementById('kg-detail').innerHTML =
+    `<b>${esc(n.label)}</b> <span class="dim">(${n.kind.replace('_', ' ')})</span>` +
+    (attrs ? `<br><span class="dim">${esc(attrs)}</span>` : '') +
+    (nb.length ? '<br>' + nb.slice(0, 30).map(esc).join('<br>') +
+      (nb.length > 30 ? `<br><span class="dim">…and ${nb.length - 30} more connections</span>` : '') : '');
 }
 
 setStep(0);        // pre-render the wizard so switching to Run is instant
