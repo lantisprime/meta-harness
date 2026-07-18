@@ -55,6 +55,28 @@ class LearningConfig:
     max_failures: int = 500          # FIFO cap on retained failure evidence
 
 
+def parse_state_data(data) -> tuple[list, dict[str, int]]:
+    """Structural shape check for learner-state.json content: returns
+    ``(raw_failure_records, backoff)`` or raises ``ValueError`` on any shape
+    the Learner cannot load. The doctor validates through this same
+    function, so everything that would brick ``Learner.__init__`` is
+    detectable (and repairable) — not just invalid JSON. Per-record
+    contract tolerance on the failures stays in ``Learner._load_state``."""
+    if not isinstance(data, dict):
+        raise ValueError("learner state is not a JSON object")
+    backoff_raw = data.get("backoff", {})
+    if not isinstance(backoff_raw, dict):
+        raise ValueError("'backoff' is not an object")
+    try:
+        backoff = {str(k): int(v) for k, v in backoff_raw.items()}
+    except (TypeError, ValueError):
+        raise ValueError("'backoff' values are not integers")
+    failures = data.get("failures", [])
+    if not isinstance(failures, list):
+        raise ValueError("'failures' is not a list")
+    return failures, backoff
+
+
 def label_topic(retriever, packs: list[str], text: str,
                 threshold: float = 0.08) -> str:
     """Deterministic topic labeling for TaskOutcome.topic: the coverage-map
@@ -91,11 +113,11 @@ class Learner:
     def _load_state(self) -> None:
         if not self.state_path.exists():
             return
-        data = json.loads(self.state_path.read_text())
-        self._backoff = {str(k): int(v) for k, v in data.get("backoff", {}).items()}
+        failures_raw, self._backoff = parse_state_data(
+            json.loads(self.state_path.read_text()))
         self._failures = []
         skipped = 0
-        for f in data.get("failures", []):
+        for f in failures_raw:
             # Migration tolerance (review finding): records persisted under
             # an older contract must not brick the learning loop — skip
             # individually-invalid records loudly instead of dying in
@@ -116,9 +138,13 @@ class Learner:
                     warnings.warn(
                         f"learner-state {self.state_path}: skipping records "
                         f"invalid under the current contract (first: {exc}); "
-                        "evidence from them is lost", stacklevel=2)
-        if skipped:
-            self._save_state()      # rewrite so the skips happen once
+                        "they stay on disk until the next state save",
+                        stacklevel=2)
+        # Deliberately no rewrite here: loading must be read-only, because
+        # merely *viewing* advice ('selflearn next', the wizard status
+        # screen) constructs a Learner — a load-time rewrite would make
+        # looking at the store destroy the skipped records. They are
+        # dropped only when a real mutation (observe/gap sweep) saves.
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)

@@ -70,8 +70,12 @@ def test_stale_learner_state_skips_invalid_records_loudly(tmp_path):
         learner = Learner(store)
     assert [f.task_id for f in learner._failures] == ["ok"]
     assert learner._backoff == {"fastapi:x": 1}
-    # rewritten so the warning fires once
-    Learner(store)   # no warning expected — pytest.warns above scoped it
+    # loading is read-only: the skipped records stay on disk (merely
+    # viewing advice must never destroy evidence), so a reload warns again
+    on_disk = json.loads((store.root / "learner-state.json").read_text())
+    assert len(on_disk["failures"]) == 2
+    with pytest.warns(UserWarning, match="skipping records"):
+        Learner(store)
 
 
 # -- F3: lazy re-index on retrieve (finding 3) -------------------------------

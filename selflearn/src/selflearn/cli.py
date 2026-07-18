@@ -336,7 +336,7 @@ def cmd_next(args) -> int:
         print(f"store failed to load: {exc}", file=sys.stderr)
         print(f"diagnose and repair with: selflearn doctor "
               f"--store {args.store} --fix", file=sys.stderr)
-        return 1
+        return 2      # a broken store is an error, per the exit contract
     print(f"next best actions for {args.store}:")
     print(render_suggestions(suggest_actions(store)))
     return 0

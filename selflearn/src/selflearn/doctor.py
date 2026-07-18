@@ -33,14 +33,14 @@ from selflearn.contracts import (
     ENTRY_STATUSES,
     CandidateEntry,
     ContractError,
-    EntrySource,
     Probe,
-    ProcedureStep,
 )
+from selflearn.learning.gaps import parse_state_data
 from selflearn.store.packstore import (
     MANIFEST_SCHEMA_VERSION,
     PackStore,
     StoredEntry,
+    _candidate_from_front,
     _entry_md,
 )
 
@@ -123,10 +123,15 @@ def _check_learner_state(root: Path, fix: bool, report: DoctorReport) -> None:
     if not path.exists():
         return
     try:
-        json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
+        # Same structural validation the Learner boots through, so every
+        # shape that would brick it (not just invalid JSON — a list where
+        # 'backoff' should be an object, non-integer counters, a top-level
+        # array) is caught here instead of surviving a doctor pass and
+        # leaving 'selflearn next' pointing at a doctor that finds nothing.
+        parse_state_data(json.loads(path.read_text()))
+    except ValueError as exc:      # JSONDecodeError is a ValueError too
         f = Finding("learner.corrupt", path.name,
-                    f"learner state is not valid JSON: {exc}")
+                    f"learner state is unreadable: {exc}")
         if fix:
             aside = path.with_suffix(".json.corrupt")
             shutil.move(str(path), str(aside))
@@ -142,21 +147,29 @@ def _check_learner_state(root: Path, fix: bool, report: DoctorReport) -> None:
 # ---------------------------------------------------------------------------
 
 def _doctor_pack(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
-    pack = pack_dir.name
     good = _check_entry_files(pack_dir, fix, report)
     _check_manifest(pack_dir, good, fix, report)
     _check_vectors(pack_dir, good, fix, report)
     _check_probes(pack_dir, good, fix, report)
 
 
+@dataclass
+class _Entry:
+    """One readable entry file as the doctor sees it."""
+    cand: CandidateEntry
+    status: str          # effective status after any repair
+    disk_status: str     # what the file on disk says right now
+    helpful: Any = None  # raw frontmatter mark counters (None when absent);
+    harmful: Any = None  # fallback when the manifest lost its copy
+
+
 def _check_entry_files(pack_dir: Path, fix: bool,
-                       report: DoctorReport
-                       ) -> dict[str, tuple[CandidateEntry, str]]:
+                       report: DoctorReport) -> dict[str, _Entry]:
     """Scan entries/*.md with tolerant parsing. Returns the readable
-    entries as {id: (candidate, status)} after any per-file repairs."""
+    entries by id after any per-file repairs."""
     pack = pack_dir.name
     entries_dir = pack_dir / "entries"
-    good: dict[str, tuple[CandidateEntry, str]] = {}
+    good: dict[str, _Entry] = {}
     for md in sorted(entries_dir.glob("*.md")) if entries_dir.exists() else []:
         front, body, err = _read_front(md)
         cand: Optional[CandidateEntry] = None
@@ -174,7 +187,8 @@ def _check_entry_files(pack_dir: Path, fix: bool,
             report.findings.append(f)
             continue
 
-        status = str(front.get("status", "candidate"))
+        disk_status = str(front.get("status", "candidate"))
+        status = disk_status
         rewrite = False
         if status not in ENTRY_STATUSES:
             f = Finding("entry.bad-status", f"{pack}/{md.name}",
@@ -195,6 +209,15 @@ def _check_entry_files(pack_dir: Path, fix: bool,
                 f.fix_note = ("demoted to 'candidate'; a journaled release "
                               "plus verification is the only path back")
             report.findings.append(f)
+        # Rewrite the status repair BEFORE the id-mismatch handling: an
+        # unresolvable duplicate below bails out of the loop, and the
+        # repairs already reported FIXED must have actually happened.
+        if fix and rewrite:
+            md.write_text(_entry_md(StoredEntry(
+                cand=cand, status=status,
+                helpful=_num(front.get("helpful")),
+                harmful=_num(front.get("harmful")))))
+            disk_status = status
         if md.stem != cand.id:
             target = entries_dir / f"{cand.id}.md"
             f = Finding("entry.id-mismatch", f"{pack}/{md.name}",
@@ -210,17 +233,14 @@ def _check_entry_files(pack_dir: Path, fix: bool,
             report.findings.append(f)
             if not f.fixed:
                 continue      # unresolvable duplicate: leave it out
-        if fix and rewrite:
-            md.write_text(_entry_md(StoredEntry(
-                cand=cand, status=status,
-                helpful=_num(front.get("helpful")),
-                harmful=_num(front.get("harmful")))))
-        good[cand.id] = (cand, status)
+        good[cand.id] = _Entry(cand=cand, status=status,
+                               disk_status=disk_status,
+                               helpful=front.get("helpful"),
+                               harmful=front.get("harmful"))
     return good
 
 
-def _check_manifest(pack_dir: Path,
-                    good: dict[str, tuple[CandidateEntry, str]],
+def _check_manifest(pack_dir: Path, good: dict[str, _Entry],
                     fix: bool, report: DoctorReport) -> None:
     pack = pack_dir.name
     manifest_path = pack_dir / "manifest.json"
@@ -260,13 +280,17 @@ def _check_manifest(pack_dir: Path,
                 "adopted into the manifest (fresh mark counters)"))
             needs_rewrite = True
         for eid in sorted(set(good) & set(old_entries)):
+            ent = good[eid]
             meta = old_entries[eid]
             meta = meta if isinstance(meta, dict) else {}
-            if meta.get("status") != good[eid][1]:
+            if meta.get("status") != ent.status:
+                said = (f"entry file says {ent.status!r}"
+                        if ent.disk_status == ent.status else
+                        f"entry file says {ent.disk_status!r} (repairs to "
+                        f"{ent.status!r})")
                 report.findings.append(_maybe_fixed(fix, Finding(
                     "manifest.status-mismatch", pack,
-                    f"{eid!r}: entry file says {good[eid][1]!r}, manifest "
-                    f"says {meta.get('status')!r}"),
+                    f"{eid!r}: {said}, manifest says {meta.get('status')!r}"),
                     "manifest updated — the entry file is the source of "
                     "truth"))
                 needs_rewrite = True
@@ -280,27 +304,53 @@ def _check_manifest(pack_dir: Path,
                     "clamped to valid non-negative numbers"))
                 needs_rewrite = True
 
+    if needs_rewrite:
+        legacy = sorted(eid for eid in set(good) & set(old_entries)
+                        if _legacy_vector(old_entries[eid]) is not None)
+        if legacy:
+            report.findings.append(_maybe_fixed(fix, Finding(
+                "manifest.legacy-vectors", pack,
+                f"manifest rebuild would drop pre-sidecar inline vectors "
+                f"for {len(legacy)} entries"),
+                "migrated to the vectors.json sidecar"))
     if fix and needs_rewrite:
         _write_manifest(pack_dir, good, old)
 
 
-def _write_manifest(pack_dir: Path,
-                    good: dict[str, tuple[CandidateEntry, str]],
+def _legacy_vector(meta: Any) -> Optional[list[float]]:
+    """The pre-sidecar layout stored 'vector' inline in the manifest
+    (still readable by PackStore._load). Returns it when well-formed."""
+    if not isinstance(meta, dict):
+        return None
+    vec = meta.get("vector")
+    if (isinstance(vec, (list, tuple)) and vec
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                    for x in vec)):
+        return [float(x) for x in vec]
+    return None
+
+
+def _write_manifest(pack_dir: Path, good: dict[str, _Entry],
                     old: dict[str, Any]) -> None:
     old_entries = old.get("entries", {})
     old_entries = old_entries if isinstance(old_entries, dict) else {}
     coverage = old.get("coverage", {})
     coverage = dict(coverage) if isinstance(coverage, dict) else {}
     entries_meta: dict[str, Any] = {}
-    for eid, (cand, status) in sorted(good.items()):
+    legacy_vecs: dict[str, Any] = {}
+    for eid, ent in sorted(good.items()):
         meta = old_entries.get(eid, {})
         meta = meta if isinstance(meta, dict) else {}
         buckets = meta.get("marks_by_task", {})
         buckets = buckets if isinstance(buckets, dict) else {}
         entries_meta[eid] = {
-            "status": status, "kind": cand.kind, "topic": cand.topic,
-            "helpful": _num(meta.get("helpful")),
-            "harmful": _num(meta.get("harmful")),
+            "status": ent.status, "kind": ent.cand.kind,
+            "topic": ent.cand.topic,
+            # manifest counters where valid; the entry file's own copy when
+            # the manifest lost them (a rebuilt manifest must not reset a
+            # proven entry's evidence to the 0.5 prior)
+            "helpful": _pick_mark(meta.get("helpful"), ent.helpful),
+            "harmful": _pick_mark(meta.get("harmful"), ent.harmful),
             "marks_by_task": {
                 str(k): [_num(v[0]), _num(v[1])]
                 for k, v in buckets.items()
@@ -310,8 +360,15 @@ def _write_manifest(pack_dir: Path,
             "marks_updated_at": str(meta.get("marks_updated_at") or ""),
             "embedder_id": str(meta.get("embedder_id") or ""),
         }
-        if status == "published":
-            coverage.setdefault(cand.topic, "covered")
+        if ent.status == "published":
+            coverage.setdefault(ent.cand.topic, "covered")
+        vec = _legacy_vector(meta)
+        if vec is not None:
+            legacy_vecs[eid] = {
+                "embedder_id": str(meta.get("embedder_id") or ""),
+                "vector": vec}
+    if legacy_vecs:
+        _migrate_legacy_vectors(pack_dir, legacy_vecs)
     (pack_dir / "manifest.json").write_text(json.dumps({
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "pack": pack_dir.name,
@@ -320,8 +377,27 @@ def _write_manifest(pack_dir: Path,
     }, indent=1, sort_keys=True))
 
 
-def _check_vectors(pack_dir: Path,
-                   good: dict[str, tuple[CandidateEntry, str]],
+def _migrate_legacy_vectors(pack_dir: Path,
+                            legacy_vecs: dict[str, Any]) -> None:
+    """Fold pre-sidecar inline vectors into vectors.json instead of losing
+    them in the manifest rebuild. Existing sidecar records win; if the
+    sidecar itself is unreadable, _check_vectors owns that finding and the
+    legacy vectors are left to regeneration like the sidecar's own."""
+    path = pack_dir / "vectors.json"
+    sidecar: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text())
+            if not isinstance(loaded, dict):
+                return
+            sidecar = loaded
+        except json.JSONDecodeError:
+            return
+    merged = {**legacy_vecs, **sidecar}
+    path.write_text(json.dumps(merged, sort_keys=True))
+
+
+def _check_vectors(pack_dir: Path, good: dict[str, _Entry],
                    fix: bool, report: DoctorReport) -> None:
     pack = pack_dir.name
     path = pack_dir / "vectors.json"
@@ -342,6 +418,7 @@ def _check_vectors(pack_dir: Path,
                           "keyword mode meanwhile")
         report.findings.append(f)
         return
+    changed = False
     unknown = sorted(set(vecs) - set(good))
     if unknown:
         f = Finding("vectors.unknown-entry", pack,
@@ -349,14 +426,36 @@ def _check_vectors(pack_dir: Path,
         if fix:
             for eid in unknown:
                 vecs.pop(eid)
-            path.write_text(json.dumps(vecs, sort_keys=True))
+            changed = True
             f.fixed = True
             f.fix_note = "pruned the unknown ids"
         report.findings.append(f)
+    # A record must have the shape PackStore._load dereferences —
+    # {"vector": [numbers...]} — or the loud loader still cannot boot even
+    # though the file is valid JSON.
+    malformed = sorted(
+        eid for eid, rec in vecs.items()
+        if not (isinstance(rec, dict)
+                and isinstance(rec.get("vector"), list)
+                and all(isinstance(x, (int, float))
+                        and not isinstance(x, bool)
+                        for x in rec["vector"])))
+    if malformed:
+        f = Finding("vectors.bad-record", pack,
+                    f"malformed vector records for entries: {malformed}")
+        if fix:
+            for eid in malformed:
+                vecs.pop(eid)
+            changed = True
+            f.fixed = True
+            f.fix_note = ("pruned — vectors are regenerable from the "
+                          "embedding endpoint")
+        report.findings.append(f)
+    if changed:
+        path.write_text(json.dumps(vecs, sort_keys=True))
 
 
-def _check_probes(pack_dir: Path,
-                  good: dict[str, tuple[CandidateEntry, str]],
+def _check_probes(pack_dir: Path, good: dict[str, _Entry],
                   fix: bool, report: DoctorReport) -> None:
     pack = pack_dir.name
     path = pack_dir / "evals" / "probes.jsonl"
@@ -369,6 +468,8 @@ def _check_probes(pack_dir: Path,
             continue
         try:
             rec = json.loads(line)
+            if not isinstance(rec, dict):
+                raise TypeError("probe record is not a JSON object")
             retired = bool(rec.pop("retired", False))
             probe = Probe(**rec)
         except (json.JSONDecodeError, ContractError, TypeError) as exc:
@@ -421,32 +522,10 @@ def _read_front(path: Path) -> tuple[dict, str, Optional[str]]:
 
 def _build_candidate(front: dict, body: str
                      ) -> tuple[Optional[CandidateEntry], Optional[str]]:
-    """Same field mapping as the store loader, but returns the error
+    """The store loader's own field mapping, tolerantly: returns the error
     instead of raising, and leaves status validation to the caller."""
     try:
-        cand = CandidateEntry(
-            id=front["id"], pack=front["pack"], kind=front["kind"],
-            body=body.strip(), topic=front.get("topic", ""),
-            claims=tuple(front.get("claims", [])),
-            task_types=tuple(front.get("task_types", [])),
-            extraction=front.get("extraction", "text"),
-            quarantined=front.get("quarantined", False),
-            quarantine_reason=front.get("quarantine_reason", ""),
-            sources=tuple(EntrySource(
-                url=s["url"], fetched_at=s.get("fetched_at", ""),
-                sha256=s.get("sha256", ""), tier=s.get("tier", "unknown"),
-                locator=s.get("locator", ""))
-                for s in front.get("sources", [])),
-            procedure=tuple(ProcedureStep(
-                id=s["id"], objective=s["objective"],
-                task_type=s.get("task_type", ""),
-                tools=tuple(s.get("tools", [])),
-                depends_on=tuple(s.get("depends_on", [])),
-                check=tuple(sorted(s.get("check", {}).items())))
-                for s in front.get("procedure", {}).get("steps", [])),
-            skill_check=tuple(sorted(front.get("check", {}).items())),
-        )
-        return cand, None
+        return _candidate_from_front(front, body), None
     except (KeyError, TypeError, AttributeError, ContractError) as exc:
         return None, f"invalid entry fields: {exc!r}"
 
@@ -471,6 +550,16 @@ def _num(value: Any) -> float:
     """Coerce to a non-negative float; garbage -> 0.0."""
     raw = _raw_num(value)
     return max(0.0, raw) if raw is not None else 0.0
+
+
+def _pick_mark(manifest_value: Any, front_value: Any) -> float:
+    """A mark counter for the rebuilt manifest: the manifest's copy when it
+    is a valid non-negative number, else the entry frontmatter's copy
+    (clamped) — absent/broken manifests must not zero real evidence."""
+    raw = _raw_num(manifest_value)
+    if raw is not None and raw >= 0:
+        return raw
+    return _num(front_value)
 
 
 def _int(value: Any) -> int:

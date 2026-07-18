@@ -177,9 +177,11 @@ Prioritized next-best-action advice computed from the store's state:
 quarantined candidates to review, candidates awaiting verification,
 published entries whose marks say they hurt (deprecate/refresh), stale
 entries (sources aged and evidence faded), claimed-but-uncovered topics,
-and missing embeddings. Each suggestion states *why* and gives the
-copy-pasteable command. Advisory-only — nothing is executed. If the store
-fails to load, it exits 1 and points at `doctor`.
+and missing embeddings. Each suggestion states *why* and, where a single
+CLI incantation exists, gives the copy-pasteable command (re-indexing
+embeddings has none, so that suggestion is advice-only). Advisory-only —
+nothing is executed. If the store fails to load, it exits 2 and points at
+`doctor`.
 
 ### `selflearn doctor [--fix]`
 Diagnose store corruption and inconsistency with tolerant parsers: corrupt

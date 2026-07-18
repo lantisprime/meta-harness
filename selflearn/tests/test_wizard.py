@@ -74,6 +74,27 @@ def test_broken_store_snapshot_points_at_doctor(tmp_path):
     assert "command: selflearn doctor" in out and "--fix" in out
 
 
+def test_argparse_rejection_does_not_kill_wizard(tmp_path):
+    store = str(tmp_path / "s")
+    # retrieve flow with a non-integer answer for -k: argparse raises
+    # SystemExit(2); the wizard must survive it, report the exit code,
+    # and come back to the menu
+    script = "8\nlifespan\np\nthree\ny\nq\n"
+    rc, out = _run(script, store=store)
+    assert rc == 0
+    assert "exit code 2" in out and "bye." in out
+
+
+def test_unbalanced_quote_reprompts_instead_of_crashing(tmp_path):
+    store = str(tmp_path / "s")
+    # the packs answer "it's" cannot be shell-parsed; the wizard re-asks
+    # instead of crashing on shlex's ValueError
+    script = "8\nlifespan\nit's\np\n\nn\nq\n"
+    rc, out = _run(script, store=store)
+    assert rc == 0
+    assert "could not parse" in out and "skipped" in out
+
+
 def test_wizard_via_cli_entrypoint(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("q\n"))
     rc = main(["wizard", "--store", str(tmp_path / "s")])

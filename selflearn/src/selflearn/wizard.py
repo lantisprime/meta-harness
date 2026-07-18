@@ -99,10 +99,23 @@ def _ask_model(con: Console) -> list[str]:
     return argv
 
 
+def _ask_tokens(con: Console, prompt: str, required: bool = False,
+                default: str = "") -> list[str]:
+    """Prompt for a space-separated list, re-asking on shell-quoting errors
+    (an apostrophe in free text must not crash the wizard)."""
+    while True:
+        raw = con.ask(prompt, default=default, required=required)
+        try:
+            return shlex.split(raw)
+        except ValueError as exc:
+            con.say(f"  could not parse that ({exc}); balance any ' or \" "
+                    "quotes and try again.")
+
+
 def _ask_refs(con: Console) -> list[str]:
     con.say("references: 'search:<question>', https:// URLs, or file:// "
             "paths — space-separated for several.")
-    return shlex.split(con.ask("refs", required=True))
+    return _ask_tokens(con, "refs", required=True)
 
 
 def _ask_search(con: Console) -> list[str]:
@@ -188,7 +201,7 @@ def _flow_release(con: Console, store: str) -> list[str]:
 
 def _flow_retrieve(con: Console, store: str) -> list[str]:
     query = con.ask("query", required=True)
-    packs = shlex.split(con.ask("packs (space-separated)", required=True))
+    packs = _ask_tokens(con, "packs (space-separated)", required=True)
     k = con.ask("how many entries", default="3")
     return ["retrieve", query, "--packs", *packs, "--store", store, "-k", k]
 
@@ -284,7 +297,13 @@ def run_wizard(runner: Callable[[list[str]], int], store: str = "",
             if not con.confirm("run it now?"):
                 con.say("(skipped — the command above is copy-pasteable)")
                 continue
-            rc = runner(argv)
+            try:
+                rc = runner(argv)
+            except SystemExit as exc:
+                # argparse rejected the assembled argv (e.g. a non-integer
+                # answer routed into a typed flag) — report it like any
+                # failed command instead of killing the whole session.
+                rc = exc.code if isinstance(exc.code, int) else 2
             con.say(f"-> finished with exit code {rc}"
                     + ("" if rc == 0 else " (non-zero: see output above)"))
     except WizardExit:

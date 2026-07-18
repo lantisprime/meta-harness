@@ -56,6 +56,43 @@ def test_harmful_published_entry_suggests_deprecation(tmp_path):
     assert "3 consecutive harmful marks" in dep[0].reason
 
 
+def test_low_score_uses_decayed_evidence(tmp_path):
+    store = PackStore(tmp_path / "s")
+    store.add_candidate(_cand("meh"))
+    _publish(store, "meh")
+    store.mark("meh", helpful=1.0, now_iso="2026-07-17T00:00:00Z")
+    store.mark("meh", harmful=5.0, now_iso="2026-07-17T00:00:00Z")
+    got = suggest_actions(store, now=NOW)
+    assert any("deprecate" in s.action and "recent marks" in s.reason
+               for s in got)
+    # the same marks a year stale have decayed below the evidence floor:
+    # the advisor reads through evidence.py, not lifetime counters
+    later = datetime(2027, 7, 18, tzinfo=timezone.utc)
+    got = suggest_actions(store, now=later)
+    assert not any("deprecate" in s.action for s in got)
+
+
+def test_viewing_advice_never_rewrites_learner_state(tmp_path):
+    import json as _json
+    store = PackStore(tmp_path / "s")
+    store.add_candidate(_cand("e1"))
+    _publish(store, "e1")
+    state_path = tmp_path / "s" / "learner-state.json"
+    # one record invalid under the current contract, one valid
+    state = {"backoff": {}, "failures": [
+        {"task_id": "old", "task_type": "code_edit", "topic": "t",
+         "verdict": "fail", "injected": [], "implicated": ["ghost"]},
+        {"task_id": "ok", "task_type": "code_edit", "topic": "t",
+         "verdict": "fail", "injected": ["e1"], "implicated": ["e1"]}]}
+    state_path.write_text(_json.dumps(state))
+    before = state_path.read_bytes()
+    import warnings as _warnings
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")
+        suggest_actions(store, now=NOW)
+    assert state_path.read_bytes() == before   # advice is read-only
+
+
 def test_stale_entry_suggests_refresh(tmp_path):
     store = PackStore(tmp_path / "s")
     store.add_candidate(_cand("old", topic="aging", fetched="2025-01-01"))
@@ -110,7 +147,7 @@ def test_cmd_next_broken_store_points_at_doctor(tmp_path, capsys):
     (root / "p").mkdir(parents=True)          # pack dir with no manifest
     rc = main(["next", "--store", str(root)])
     err = capsys.readouterr().err
-    assert rc == 1 and "selflearn doctor" in err
+    assert rc == 2 and "selflearn doctor" in err   # broken store = error
 
 
 def test_corrupt_learner_state_suggests_doctor(tmp_path):

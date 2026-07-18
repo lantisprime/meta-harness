@@ -23,11 +23,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from selflearn.evidence import decay_factor
+from selflearn.learning.marks import DEPRECATE_THRESHOLD
 from selflearn.store.packstore import PackStore
 
-# A published entry is flagged as harmful on an unbroken losing streak, or
-# on a low evidence score once there is enough evidence to mean something.
-HARMFUL_STREAK = 3
+# A published entry is flagged as harmful on an unbroken losing streak
+# (same threshold the learning loop auto-deprecates at), or on a low
+# *decayed* evidence score once enough recent evidence exists — all
+# through evidence.py, so the advisor can never disagree with the loop.
 LOW_SCORE = 0.35
 MIN_EVIDENCE = 4.0
 
@@ -95,14 +98,16 @@ def suggest_actions(store: PackStore,
 
         published = store.published(pack)
         for e in published:
-            evidence = e.helpful + e.harmful
-            streak = e.consecutive_harmful >= HARMFUL_STREAK
-            low = evidence >= MIN_EVIDENCE and e.score < LOW_SCORE
+            evidence = (e.helpful + e.harmful) * decay_factor(
+                e.marks_updated_at, now)
+            score = e.score_for("", now=now)
+            streak = e.consecutive_harmful >= DEPRECATE_THRESHOLD
+            low = evidence >= MIN_EVIDENCE and score < LOW_SCORE
             if streak or low:
                 why = (f"{e.consecutive_harmful} consecutive harmful marks"
                        if streak else
-                       f"evidence score {e.score:.2f} over "
-                       f"{evidence:.0f} marks")
+                       f"evidence score {score:.2f} over "
+                       f"{evidence:.0f} recent marks")
                 out.append(Suggestion(
                     3, f"deprecate or refresh {e.cand.id}",
                     f"published entry is hurting tasks ({why})",

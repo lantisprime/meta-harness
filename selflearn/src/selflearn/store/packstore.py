@@ -500,6 +500,33 @@ def _entry_md(stored: StoredEntry) -> str:
     return f"---\n{header}\n---\n{c.body.rstrip()}\n"
 
 
+def _candidate_from_front(front: dict, body: str) -> CandidateEntry:
+    """Single source of truth for the frontmatter -> CandidateEntry field
+    mapping. The doctor's tolerant reader reuses this, so a field added to
+    ``_entry_md`` can never be silently stripped by a repair rewrite."""
+    return CandidateEntry(
+        id=front["id"], pack=front["pack"], kind=front["kind"],
+        body=body.strip(), topic=front.get("topic", ""),
+        claims=tuple(front.get("claims", [])),
+        task_types=tuple(front.get("task_types", [])),
+        extraction=front.get("extraction", "text"),
+        quarantined=front.get("quarantined", False),
+        quarantine_reason=front.get("quarantine_reason", ""),
+        sources=tuple(EntrySource(
+            url=s["url"], fetched_at=s.get("fetched_at", ""),
+            sha256=s.get("sha256", ""), tier=s.get("tier", "unknown"),
+            locator=s.get("locator", "")) for s in front.get("sources", [])),
+        procedure=tuple(ProcedureStep(
+            id=s["id"], objective=s["objective"],
+            task_type=s.get("task_type", ""),
+            tools=tuple(s.get("tools", [])),
+            depends_on=tuple(s.get("depends_on", [])),
+            check=tuple(sorted(s.get("check", {}).items())))
+            for s in front.get("procedure", {}).get("steps", [])),
+        skill_check=tuple(sorted(front.get("check", {}).items())),
+    )
+
+
 def _read_entry_md(path: Path) -> tuple[CandidateEntry, str]:
     text = path.read_text()
     if not text.startswith("---\n"):
@@ -510,27 +537,7 @@ def _read_entry_md(path: Path) -> tuple[CandidateEntry, str]:
     except (ValueError, yaml.YAMLError) as exc:
         raise StoreError(f"corrupt entry file {path}: {exc}")
     try:
-        cand = CandidateEntry(
-            id=front["id"], pack=front["pack"], kind=front["kind"],
-            body=body.strip(), topic=front.get("topic", ""),
-            claims=tuple(front.get("claims", [])),
-            task_types=tuple(front.get("task_types", [])),
-            extraction=front.get("extraction", "text"),
-            quarantined=front.get("quarantined", False),
-            quarantine_reason=front.get("quarantine_reason", ""),
-            sources=tuple(EntrySource(
-                url=s["url"], fetched_at=s.get("fetched_at", ""),
-                sha256=s.get("sha256", ""), tier=s.get("tier", "unknown"),
-                locator=s.get("locator", "")) for s in front.get("sources", [])),
-            procedure=tuple(ProcedureStep(
-                id=s["id"], objective=s["objective"],
-                task_type=s.get("task_type", ""),
-                tools=tuple(s.get("tools", [])),
-                depends_on=tuple(s.get("depends_on", [])),
-                check=tuple(sorted(s.get("check", {}).items())))
-                for s in front.get("procedure", {}).get("steps", [])),
-            skill_check=tuple(sorted(front.get("check", {}).items())),
-        )
+        cand = _candidate_from_front(front, body)
     except (KeyError, ContractError) as exc:
         raise StoreError(f"invalid entry file {path}: {exc}")
     status = front.get("status", "candidate")

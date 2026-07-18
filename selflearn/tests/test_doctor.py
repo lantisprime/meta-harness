@@ -215,6 +215,111 @@ def test_corrupt_learner_state_moved_aside(tmp_path):
     assert (root / "learner-state.json.corrupt").exists()
 
 
+def test_legacy_inline_vectors_survive_manifest_rebuild(tmp_path):
+    root = tmp_path / "s"
+    _healthy_store(root)
+    manifest = json.loads((root / "p" / "manifest.json").read_text())
+    manifest["entries"]["e1"]["vector"] = [1.0, 0.0]    # pre-sidecar layout
+    manifest["entries"]["e1"]["embedder_id"] = "emb-legacy"
+    del manifest["entries"]["e2"]                       # orphan forces rebuild
+    (root / "p" / "manifest.json").write_text(json.dumps(manifest))
+    report = run_doctor(root, fix=True)
+    assert any(f.code == "manifest.legacy-vectors" and f.fixed
+               for f in report.findings)
+    sidecar = json.loads((root / "p" / "vectors.json").read_text())
+    assert sidecar["e1"]["vector"] == [1.0, 0.0]
+    stored = PackStore(root).get("e1")
+    assert stored.vector == (1.0, 0.0) and stored.embedder_id == "emb-legacy"
+
+
+def test_manifest_rebuild_keeps_marks_from_entry_files(tmp_path):
+    root = tmp_path / "s"
+    store = _healthy_store(root)
+    store.mark("e1", helpful=4.0, now_iso="2026-07-01T00:00:00Z")
+    (root / "p" / "manifest.json").unlink()
+    report = run_doctor(root, fix=True)
+    assert report.ok
+    # the entry file's own counters back-fill the rebuilt manifest — a
+    # proven entry must not reset to the 0.5 prior
+    assert PackStore(root).get("e1").helpful == 4.0
+
+
+def test_non_object_probe_line_reported_not_crash(tmp_path):
+    root = tmp_path / "s"
+    _healthy_store(root)
+    probes = root / "p" / "evals" / "probes.jsonl"
+    probes.write_text(probes.read_text() + "null\n\"garbage\"\n")
+    report = run_doctor(root, fix=True)
+    assert sum(1 for f in report.findings
+               if f.code == "probe.corrupt" and f.fixed) == 2
+    assert report.ok
+
+
+def test_malformed_vector_records_pruned(tmp_path):
+    root = tmp_path / "s"
+    store = _healthy_store(root)
+    store.set_vector("e1", (1.0, 0.0), "emb-1")
+    vectors = root / "p" / "vectors.json"
+    data = json.loads(vectors.read_text())
+    data["e1"] = None                    # valid JSON, unloadable shape
+    vectors.write_text(json.dumps(data))
+    report = run_doctor(root)            # report-only must already see it
+    assert any(f.code == "vectors.bad-record" for f in report.findings)
+    report = run_doctor(root, fix=True)
+    assert any(f.code == "vectors.bad-record" and f.fixed
+               for f in report.findings)
+    assert report.load_ok
+    PackStore(root)
+
+
+def test_structurally_invalid_learner_state_detected(tmp_path):
+    root = tmp_path / "s"
+    _healthy_store(root)
+    # valid JSON, but a shape the Learner cannot boot from — exactly what
+    # 'selflearn next' points at doctor for
+    (root / "learner-state.json").write_text('{"backoff": [1, 2]}')
+    report = run_doctor(root)
+    assert any(f.code == "learner.corrupt" for f in report.findings)
+    report = run_doctor(root, fix=True)
+    assert any(f.code == "learner.corrupt" and f.fixed
+               for f in report.findings)
+    assert not (root / "learner-state.json").exists()
+
+
+def test_report_mode_mismatch_wording_is_accurate(tmp_path):
+    root = tmp_path / "s"
+    _healthy_store(root)
+    md = root / "p" / "entries" / "e2.md"
+    md.write_text(md.read_text().replace("status: candidate",
+                                         "status: bogus"))
+    manifest = json.loads((root / "p" / "manifest.json").read_text())
+    manifest["entries"]["e2"]["status"] = "bogus"   # disk copies agree
+    (root / "p" / "manifest.json").write_text(json.dumps(manifest))
+    report = run_doctor(root)                       # report-only
+    mm = [f for f in report.findings
+          if f.code == "manifest.status-mismatch"]
+    # must not claim the file already says 'candidate' when it doesn't
+    assert mm and "entry file says 'bogus'" in mm[0].detail
+    assert "repairs to 'candidate'" in mm[0].detail
+
+
+def test_status_repair_lands_despite_unresolvable_id_mismatch(tmp_path):
+    root = tmp_path / "s"
+    _healthy_store(root)
+    entries = root / "p" / "entries"
+    dupe = entries / "e9.md"
+    dupe.write_text((entries / "e2.md").read_text()
+                    .replace("status: candidate", "status: bogus"))
+    # e9.md claims id 'e2' while e2.md exists: the rename is unresolvable,
+    # but the bad-status repair reported FIXED must still be on disk
+    report = run_doctor(root, fix=True)
+    assert any(f.code == "entry.bad-status" and f.fixed
+               for f in report.findings)
+    assert any(f.code == "entry.id-mismatch" and not f.fixable
+               for f in report.findings)
+    assert "status: candidate" in dupe.read_text()
+
+
 def test_report_mode_never_writes(tmp_path):
     root = tmp_path / "s"
     _healthy_store(root)
