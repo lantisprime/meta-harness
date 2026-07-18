@@ -1,6 +1,7 @@
 # selflearn learning module — improvement design from recent learning-theory papers
 
-**Status:** design / proposal (2026-07-18). No code changed by this document.
+**Status:** Phase 1 + Phase 2 **implemented** (2026-07-18); Phases 3–5
+remain proposals. See §6 for per-phase status.
 **Scope:** the learning module only — `selflearn/src/selflearn/learning/`
 (`marks.py`, `gaps.py`), `evidence.py`, `advisor.py`, and the retrieval
 ranking in `retrieval/retriever.py`.
@@ -255,17 +256,24 @@ Not everything in the papers is worth building here:
 
 ## 6. Phased roadmap
 
-1. **Phase 1 — posterior uncertainty (3.2).** Add `laplace_variance` /
-   `posterior_entropy` to `evidence.py`; surface as a confidence badge in
-   `advisor.py`. Small, self-contained, unlocks the rest.
-2. **Phase 2 — epistemic acquisition (3.1).** Add an `expected_free_energy`
-   scorer combining the existing pragmatic signals with the Phase-1 epistemic
-   term; rank `suggest_actions`/gap signals by it. **Highest-value phase.**
+1. **Phase 1 — posterior uncertainty (3.2). ✅ SHIPPED.**
+   `evidence.laplace_variance` (Beta-posterior variance) +
+   `StoredEntry.uncertainty_for` (decayed, task-type-aware). Consumed by
+   Phase 2; surfaced in the advisor via the epistemic suggestion below.
+2. **Phase 2 — epistemic acquisition (3.1). ✅ SHIPPED.**
+   `Learner.epistemic_signals` emits a proactive `uncertainty`-kind
+   `GapSignal` for thinly-evidenced published topics (the loop's first
+   forward-looking signal); `expected_free_energy_value(signal)` scores
+   `pragmatic + epistemic`; `Learner.suggestions` and `advisor.suggest_actions`
+   are EFE-ranked (`sorted(key=(priority, −efe))`). Read-only — viewing
+   advice mutates no state.
 3. **Phase 3 — surprise-weighted marks (3.3) and surprise-triggered growth
-   (3.6).** Introduce a `surprise` helper; weight increments and the
-   acquisition trigger by it.
+   (3.6).** *Proposed.* Introduce a `surprise` helper; weight increments and
+   the acquisition trigger by it. Touches the fast loop — must preserve the
+   streak-deprecation guarantee (§7).
 4. **Phase 4 — normalized retrieval posterior (3.4) and surprisal thresholds
-   (3.5).** Reparameterize ranking and cutoffs.
+   (3.5).** *Proposed.* Reparameterize ranking and cutoffs; pin retrieval
+   recall against regression first (§7).
 5. **Deferred — first-class conditional knowledge (3.7).** Separate design.
 
 ---

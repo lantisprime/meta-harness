@@ -37,5 +37,22 @@ def decay_factor(last_marked_iso: str, now: datetime,
 
 
 def laplace_score(helpful: float, harmful: float) -> float:
-    """Laplace-smoothed evidence score in (0, 1); no evidence -> 0.5."""
+    """Laplace-smoothed evidence score in (0, 1); no evidence -> 0.5.
+
+    This is the MEAN of the Beta(helpful+1, harmful+1) posterior over an
+    entry's helpfulness. Its uncertainty is ``laplace_variance`` below."""
     return (helpful + 1.0) / (helpful + harmful + 2.0)
+
+
+def laplace_variance(helpful: float, harmful: float) -> float:
+    """Variance of the Beta(helpful+1, harmful+1) posterior whose mean is
+    ``laplace_score`` — the epistemic uncertainty we otherwise discard.
+
+    Maximal at no evidence (Beta(1,1) -> 1/12 ≈ 0.083) and shrinks toward 0
+    as marks accumulate, so it distinguishes "0.5 because genuinely mixed"
+    from "0.5 because we know nothing." Active-inference epistemic value and
+    the advisor's confidence badge read this (design note §3.2)."""
+    a = helpful + 1.0
+    b = harmful + 1.0
+    n = a + b
+    return (a * b) / (n * n * (n + 1.0))

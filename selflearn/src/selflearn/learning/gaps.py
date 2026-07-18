@@ -42,6 +42,9 @@ ACTIONS = {
                "entries (knowledge not working)",
     "staleness": "propose refresh run: re-fetch sources and regenerate the "
                  "entry (knowledge aging)",
+    "uncertainty": "propose probe/strengthen run: generate evals or gather "
+                   "corroboration for thinly-evidenced published knowledge "
+                   "before it is relied on (epistemic value)",
 }
 
 
@@ -53,6 +56,11 @@ class LearningConfig:
     staleness_score_max: float = 0.45   # only aging entries that also stopped helping
     mark_half_life_days: float = MARK_HALF_LIFE_DAYS   # recency decay on marks
     max_failures: int = 500          # FIFO cap on retained failure evidence
+    # epistemic gap (design note §3.1/§3.2): a published entry whose decayed
+    # Beta posterior variance exceeds this is "we serve it but barely know if
+    # it works" — proactively probe it. Beta(1,1) [no marks] is ~0.083, and a
+    # net ~3 marks lands near 0.038, so 0.04 flags roughly-untested knowledge.
+    uncertainty_min: float = 0.04
 
 
 def parse_state_data(data) -> tuple[list, dict[str, int]]:
@@ -75,6 +83,43 @@ def parse_state_data(data) -> tuple[list, dict[str, int]]:
     if not isinstance(failures, list):
         raise ValueError("'failures' is not a list")
     return failures, backoff
+
+
+def expected_free_energy_value(signal: GapSignal) -> float:
+    """The value of acting on a gap signal, as negative expected free energy
+    (design note §3.1): higher = acquire sooner. G = pragmatic + epistemic.
+
+    Deterministic and cheap — a coarse ordering prior over signals, not a
+    literal Friston-style planner (the design note is explicit that full EFE
+    with a transition model is out of scope). Pragmatic value approximates
+    expected task-failure reduction from the signal's own evidence; epistemic
+    value is a fixed per-kind prior on how much acting reduces uncertainty:
+
+    - coverage : knowledge is missing -> highest pragmatic + epistemic
+    - quality  : retrieved but failing -> high pragmatic, lower epistemic
+    - staleness: aged and fading      -> moderate
+    - uncertainty: proactive, no failures yet -> pure epistemic
+    """
+    pragmatic = {"coverage": 1.0, "quality": 0.9,
+                 "staleness": 0.5, "uncertainty": 0.0}.get(signal.kind, 0.3)
+    epistemic = {"coverage": 1.0, "quality": 0.3,
+                 "staleness": 0.4, "uncertainty": 0.6}.get(signal.kind, 0.3)
+    # more cited failures => more expected pragmatic payoff, saturating
+    n = _leading_int(signal.evidence)
+    pragmatic *= 1.0 + min(n, 10) / 10.0
+    return pragmatic + epistemic
+
+
+def _leading_int(text: str) -> int:
+    """First integer in a signal's evidence string (its failure count when
+    present), else 0 — used only to weight pragmatic value."""
+    num = ""
+    for ch in text:
+        if ch.isdigit():
+            num += ch
+        elif num:
+            break
+    return int(num) if num else 0
 
 
 def label_topic(retriever, packs: list[str], text: str,
@@ -241,16 +286,52 @@ class Learner:
                          f"harmful={harmful:.1f})"))
         return signals
 
+    def epistemic_signals(self, pack: str,
+                          now: Optional[datetime] = None) -> list[GapSignal]:
+        """Proactive, uncertainty-seeking signal (design note §3.1/§3.2):
+        published topics we serve on thin evidence, surfaced BEFORE they fail.
+
+        This is the active-inference epistemic term made concrete — the slow
+        loop's only forward-looking signal (coverage/quality/staleness are all
+        reactive to failures or age). Read-only: like ``staleness_signals`` it
+        mutates no state and no backoff, so merely viewing advice is safe. One
+        signal per topic, so a fresh unvalidated pack yields a bounded list."""
+        now = now or datetime.now(timezone.utc)
+        worst: dict[str, tuple[float, str]] = {}
+        for stored in self.store.published(pack):
+            u = stored.uncertainty_for(now=now,
+                                       half_life_days=self.config.mark_half_life_days)
+            if u < self.config.uncertainty_min:
+                continue
+            topic = stored.cand.topic
+            if topic not in worst or u > worst[topic][0]:
+                worst[topic] = (u, stored.cand.id)
+        signals: list[GapSignal] = []
+        for topic, (u, entry_id) in sorted(worst.items()):
+            signals.append(GapSignal(
+                pack=pack, topic=topic, kind="uncertainty",
+                evidence=f"published knowledge in {topic!r} is thinly "
+                         f"evidenced (posterior variance {u:.3f}, e.g. "
+                         f"{entry_id}); probe or corroborate before relying"))
+        return signals
+
     def suggestions(self, pack: str,
                     now: Optional[datetime] = None) -> list[dict]:
         """Advisory-only proposals for the host's console: what to run and
-        why. The host NEVER auto-runs these — a human starts acquisition."""
+        why, EFE-ranked (design note §3.1). The host NEVER auto-runs these —
+        a human starts acquisition."""
+        signals = (self.gap_signals(pack)
+                   + self.staleness_signals(pack, now)
+                   + self.epistemic_signals(pack, now))
         out = []
-        for sig in self.gap_signals(pack) + self.staleness_signals(pack, now):
+        for sig in signals:
             out.append({"pack": sig.pack, "topic": sig.topic,
                         "kind": sig.kind, "evidence": sig.evidence,
                         "proposed_action": ACTIONS[sig.kind],
+                        "efe_value": round(expected_free_energy_value(sig), 4),
                         "advisory": "requires human approval; never auto-run"})
+        # highest expected free energy reduction first (design note §3.1)
+        out.sort(key=lambda d: d["efe_value"], reverse=True)
         return out
 
 

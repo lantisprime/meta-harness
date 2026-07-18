@@ -344,3 +344,83 @@ def test_regression_loud_paths(store):
     snapshot_baseline(store, "fastapi", suite("m1", 2, 2))
     with pytest.raises(StoreError, match="same model"):
         check_regression(store, "fastapi", suite("OTHER", 2, 2))
+
+
+# ---------------------------------------------------------------------------
+# Phase 1/2 — posterior uncertainty and epistemic (EFE) acquisition
+# (design note docs/selflearn-learning-module-improvements.md §3.1/§3.2)
+# ---------------------------------------------------------------------------
+
+def test_laplace_variance_math():
+    from selflearn.evidence import laplace_variance, laplace_score
+    # no evidence -> maximal Beta(1,1) variance = 1/12
+    assert laplace_variance(0.0, 0.0) == pytest.approx(1.0 / 12.0)
+    # symmetric in helpful/harmful (same as the mean sitting at 0.5)
+    assert laplace_variance(3.0, 1.0) == laplace_variance(1.0, 3.0)
+    # more evidence -> tighter posterior
+    assert laplace_variance(20.0, 20.0) < laplace_variance(1.0, 1.0)
+    # mean unchanged by the new function
+    assert laplace_score(4.0, 0.0) == pytest.approx(5.0 / 6.0)
+
+
+def test_uncertainty_for_decays_and_conditions(store):
+    e = publish(store, "kn-f-u", "Body.", "utopic")
+    stored = store.get("kn-f-u")
+    fresh = stored.uncertainty_for()                     # no marks -> ~0.083
+    assert fresh == pytest.approx(1.0 / 12.0)
+    store.mark("kn-f-u", helpful=8.0, now_iso="2026-07-17T00:00:00Z")
+    stored = store.get("kn-f-u")
+    assert stored.uncertainty_for() < fresh              # evidence tightened it
+    # stale evidence widens the posterior again (decay) — the intended signal
+    later = datetime(2027, 7, 18, tzinfo=timezone.utc)
+    assert stored.uncertainty_for(now=later) > stored.uncertainty_for()
+    # a task_type bucket with no marks is more uncertain than the global
+    assert stored.uncertainty_for(task_type="unseen") >= stored.uncertainty_for()
+
+
+def test_epistemic_signals_flag_thin_knowledge_only(store):
+    publish(store, "kn-f-thin", "Thin.", "thin-topic")
+    well = publish(store, "kn-f-well", "Well.", "well-topic")
+    for _ in range(12):
+        store.mark("kn-f-well", helpful=1.0, now_iso="2026-07-17T00:00:00Z")
+    learner = Learner(store)
+    before = (store.root / "learner-state.json").read_bytes() \
+        if (store.root / "learner-state.json").exists() else None
+    sigs = learner.epistemic_signals("fastapi")
+    topics = {s.topic for s in sigs}
+    assert "thin-topic" in topics and "well-topic" not in topics
+    assert all(s.kind == "uncertainty" for s in sigs)
+    # read-only: viewing epistemic advice must not write learner state
+    after = (store.root / "learner-state.json").read_bytes() \
+        if (store.root / "learner-state.json").exists() else None
+    assert after == before
+
+
+def test_expected_free_energy_orders_kinds():
+    from selflearn.contracts import GapSignal
+    from selflearn.learning.gaps import expected_free_energy_value as efe
+    cov = GapSignal(pack="p", topic="t", kind="coverage",
+                    evidence="5 verified failures")
+    qual = GapSignal(pack="p", topic="t", kind="quality",
+                     evidence="5 verified failures despite retrieval")
+    unc = GapSignal(pack="p", topic="t", kind="uncertainty",
+                    evidence="posterior variance 0.08")
+    # missing knowledge (coverage) beats retrieved-but-failing (quality),
+    # which beats a purely proactive uncertainty nudge
+    assert efe(cov) > efe(qual) > efe(unc)
+    # more cited failures raise pragmatic value
+    few = GapSignal(pack="p", topic="t", kind="coverage",
+                    evidence="2 verified failures")
+    assert efe(cov) > efe(few)
+
+
+def test_suggestions_efe_ranked_and_readonly(store):
+    # a covered-but-thin topic (epistemic) plus a claimed-uncovered topic
+    publish(store, "kn-f-cov", "Covered.", "covered")
+    store.claim_topics("fastapi", ["missing"])
+    learner = Learner(store)
+    out = learner.suggestions("fastapi")
+    assert out and all("efe_value" in d for d in out)
+    # sorted by descending EFE value
+    vals = [d["efe_value"] for d in out]
+    assert vals == sorted(vals, reverse=True)

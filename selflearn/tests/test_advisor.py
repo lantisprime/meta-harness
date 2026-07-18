@@ -133,6 +133,39 @@ def test_all_clear_when_nothing_pending(tmp_path):
     assert "retrieve" in got[0].command
 
 
+def test_epistemic_suggestion_for_thin_published_knowledge(tmp_path):
+    # published but never validated -> proactive "strengthen" suggestion,
+    # BEFORE any failure (the active-inference epistemic term, §3.1)
+    store = PackStore(tmp_path / "s")
+    store.add_candidate(_cand("thin", topic="lonely"))
+    _publish(store, "thin")
+    store.set_vector("thin", (1.0, 0.0), "emb-1")     # silence the embeddings note
+    got = suggest_actions(store, now=NOW)
+    strengthen = [x for x in got if "strengthen low-confidence" in x.action]
+    assert strengthen and "lonely" in strengthen[0].action
+    assert strengthen[0].efe > 0
+
+    # once it earns solid evidence, the proactive suggestion goes away
+    for _ in range(12):
+        store.mark("thin", helpful=1.0, now_iso="2026-07-17T00:00:00Z")
+    got = suggest_actions(store, now=NOW)
+    assert not any("strengthen low-confidence" in x.action for x in got)
+
+
+def test_coverage_gap_outranks_weaker_signal_in_tier(tmp_path):
+    # within the same priority tier, higher EFE floats up (§3.1): a missing
+    # claimed topic (coverage) should precede a proactive uncertainty nudge
+    store = PackStore(tmp_path / "s")
+    store.add_candidate(_cand("e1", topic="have"))
+    _publish(store, "e1")
+    store.set_vector("e1", (1.0, 0.0), "emb-1")
+    store.claim_topics("p", ["missing"])
+    got = suggest_actions(store, now=NOW)
+    tier5 = [x for x in got if x.priority == 5]
+    assert len(tier5) >= 2
+    assert "acquire claimed topic" in tier5[0].action   # coverage gap first
+
+
 def test_cmd_next_prints_and_exits_zero(tmp_path, capsys):
     store = PackStore(tmp_path / "s")
     store.add_candidate(_cand("c1"))

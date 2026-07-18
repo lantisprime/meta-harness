@@ -20,7 +20,7 @@ SOURCE_TIERS = ("official", "primary", "community", "unknown")
 PROBE_KINDS = ("recall", "application", "skill", "golden_run")
 CHECK_KINDS = ("deterministic", "judge", "execution")
 EXTRACTIONS = ("text", "vision")
-GAP_KINDS = ("coverage", "quality", "staleness")
+GAP_KINDS = ("coverage", "quality", "staleness", "uncertainty")
 VERDICTS = ("pass", "fail")
 
 
