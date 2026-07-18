@@ -1,0 +1,26 @@
+[project]
+name = "selflearn"
+version = "0.1.0"
+description = "Standalone self-learning knowledge system: acquire from sources, verify, eval-gate, retrieve, learn — host-agnostic behind five ports"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+pdf = ["pypdf>=4"]
+
+[project.scripts]
+selflearn = "selflearn.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

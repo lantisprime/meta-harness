@@ -103,6 +103,9 @@ class AgentConfig(BaseModel):
     system_prompt: str = ""
     task_types: list[str] = Field(default_factory=list)
     roles: list[str] = Field(default_factory=list)
+    # selflearn specialist binding: knowledge packs retrieved into this
+    # agent's task prompts (docs/self-learning-specialist-agents-plan.md).
+    knowledge_packs: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     temperature: float = 0.2
     max_tokens: Optional[int] = 4000

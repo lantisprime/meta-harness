@@ -261,8 +261,66 @@ RESEARCH = WorkflowTemplate(
     ],
 )
 
+KNOWLEDGE_ACQUISITION = WorkflowTemplate(
+    id="knowledge_acquisition",
+    label="Knowledge acquisition",
+    description=(
+        "Research reputable sources into a verified knowledge pack: "
+        "scope → gather → distill → verify (gate). Strict mode: workers "
+        "have no publish tool; a human approves eligible entries."
+    ),
+    phases=[
+        PhaseSpec(
+            id="scope",
+            objective=(
+                "Turn this pack-building goal into a research syllabus: {goal}\n"
+                "List subtopics, the key questions each must answer, and a "
+                "source-type strategy per subtopic (official docs, papers, "
+                "lectures). Propose concrete source refs: URLs, arXiv links, "
+                "or 'search:<question>' queries. Effort-scale to the budget; "
+                "do not fetch anything yourself."),
+            task_type=TaskType.REASONING,
+        ),
+        PhaseSpec(
+            id="gather",
+            objective=(
+                "Acquire the syllabus sources for: {goal}\n"
+                "Call knowledge_gather with the proposed refs (batch related "
+                "refs together). Report what was acquired: url, tier, chunk "
+                "count per source. A failed ref is a finding, not something "
+                "to silently drop."),
+            tools=["knowledge_gather"],
+            feeds_from=["scope"], depends_on=["scope"],
+        ),
+        PhaseSpec(
+            id="distill",
+            objective=(
+                "Distill the gathered sources into knowledge entries for: "
+                "{goal}\nEvery claim must be traceable to the gathered "
+                "sources — never add facts from memory. Submit entries via "
+                "knowledge_submit_entries; it schema-guards, screens, and "
+                "stores them as candidates. Report ids and any quarantines."),
+            tools=["knowledge_submit_entries"],
+            feeds_from=["gather"], depends_on=["gather"],
+        ),
+        PhaseSpec(
+            id="verify",
+            objective=(
+                "Verify the candidate entries for: {goal}\n"
+                "Call knowledge_verify for the pack and report the verdict "
+                "per entry (eligible/rejected with reasons), then "
+                "knowledge_status for the pack totals. Entries are NOT "
+                "published here: strict mode holds eligible entries for "
+                "human approval (selflearn approve / console)."),
+            tools=["knowledge_verify", "knowledge_status"],
+            feeds_from=["distill"], depends_on=["distill"],
+            hitl=True, hitl_timing="after",   # human reviews the verify report
+        ),
+    ],
+)
+
 TEMPLATES: dict[str, WorkflowTemplate] = {
-    t.id: t for t in (SOFTWARE_ENGINEERING, RESEARCH)
+    t.id: t for t in (SOFTWARE_ENGINEERING, RESEARCH, KNOWLEDGE_ACQUISITION)
 }
 
 
