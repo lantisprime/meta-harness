@@ -58,6 +58,9 @@ class HarnessState:
     secret_bindings: LocalSecretBindingRegistry = field(
         default_factory=LocalSecretBindingRegistry, repr=False
     )
+    # worker_id -> (packs, task_types) for session-only (persist=false)
+    # workers; durable bindings live on AgentConfig.knowledge_packs
+    ephemeral_knowledge_bindings: dict[str, tuple] = field(default_factory=dict)
 
     def save_config(self) -> None:
         """Write-through for the durable config, mirroring matrix/playbook."""
@@ -70,6 +73,7 @@ class HarnessState:
         self.config.hydrate_secret_bindings(self.secret_bindings)
 
     def __post_init__(self) -> None:
+        self._knowledge_hints = None    # rebuilt by refresh_knowledge_hints
         if self.learning is None:
             self.learning = LearningLoop(self.playbook)
         # F1 (panel 2026-07-09): a None budget silently no-op'd every budget=
@@ -192,17 +196,95 @@ class HarnessState:
             orchestrator_keypair=self.orchestrator_keypair,
             budget=self.budget,
             reflector=grounded_reflector,
-            playbook_hints=self.learning.hints_for,
+            playbook_hints=self.knowledge_aware_hints,
             observer=self.learning.observe,
             judge=judge_fn,
             workspace_root=self.tools.workspace_root,
         )
+        self.refresh_knowledge_hints()
         self.engine = WorkflowEngine(
             self.executor, journal_dir=journal_dir,
             # MCP tool names are namespaced. Treat any dotted external name as
             # gated even while its server is unloaded, closing load-time races.
             tool_requires_approval=lambda name: "." in name,
         )
+
+    # -- selflearn knowledge injection ------------------------------------
+
+    def knowledge_aware_hints(self, task) -> list:
+        """The executor's advice callable: playbook lessons first, then the
+        specialists' retrieved knowledge blocks. Knowledge failures warn
+        instead of failing the task — injection is advisory by design."""
+        import warnings
+
+        advice = list(self.learning.hints_for(task))
+        hints = self._knowledge_hints
+        if hints is not None:
+            try:
+                advice.extend(hints(task))
+            except Exception as exc:
+                warnings.warn(f"knowledge retrieval failed for task "
+                              f"{task.id!r}: {exc}", stacklevel=2)
+        return advice
+
+    def knowledge_specs(self) -> "dict[str, tuple]":
+        """worker_id -> (packs, task_types) for every knowledge-bound agent:
+        durable config entries plus session-only workers."""
+        bindings: dict[str, tuple] = {}
+        for agent in self.config.agents:
+            if agent.enabled and agent.knowledge_packs:
+                bindings[agent.worker_id] = (
+                    tuple(agent.knowledge_packs), tuple(agent.task_types))
+        bindings.update(self.ephemeral_knowledge_bindings)
+        return bindings
+
+    def refresh_knowledge_hints(self) -> None:
+        """Rebuild the knowledge-injection callable from the current agent
+        bindings. Call after workers change. Absent selflearn, an absent
+        store, or no bound packs all degrade to no injection — with a
+        warning when packs are bound but cannot be served, so a
+        misconfigured specialist never fails silently."""
+        import warnings
+
+        self._knowledge_hints = None
+        bindings = self.knowledge_specs()
+        if not bindings:
+            return
+        try:
+            from metaharness.knowledge import (
+                DEFAULT_KNOWLEDGE_ROOT,
+                make_knowledge_hints,
+                open_store,
+            )
+            from selflearn.specialist import SpecialistSpec
+
+            if not DEFAULT_KNOWLEDGE_ROOT.exists():
+                warnings.warn(
+                    f"agents bind knowledge packs but no store exists at "
+                    f"{DEFAULT_KNOWLEDGE_ROOT}; injection disabled until one "
+                    "is seeded (try: selflearn wizard)", stacklevel=2)
+                return
+            store = open_store()
+            specs = [SpecialistSpec(name=worker_id, packs=packs,
+                                    task_types=task_types)
+                     for worker_id, (packs, task_types)
+                     in sorted(bindings.items())]
+            embedder = self._knowledge_embedder()
+            self._knowledge_hints = make_knowledge_hints(
+                store, specs, embedder=embedder)
+        except Exception as exc:
+            warnings.warn(f"knowledge injection unavailable: {exc}",
+                          stacklevel=2)
+
+    def _knowledge_embedder(self):
+        """Optional semantic retrieval: settings.knowledge_embedding_endpoint
+        (+ _model) bind selflearn's embedder; unset means keyword mode."""
+        endpoint = self.config.settings.get("knowledge_embedding_endpoint", "")
+        model = self.config.settings.get("knowledge_embedding_model", "")
+        if not endpoint or not model:
+            return None
+        from metaharness.knowledge import OpenAICompatEmbedding
+        return OpenAICompatEmbedding(endpoint, model)
 
     def attach_tools(self, runner: Runner) -> None:
         """Point a runner (and whatever it wraps) at the shared tool registry.

@@ -1278,3 +1278,72 @@ async def test_knowledge_graph_endpoint(client, tmp_path, monkeypatch):
 async def test_dashboard_has_knowledge_view(client):
     resp = await client.get("/")
     assert "view-knowledge" in resp.text and "nav-knowledge" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Self-learning specialist binding through the web API
+# ---------------------------------------------------------------------------
+
+async def test_add_worker_with_knowledge_packs_injects_at_runtime(
+        wired_state, client, tmp_path, monkeypatch):
+    """POST /api/workers with knowledge_packs binds a selflearn pack; the
+    executor's advice callable then injects retrieved knowledge for tasks."""
+    import metaharness.knowledge as knowledge
+    from metaharness.core.types import Task
+
+    selflearn = pytest.importorskip("selflearn")
+    from selflearn.contracts import CandidateEntry, EntrySource, PublishDecision
+
+    root = tmp_path / "knowledge"
+    monkeypatch.setattr(knowledge, "DEFAULT_KNOWLEDGE_ROOT", root)
+    store = selflearn.PackStore(root)
+    store.add_candidate(CandidateEntry(
+        id="kn-lifespan", pack="fastapi", kind="knowledge",
+        body="FastAPI lifespan handlers replace on_event startup hooks.",
+        claims=("lifespan replaces on_event",), topic="lifespan",
+        sources=(EntrySource(url="https://fastapi.tiangolo.com/lifespan",
+                             fetched_at="2026-07-01", sha256="0" * 64,
+                             tier="official"),)))
+    store.publish("kn-lifespan", PublishDecision(
+        entry_id="kn-lifespan", publish=True, basis=("test",),
+        identity_basis="test"))
+
+    resp = await client.post("/api/workers", json={
+        "worker_id": "fastapi-specialist", "tier": "small", "kind": "mock",
+        "knowledge_packs": ["fastapi"], "persist": True})
+    assert resp.status_code == 201, resp.text
+
+    # the binding is durable config, visible over the API
+    cfg = (await client.get("/api/config")).json()
+    spec = next(a for a in cfg["agents"]
+                if a["worker_id"] == "fastapi-specialist")
+    assert spec["knowledge_packs"] == ["fastapi"]
+
+    # and live: the executor's advice callable now injects the pack
+    advice = wired_state.knowledge_aware_hints(
+        Task(objective="explain lifespan startup handlers"))
+    joined = "\n".join(advice)
+    assert "lifespan handlers replace on_event" in joined
+    assert "kn-lifespan" in joined          # provenance-traceable entry id
+
+    # removing the worker drops the binding and the injection
+    await client.delete("/api/workers/fastapi-specialist")
+    advice = wired_state.knowledge_aware_hints(
+        Task(objective="explain lifespan startup handlers"))
+    assert "lifespan handlers" not in "\n".join(advice)
+
+
+async def test_knowledge_packs_without_store_degrade_loudly(
+        wired_state, client, tmp_path, monkeypatch):
+    import metaharness.knowledge as knowledge
+
+    monkeypatch.setattr(knowledge, "DEFAULT_KNOWLEDGE_ROOT",
+                        tmp_path / "absent")
+    with pytest.warns(UserWarning, match="no store exists"):
+        resp = await client.post("/api/workers", json={
+            "worker_id": "specialist-nostore", "tier": "small",
+            "kind": "mock", "knowledge_packs": ["ghost"], "persist": True})
+    assert resp.status_code == 201
+    from metaharness.core.types import Task
+    assert wired_state.knowledge_aware_hints(Task(objective="x")) == \
+        wired_state.learning.hints_for(Task(objective="x"))

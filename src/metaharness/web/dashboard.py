@@ -2958,7 +2958,7 @@ function renderSettingsHome(){
       <div class="kv">${a.kind === 'coding_cli' ? 'CLI: ' + esc(a.cli) : esc(a.provider ? 'provider: ' + a.provider : a.base_url)}
         ${a.model ? ' · ' + esc(a.model) : ''}${a.system_prompt ? ' · has its own instructions' : ''}
         ${a.timeout_s ? ' · timeout ' + a.timeout_s + 's' : ''}</div>
-      <div class="small dim">Roles: ${esc((a.roles || []).join(', ') || 'any')} · Capabilities: ${esc((a.capabilities || []).join(', ') || 'general')}</div></div>
+      <div class="small dim">Roles: ${esc((a.roles || []).join(', ') || 'any')} · Capabilities: ${esc((a.capabilities || []).join(', ') || 'general')}${(a.knowledge_packs || []).length ? ' · 📚 knowledge: ' + esc(a.knowledge_packs.join(', ')) : ''}</div></div>
       <button class="pill" data-act="agent_edit" data-id="${i}">Edit</button>
       <button class="pill" data-act="agent_del" data-id="${esc(a.worker_id)}">Remove</button></div>`).join('')
     : '<div class="empty">no saved agents — the ones running now were auto-discovered and vanish when the server restarts</div>';
@@ -3473,6 +3473,7 @@ function startAgentWizard(a){
     system_prompt: a ? a.system_prompt : '', archetype: '',
     roles: a ? (a.roles || []).slice() : [],
     capabilities: a ? (a.capabilities || []).slice() : [],
+    knowledge_packs: a ? (a.knowledge_packs || []).slice() : [],
     timeout_s: a ? (a.timeout_s ?? null) : null,
     probed: [], test: null };
   if(SET.cfg) renderSettings(); else showView('settings');
@@ -3558,6 +3559,12 @@ function renderAgentWizard(){
         <span style="flex:1"><label for="aw-roles">Roles this agent can take</label><input id="aw-roles" value="${esc(w.roles.join(', '))}" placeholder="reviewer, implementer"></span>
         <span style="flex:1"><label for="aw-capabilities">Capability IDs</label><input id="aw-capabilities" value="${esc(w.capabilities.join(', '))}" placeholder="workspace.write, tests.run"></span></div>
       <div class="small dim">Comma-separated. Automatic assignment uses these exact IDs to match a stage's role and capability requirements.</div>
+      <div class="field"><label for="aw-packs">Knowledge packs — make this a self-learning specialist</label>
+        <input id="aw-packs" value="${esc(w.knowledge_packs.join(', '))}" placeholder="fastapi, security-hardening">
+        <span class="small dim">Comma-separated selflearn pack names. Published entries are retrieved
+        per task and injected as fenced, untrusted-advisory field notes; verified outcomes mark them
+        helpful/harmful so the packs keep learning. Build packs with
+        <span class="mono">selflearn wizard</span>; browse them in the Knowledge tab.</span></div>
       <div class="field"><label>System prompt — start from an archetype, then tailor it</label>
         <div class="pillrow">${Object.entries(PROMPT_ARCHETYPES).map(([k, a]) =>
           `<button class="pill ${w.archetype === k ? 'on' : ''}" onclick="agentArchetype('${k}')">${a.label}</button>`).join('')}</div>
@@ -3580,7 +3587,8 @@ function renderAgentWizard(){
       <div class="hint-panel"><b>About to ${w.editing ? 'update' : 'register'}</b>
         <span class="kv">${esc(w.worker_id)} · ${esc(w.tier)} · ${esc(w.kind)}
         ${w.kind === 'coding_cli' ? '· ' + esc(w.cli) : '· ' + esc(w.provider || w.base_url) + (w.model ? ' · ' + esc(w.model) : '')}
-        ${w.timeout_s ? ' · timeout ' + w.timeout_s + 's' : ''}</span></div>
+        ${w.timeout_s ? ' · timeout ' + w.timeout_s + 's' : ''}
+        ${w.knowledge_packs.length ? ' · knowledge: ' + esc(w.knowledge_packs.join(', ')) : ''}</span></div>
       <div style="display:flex;gap:10px;align-items:center">
         <button class="btn ghost" onclick="agentTest()">Test</button>
         <span class="small" id="aw-test">${w.test === null ? '' : w.test.ok
@@ -3637,6 +3645,7 @@ function agentCapture(){
   const prompt = grab('aw-prompt'); if(prompt !== null) w.system_prompt = prompt;
   const roles=grab('aw-roles'); if(roles !== null) w.roles=roles.split(',').map(x=>x.trim()).filter(Boolean);
   const capabilities=grab('aw-capabilities'); if(capabilities !== null) w.capabilities=capabilities.split(',').map(x=>x.trim()).filter(Boolean);
+  const packs=grab('aw-packs'); if(packs !== null) w.knowledge_packs=packs.split(',').map(x=>x.trim()).filter(Boolean);
   const timeout = grab('aw-timeout');
   if(timeout !== null){
     const n = parseFloat(timeout);
@@ -3695,7 +3704,8 @@ async function agentSave(){
   }
   const r = await post('/api/workers', {worker_id: w.worker_id, tier: w.tier, kind: w.kind,
     provider: w.provider, base_url: w.provider ? '' : w.base_url, model: w.model,
-    system_prompt: w.system_prompt, cli: w.cli, roles:w.roles, capabilities:w.capabilities, persist: true,
+    system_prompt: w.system_prompt, cli: w.cli, roles:w.roles, capabilities:w.capabilities,
+    knowledge_packs: w.knowledge_packs, persist: true,
     // a timeout entered before a kind switch to mock must not silently
     // reach a kind that has no timeout to apply it to (issue #2)
     ...(w.timeout_s && w.kind !== 'mock' ? {timeout_s: w.timeout_s} : {})});

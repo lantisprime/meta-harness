@@ -501,6 +501,15 @@ from metaharness.knowledge import (
   the hints callable from `SpecialistSpec`s and pass it to `TaskExecutor`
   alongside `playbook_hints`. Injected blocks land in task boundaries,
   fenced and marked untrusted-advisory.
+- **Binding from the web UI**: the Settings → agent wizard has a
+  *Knowledge packs* field (comma-separated pack names). `metaharness serve`
+  wires every bound agent's packs into the executor's advice path
+  automatically — retrieval runs per task against the store at
+  `~/.metaharness/knowledge` and re-wires live when agents are added or
+  removed. Keyword mode by default; set the
+  `knowledge_embedding_endpoint` and `knowledge_embedding_model` settings
+  in config.json for semantic scoring. Bound packs with no store degrade
+  loudly (a warning, no injection) instead of failing tasks.
 - **The `knowledge_acquisition` workflow template**: scope → gather →
   distill → verify, with a post-artifact HITL gate on the verification
   report. Workers drive it through `knowledge_gather`,

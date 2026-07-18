@@ -216,6 +216,9 @@ class AddWorkerRequest(BaseModel):
     task_types: list[str] = []
     roles: list[str] = []
     capabilities: list[str] = []
+    # selflearn packs retrieved into this agent's task prompts (the
+    # self-learning specialist binding; see the Knowledge tab)
+    knowledge_packs: list[str] = []
     temperature: float = 0.2
     thinking: Optional[bool] = None
     max_tokens: Optional[int] = 4000
@@ -1612,6 +1615,7 @@ def create_app(state: HarnessState) -> FastAPI:
             model=req.model, system_prompt=req.system_prompt,
             task_types=req.task_types, temperature=req.temperature,
             roles=req.roles, capabilities=req.capabilities,
+            knowledge_packs=req.knowledge_packs,
             max_tokens=req.max_tokens, thinking=req.thinking, cli=req.cli,
             # mock has no timeout to apply it to; a direct API caller bypasses
             # the wizard's JS guards, so drop it server-side too (issue #2
@@ -1662,6 +1666,11 @@ def create_app(state: HarnessState) -> FastAPI:
         if req.persist:
             state.config.upsert_agent(agent)
             state.save_config()
+        elif req.knowledge_packs:
+            state.ephemeral_knowledge_bindings[req.worker_id] = (
+                tuple(req.knowledge_packs), tuple(req.task_types))
+        if req.knowledge_packs:
+            state.refresh_knowledge_hints()
         return state.registry.get(req.worker_id).model_dump(mode="json")
 
     @app.delete("/api/workers/{worker_id}")
@@ -1688,6 +1697,8 @@ def create_app(state: HarnessState) -> FastAPI:
         removed = state.config.remove_agent(worker_id)
         if removed:
             state.save_config()
+        if state.ephemeral_knowledge_bindings.pop(worker_id, None) or removed:
+            state.refresh_knowledge_hints()
         return {"worker_id": worker_id, "deactivated": True, "config_removed": removed}
 
     @app.post("/api/test_worker")
