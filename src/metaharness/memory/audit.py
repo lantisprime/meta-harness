@@ -6,6 +6,12 @@ observability event describing the write is emitted. The default :class:
 ``commit()``. ``CommitOrderedMemoryStore`` here adds a post-commit audit hook
 that fires only after the underlying write is durable.
 
+FIX-15 durability caveat: ``synchronous=NORMAL`` makes the audit-after-commit
+boundary meaningful across close/reopen and process crashes, but it is NOT
+durable across an OS crash or power loss (see ``stores.py`` for the exact
+guarantee). The audit hook is therefore a post-COMMIT signal relative to the
+durable write semantics, not a fsync barrier.
+
 Bind a sink via :func:`bind_sink`; events emitted from the store are then
 dispatched to your sink. Tests use this to verify the order contract.
 """

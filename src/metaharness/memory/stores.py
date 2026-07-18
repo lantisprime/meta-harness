@@ -5,6 +5,14 @@ The four subclass stores (Episodic/Semantic/Working/Procedural) differ only by
 default_kind; their durability and contract surface are identical. Records
 survive close/reopen (WAL + numbered migrations). In-memory mode for tests
 where durability isn't under test.
+
+FIX-15: durability guarantee is precise. ``journal_mode=WAL`` plus
+``synchronous=NORMAL`` makes a record durably visible to a subsequent
+connection after a normal ``close()`` and across process crashes. It does
+NOT promise durability across an OS crash or power loss; the spec only
+requires close/reopen survival, which WAL + NORMAL satisfies. If full
+ACID-on-power-loss is ever required, switch ``synchronous`` to ``FULL`` (at
+the cost of fsync per transaction).
 """
 from __future__ import annotations
 
@@ -79,15 +87,23 @@ class MemoryStore:
         self._lock = threading.RLock()
         # isolation_level=None puts sqlite3 in autocommit mode; that gives
         # us a clean commit-before-emit boundary for the audit hook to rely
-        # on (durable commit must precede any observability event).
+        # on (durable commit must precede any observability event). The
+        # outer ``_transaction(mode="outer")`` path used by ``mutate()`` opens
+        # an explicit BEGIN IMMEDIATE so the record insert, the FTS row, and
+        # the mutation-receipt insert are one durable transaction.
         self._conn = sqlite3.connect(self._path, isolation_level=None, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
+        # synchronous=NORMAL is the WAL-compatible default that gives
+        # close/reopen + process-crash durability without an fsync per commit
+        # (which is what WAL is for). It is NOT durable across OS crash or
+        # power loss; if that becomes a requirement, switch to FULL.
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._clock_fn: Callable[[], int] = clock if clock is not None else self._default_clock
         self._id_counter = itertools.count(0)
         self._id_factory: Callable[[], str] = id_factory if id_factory is not None else self._default_id_factory
         self._migrate()
+        self._recover_high_water_marks()
 
     # -- public API ------------------------------------------------------------
 
@@ -114,29 +130,22 @@ class MemoryStore:
         fired after commit() may trust the record is durable.
         """
 
-        resolved_kind = self._resolve_kind(kind)
-        record_id = self._id_factory()
-        with self._lock:
-            record = MemoryRecord(
-                id=record_id,
-                kind=resolved_kind,
-                scope=scope if scope is not None else _DEFAULT_SCOPE_FACTORY(),
-                content=content,
-                normalized_content=normalize_text(content),
-                source_refs=tuple(source_refs),
-                observed_at=observed_at if observed_at is not None else self._clock_fn(),
-                valid_from=valid_from,
-                valid_until=valid_until,
-                confidence=confidence,
-                sensitivity=sensitivity,
-                creator_id=creator_id,
-                activation_state=activation_state,
-                lifecycle_state=lifecycle_state,
-                supersedes=tuple(supersedes),
-                usage_count=usage_count,
-                creation_seq=next(self._id_counter),
-            )
-            self._insert_record(record)
+        record = self._build_and_insert_record(
+            kind=kind,
+            content=content,
+            scope=scope,
+            source_refs=source_refs,
+            observed_at=observed_at,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            confidence=confidence,
+            sensitivity=sensitivity,
+            creator_id=creator_id,
+            activation_state=activation_state,
+            lifecycle_state=lifecycle_state,
+            supersedes=supersedes,
+            usage_count=usage_count,
+        )
         return record
 
     def overwrite(self, record_id: str, *, content: str) -> None:
@@ -163,6 +172,11 @@ class MemoryStore:
         MemoryMutationReceipt. receipt=None raises UnreceiptedMutationError
         BEFORE any database write — unreceipted mutation is forbidden.
 
+        FIX-1: the supersede record insert, its FTS row, and the mutation
+        receipt insert run inside one transaction. Receipt construction
+        happens before the transaction opens so a construction failure
+        cannot leave a durable orphan record.
+
         ``receipt`` is the receipted mutation marker (any non-None value is
         accepted; ``None`` is the unallowed sentinel). The MutationReceipt
         is constructed and persisted here, so callers don't have to
@@ -180,7 +194,7 @@ class MemoryStore:
                 raise KeyError(f"no memory record with id {record_id!r}")
             requested_observed = commit_kwargs.pop("observed_at", None)
             observed = requested_observed if requested_observed is not None else self._clock_fn()
-            new_record = self.commit(
+            new_record = self._build_record(
                 kind=existing.kind,
                 content=content,
                 scope=existing.scope,
@@ -194,6 +208,7 @@ class MemoryStore:
                 activation_state=commit_kwargs.pop("activation_state", ActivationState.ACTIVE),
                 lifecycle_state=commit_kwargs.pop("lifecycle_state", LifecycleState.ACTIVE),
                 supersedes=(existing.id,),
+                usage_count=existing.usage_count,
                 **commit_kwargs,
             )
             mutation_receipt = MemoryMutationReceipt(
@@ -208,7 +223,9 @@ class MemoryStore:
                 observed_at=observed,
                 mutation_reason=mutation_reason,
             )
-            self._insert_mutation(mutation_receipt)
+            with self._transaction(mode="outer"):
+                self._insert_record_no_savepoint(new_record)
+                self._insert_mutation_no_savepoint(mutation_receipt)
         return new_record
 
     def get(self, record_id: str) -> MemoryRecord | None:
@@ -297,6 +314,44 @@ class MemoryStore:
             return kind
         return MemoryKind(kind)
 
+    def _recover_high_water_marks(self) -> None:
+        """FIX-7: on reopen, seed ``_id_counter`` and ``_id_counter`` for the
+        default slug from the durable database so the next default-id commit
+        does not collide with existing rows. Also restores ``creation_seq`` by
+        reading ``MAX(creation_seq)`` so list() ordering is preserved.
+
+        Custom ``id_factory`` callers are responsible for their own continuity;
+        this only adjusts the default factory's counter.
+        """
+
+        if self._id_factory != self._default_id_factory:
+            return
+        slug = (self.default_kind.value if self.default_kind is not None else "memory").replace("_", "-")
+        prefix = f"{slug}-"
+        with self._lock:
+            try:
+                rows = self._conn.execute(
+                    "SELECT id, creation_seq FROM records WHERE id LIKE ?",
+                    (f"{prefix}%",),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return
+        max_seq = -1
+        max_counter = -1
+        for record_id, creation_seq in rows:
+            try:
+                max_seq = max(max_seq, int(creation_seq))
+            except (TypeError, ValueError):
+                continue
+            tail = record_id[len(prefix):]
+            try:
+                max_counter = max(max_counter, int(tail, 16))
+            except ValueError:
+                continue
+        for _ in range(max_counter + 1):
+            next(self._id_counter)
+        self._default_clock_seq = itertools.count(max_seq + 1000).__next__
+
     def _default_clock(self) -> int:
         """Injectable-clock default: monotonic in-process counter. Never
         wall-clock; tests stay deterministic regardless of system time."""
@@ -311,7 +366,17 @@ class MemoryStore:
         return f"{slug}-{counter:08x}"
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, mode: str = "savepoint"):
+        if mode == "outer":
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+            return
         # autocommit is on; we use SAVEPOINT so commit()/mutate() can
         # compose. SAVEPOINT names must be plain identifiers (no '-'); we
         # also strip the decimal `id(self)` to keep the name sqlite-safe.
@@ -413,6 +478,86 @@ class MemoryStore:
                 """
             )
 
+    def _build_record(
+        self,
+        *,
+        kind: str | MemoryKind | None,
+        content: str,
+        scope: ContextScope | None,
+        source_refs: Iterable[str],
+        observed_at: int,
+        valid_from: int | None,
+        valid_until: int | None,
+        confidence: float,
+        sensitivity: Sensitivity,
+        creator_id: str,
+        activation_state: ActivationState,
+        lifecycle_state: LifecycleState,
+        supersedes: Iterable[str],
+        usage_count: int,
+    ) -> MemoryRecord:
+        """FIX-1 / FIX-10: build the in-memory MemoryRecord without touching
+        the database. Lets ``mutate()`` open one outer transaction for the
+        record + receipt inserts and lets ``commit()`` stay audit-driven."""
+
+        return MemoryRecord(
+            id=self._id_factory(),
+            kind=self._resolve_kind(kind),
+            scope=scope if scope is not None else _DEFAULT_SCOPE_FACTORY(),
+            content=content,
+            normalized_content=normalize_text(content),
+            source_refs=tuple(source_refs),
+            observed_at=observed_at,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            confidence=confidence,
+            sensitivity=sensitivity,
+            creator_id=creator_id,
+            activation_state=activation_state,
+            lifecycle_state=lifecycle_state,
+            supersedes=tuple(supersedes),
+            usage_count=usage_count,
+            creation_seq=next(self._id_counter),
+        )
+
+    def _build_and_insert_record(
+        self,
+        *,
+        kind: str | MemoryKind | None,
+        content: str,
+        scope: ContextScope | None,
+        source_refs: Iterable[str],
+        observed_at: int | None,
+        valid_from: int | None,
+        valid_until: int | None,
+        confidence: float,
+        sensitivity: Sensitivity,
+        creator_id: str,
+        activation_state: ActivationState,
+        lifecycle_state: LifecycleState,
+        supersedes: Iterable[str],
+        usage_count: int,
+    ) -> MemoryRecord:
+        with self._lock:
+            record = self._build_record(
+                kind=kind,
+                content=content,
+                scope=scope,
+                source_refs=source_refs,
+                observed_at=observed_at if observed_at is not None else self._clock_fn(),
+                valid_from=valid_from,
+                valid_until=valid_until,
+                confidence=confidence,
+                sensitivity=sensitivity,
+                creator_id=creator_id,
+                activation_state=activation_state,
+                lifecycle_state=lifecycle_state,
+                supersedes=supersedes,
+                usage_count=usage_count,
+            )
+            self._insert_record(record)
+        return record
+
     def _insert_record(self, record: MemoryRecord) -> None:
         with self._transaction():
             self._conn.execute(
@@ -455,6 +600,50 @@ class MemoryStore:
                 (record.id, record.normalized_content),
             )
 
+    def _insert_record_no_savepoint(self, record: MemoryRecord) -> None:
+        """FIX-1: caller already opened the outer transaction; this insert
+        must not nest a SAVEPOINT that could be released early."""
+
+        self._conn.execute(
+            """
+            INSERT INTO records(
+                id, kind, project_id, run_id, task_id, attempt_id, lineage_id,
+                content, source_refs_json, observed_at, valid_from, valid_until,
+                confidence, lifecycle_state, activation_state, superseded_by, supersedes_json,
+                sensitivity, creator_id, usage_count, last_accessed_at, creation_seq, tombstone_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.id,
+                record.kind.value,
+                record.scope.project_id,
+                record.scope.run_id,
+                record.scope.task_id,
+                record.scope.attempt_id,
+                record.scope.lineage_id,
+                record.content,
+                _canonical_json_str(record.source_refs),
+                record.observed_at,
+                record.valid_from,
+                record.valid_until,
+                record.confidence,
+                record.lifecycle_state.value,
+                record.activation_state.value,
+                record.superseded_by,
+                _canonical_json_str(record.supersedes),
+                record.sensitivity.value,
+                record.creator_id,
+                record.usage_count,
+                record.last_accessed_at,
+                record.creation_seq,
+                record.tombstone_reason,
+            ),
+        )
+        self._conn.execute(
+            "INSERT INTO records_fts(record_id, normalized_content) VALUES (?, ?)",
+            (record.id, record.normalized_content),
+        )
+
     def _insert_mutation(self, mutation: MemoryMutationReceipt) -> None:
         with self._transaction():
             self._conn.execute(
@@ -480,6 +669,35 @@ class MemoryStore:
                     mutation.content_hash,
                 ),
             )
+
+    def _insert_mutation_no_savepoint(self, mutation: MemoryMutationReceipt) -> None:
+        """FIX-1: caller (mutate) already opened a BEGIN/COMMIT; this insert
+        must not start a nested savepoint or it could be released ahead of
+        the receipt insert and break atomicity."""
+
+        self._conn.execute(
+            """
+            INSERT INTO mutations(
+                mutation_id, target_record_id, supersede_record_id,
+                before_content_hash, after_content_hash,
+                before_lifecycle, after_lifecycle,
+                actor_id, observed_at, mutation_reason, content_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mutation.mutation_id,
+                mutation.target_record_id,
+                mutation.supersede_record_id,
+                mutation.before_content_hash,
+                mutation.after_content_hash,
+                mutation.before_lifecycle.value,
+                mutation.after_lifecycle.value,
+                mutation.actor_id,
+                mutation.observed_at,
+                mutation.mutation_reason,
+                mutation.content_hash,
+            ),
+        )
 
     def _fetch_record_locked(self, record_id: str) -> MemoryRecord | None:
         row = self._conn.execute(

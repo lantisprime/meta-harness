@@ -362,6 +362,9 @@ def test_broker_converts_lifecycle_bypass_into_reviewable_proposal():
 
 
 def test_broker_rejects_direct_tombstone_as_proposal():
+    """FIX-4: lifecycle operations on unknown targets are REJECTED, not
+    converted to proposals. Only well-typed, in-scope lifecycle targets
+    become reviewable proposals."""
     broker = MemoryActionBroker(snapshot=_snapshot(), stores=_stores(), clock=lambda: 0)
     receipt = broker.invoke(
         {
@@ -371,7 +374,9 @@ def test_broker_rejects_direct_tombstone_as_proposal():
             "payload": {"record_ids": ["ghost"]},
         }
     )
-    assert receipt.outcome is MemoryActionOutcome.PROPOSED
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "lifecycle proposal" in receipt.effect_or_rejection_reason
+    assert broker.proposals == ()
 
 
 # -- receipt immutability + self-verifying hash --------------------------------
@@ -663,3 +668,332 @@ def test_receipt_carries_store_high_water_marks_under_scope():
 def test_normalize_text_used_by_scaffold_is_stable():
     assert normalize_text("  Hello   WORLD  ") == "hello world"
     assert normalize_text("Hello   WORLD") == normalize_text("HELLO world")
+
+
+# ---------------------------------------------------------------------------
+# META-6 fix-batch-1 broker regression tests. Each cites its FIX id.
+# ---------------------------------------------------------------------------
+
+
+def test_FIX_02_broker_emits_receipt_when_store_write_raises_operational_error():
+    """FIX-2(a): a sqlite3 error from the underlying store must be caught
+    and turned into a rejection receipt, never a silent zero-receipt path."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    seed = store.commit(
+        kind="episodic_memory",
+        content="seed",
+        scope=ContextScope(project_id="meta-harness"),
+        lifecycle_state=LifecycleState.CANDIDATE,
+    )
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": store},
+        clock=lambda: 0,
+    )
+    # Drop the FTS table to force an OperationalError in the candidate write.
+    store._conn.execute("DROP TABLE records_fts")
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.REVISE_CANDIDATE,
+            phase=MemoryPhase.MAINTAIN,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"target_record_id": seed.id, "content": "attempted write"},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "operational error" in receipt.effect_or_rejection_reason or "policy:rejected" in receipt.validation_results
+    assert len(broker.receipts) == 1
+    assert broker.receipts[0] is receipt
+
+
+def test_FIX_02_broker_emits_receipt_when_context_is_not_json_serializable():
+    """FIX-2(b): a non-JSON-serializable context must yield a rejection
+    receipt, not a bare TypeError that escapes invoke()."""
+
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        {"operation": "search", "phase": "consult", "scope": ContextScope(project_id="meta-harness"),
+         "payload": {"query": "x"}},
+        context_id="ctx-1",
+        context={"weird": object()},
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert len(broker.receipts) == 1
+
+
+def test_FIX_02_broker_rejects_empty_context_id_before_any_store_write():
+    """FIX-2 (receipt-critical input): an empty context_id is rejected
+    before any store write, so a construction failure cannot follow a
+    successful write."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": store},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "x"},
+        ),
+        context_id="",
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "context_id" in receipt.effect_or_rejection_reason
+    assert store.list(project_id="meta-harness") == []
+
+
+def test_FIX_04_lifecycle_proposal_cross_scope_target_is_rejected_not_stored():
+    """FIX-4: a lifecycle operation against a cross-scope target is
+    REJECTED, never converted to a stored proposal."""
+
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        {
+            "operation": "delete",
+            "phase": "maintain",
+            "scope": ContextScope(project_id="project-x").model_dump(mode="json"),
+            "payload": {"record_ids": ["ghost"]},
+        }
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert broker.proposals == ()
+
+
+def test_FIX_04_lifecycle_proposal_unknown_target_is_rejected_not_stored():
+    """FIX-4: a lifecycle operation against an unknown target is REJECTED
+    (not converted to a proposal for a non-existent record)."""
+
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        {
+            "operation": "tombstone",
+            "phase": "log",
+            "scope": ContextScope(project_id="meta-harness"),
+            "payload": {"record_ids": ["ghost"]},
+        }
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "lifecycle proposal" in receipt.effect_or_rejection_reason
+    assert broker.proposals == ()
+
+
+def test_FIX_05_read_rejects_tombstoned_record_with_rejection_receipt():
+    """FIX-5: a direct-id read against a TOMBSTONED record is rejected
+    instead of returning evidence the snapshot policy hides."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    rec = store.commit(
+        kind="episodic_memory",
+        content="still here",
+        scope=ContextScope(project_id="meta-harness"),
+        lifecycle_state=LifecycleState.TOMBSTONED,
+        activation_state=ActivationState.TOMBSTONED,
+    )
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": store},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.READ,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"record_ids": [rec.id]},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "tombstoned" in receipt.effect_or_rejection_reason
+    assert rec.id not in receipt.selected_targets
+
+
+def test_FIX_06_secret_source_record_blocks_public_candidate_append():
+    """FIX-6: a SECRET same-scope source record cannot be silently cited
+    when the candidate is allowed only for PUBLIC/INTERNAL sensitivities."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    secret = store.commit(
+        kind="episodic_memory",
+        content="SECRET",
+        scope=ContextScope(project_id="meta-harness"),
+        sensitivity=Sensitivity.SECRET,
+        lifecycle_state=LifecycleState.ACTIVE,
+        activation_state=ActivationState.ACTIVE,
+    )
+    snap = _snapshot(allowed_sensitivities=(Sensitivity.PUBLIC, Sensitivity.INTERNAL))
+    broker = MemoryActionBroker(snapshot=snap, stores={"episodic_memory": store}, clock=lambda: 0)
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.APPEND,
+            phase=MemoryPhase.LOG,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"kind": "episodic_memory", "content": "citing secret", "source_record_ids": [secret.id]},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "sensitivity" in receipt.effect_or_rejection_reason
+    assert store.list(project_id="meta-harness", kind="episodic_memory", lifecycle_state=LifecycleState.ACTIVE).__len__() == 1
+
+
+def test_FIX_08_context_hash_must_match_canonical_json_of_context():
+    """FIX-8: when both context and context_hash are supplied, the broker
+    must verify the hash matches. Mismatch = REJECTED receipt."""
+
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "alpha"},
+        ),
+        context_id="ctx-1",
+        context={"task": "t-1"},
+        context_hash="sha256:" + "0" * 64,
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "context_hash" in receipt.effect_or_rejection_reason
+
+
+def test_FIX_11_search_deterministically_supersedes_superseded_records():
+    """FIX-11: candidate selection suppresses any record whose id appears in
+    another record's ``supersedes`` (latest-in-chain wins)."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    original = store.commit(
+        kind="episodic_memory",
+        content="original alpha",
+        lifecycle_state=LifecycleState.ACTIVE,
+        activation_state=ActivationState.ACTIVE,
+    )
+    revised = store.mutate(
+        original.id,
+        content="revised alpha",
+        receipt="permit",
+        lifecycle_state=LifecycleState.ACTIVE,
+        activation_state=ActivationState.ACTIVE,
+        mutation_reason="update",
+    )
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"episodic_memory": store},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "alpha", "limit": 5},
+        )
+    )
+    assert revised.id in receipt.selected_targets or revised.id in receipt.considered_targets
+    # The original was superseded by revised; it must NOT appear in either
+    # set because of the deterministic suppression rule.
+    assert original.id not in receipt.considered_targets
+    assert original.id not in receipt.selected_targets
+
+
+def test_FIX_12_fts5_token_match_is_used_for_search():
+    """FIX-12: lexical matching uses the FTS5 index — token-level match,
+    not substring. 'cat' must not match 'category' (different tokens)."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    cat_record = store.commit(
+        kind="episodic_memory",
+        content="a single cat sat on a mat",
+    )
+    category_record = store.commit(
+        kind="episodic_memory",
+        content="the category of items is broad",
+    )
+    broker = MemoryActionBroker(
+        snapshot=_snapshot(),
+        stores={"memory": store},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "cat", "limit": 5},
+        )
+    )
+    assert cat_record.id in receipt.selected_targets
+    assert category_record.id not in receipt.selected_targets
+    assert "fts_token_match:applied" in receipt.redaction_results
+
+
+def test_FIX_13_domain_marker_rejected_when_nested_in_payload():
+    """FIX-13: the domain-marker check is recursive, not top-level only."""
+
+    snap = _snapshot()
+    broker = MemoryActionBroker(
+        snapshot=snap,
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.APPEND,
+            phase=MemoryPhase.LOG,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={
+                "kind": "episodic_memory",
+                "content": "x",
+                "nested": {"task_action": "write_test"},
+            },
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "domain task actions" in receipt.effect_or_rejection_reason
+
+
+def test_FIX_14_lifecycle_enum_in_payload_does_not_trigger_false_proposal():
+    """FIX-14: a payload carrying the LifecycleState.CANDIDATE enum
+    (str() is the qualified name) must not be reported as a lifecycle
+    transition and must not produce a spurious PROPOSED."""
+
+    snap = _snapshot()
+    broker = MemoryActionBroker(
+        snapshot=snap,
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.CREATE_CANDIDATE,
+            phase=MemoryPhase.LOG,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={
+                "kind": "episodic_memory",
+                "content": "candidate with enum",
+                "lifecycle_state": LifecycleState.CANDIDATE,
+            },
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.ACCEPTED
+    assert receipt.selected_targets
+    assert broker.proposals == ()

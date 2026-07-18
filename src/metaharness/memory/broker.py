@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import sqlite3
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping
@@ -431,26 +432,113 @@ class MemoryActionBroker:
         context: Mapping[str, Any] | None = None,
         context_hash: str | None = None,
     ) -> MemoryActionReceipt:
+        # FIX-2: validate the receipt-critical context_id BEFORE any store
+        # write so a construction failure cannot follow a successful write.
+        # Coerce empty/whitespace to a placeholder so the rejection receipt
+        # itself is constructible (its schema requires min_length=1).
+        receipt_context_id = context_id if isinstance(context_id, str) and context_id.strip() else "shadow-context:missing"
+        if context_id != receipt_context_id:
+            return self._emit_receipt(
+                context_id=receipt_context_id,
+                context_hash="sha256:" + "0" * 64,
+                scope=self.snapshot.scope,
+                phase="invalid",
+                operation="invalid",
+                payload={},
+                observed_at=self._safe_clock(),
+                input_tokens=0,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason="context_id must be a non-empty string (receipt-critical input)",
+                validation=("broker_mode:shadow", "context_id:rejected"),
+            )
+
+        try:
+            return self._invoke_locked(
+                action,
+                context_id=context_id,
+                context=context,
+                context_hash=context_hash,
+            )
+        except _BrokerRejection as exc:
+            # The structured path already returns receipts; this catch exists
+            # for defensive completeness and is a no-op when _invoke_locked
+            # has already produced one.
+            return self._emit_receipt(
+                context_id=context_id,
+                context_hash=self._safe_context_hash(
+                    context_id=context_id, context=context,
+                    context_hash=context_hash, scope=self.snapshot.scope,
+                ),
+                scope=self.snapshot.scope,
+                phase="invalid",
+                operation="invalid",
+                payload={},
+                observed_at=self._safe_clock(),
+                input_tokens=0,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason=f"broker rejection escaped: {exc.reason}",
+                validation=("broker_mode:shadow", "policy:rejected"),
+                considered=exc.considered,
+                redaction_results=exc.redaction_results,
+            )
+        except Exception as exc:  # FIX-2: catch any escape and emit a receipt.
+            return self._emit_receipt(
+                context_id=context_id,
+                context_hash=self._safe_context_hash(
+                    context_id=context_id, context=context,
+                    context_hash=context_hash, scope=self.snapshot.scope,
+                ),
+                scope=self.snapshot.scope,
+                phase="invalid",
+                operation="invalid",
+                payload={},
+                observed_at=self._safe_clock(),
+                input_tokens=0,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason=f"operational error: {type(exc).__name__}: {exc}",
+                validation=("broker_mode:shadow", "execution:rejected"),
+            )
+
+    def _invoke_locked(
+        self,
+        action: MemoryAction | Mapping[str, Any],
+        *,
+        context_id: str,
+        context: Mapping[str, Any] | None,
+        context_hash: str | None,
+    ) -> MemoryActionReceipt:
         raw = self._raw_action(action)
-        operation = str(raw.get("operation", "invalid"))
+        raw_operation_value = self._raw_operation_value(raw)
         phase = str(raw.get("phase", "invalid"))
         scope = self._receipt_scope(raw.get("scope"))
         payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
         observed_at = self._clock()
-        resolved_context_hash = self._resolve_context_hash(
+        # FIX-2 / FIX-8: never let serialization raise. Compute the context
+        # hash with a defensive fallback and reject mismatches as a
+        # receipted outcome.
+        resolved_context_hash, context_hash_rejection = self._safe_resolve_context_hash(
             context_id=context_id,
             context=context,
             context_hash=context_hash,
             scope=scope,
         )
-        input_tokens = self._tokens(canonical_json(self._raw_tokenizable(raw)))
+        if context_hash_rejection is not None:
+            return self._emit_receipt(
+                context_id=context_id,
+                context_hash="sha256:" + "0" * 64,
+                scope=scope,
+                phase=phase,
+                operation=raw_operation_value,
+                payload=payload,
+                observed_at=observed_at,
+                input_tokens=0,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason=context_hash_rejection,
+                validation=("broker_mode:shadow", "context_hash:rejected"),
+            )
+        input_tokens = self._safe_tokens(raw)
         validation = ["broker_mode:shadow"]
 
-        raw_operation = raw.get("operation")
-        if isinstance(raw_operation, MemoryOperation):
-            raw_operation_value = raw_operation.value
-        else:
-            raw_operation_value = str(raw_operation) if raw_operation is not None else "invalid"
         if raw_operation_value in self._DOMAIN_OPERATIONS:
             return self._emit_receipt(
                 context_id=context_id,
@@ -466,7 +554,7 @@ class MemoryActionBroker:
                 validation=validation + ["domain_authority:rejected"],
             )
         if raw_operation_value in self._LIFECYCLE_OPERATIONS:
-            return self._make_proposal_receipt(
+            return self._propose_lifecycle_action(
                 kind=self._LIFECYCLE_OPERATIONS[raw_operation_value],
                 requested_transition=raw_operation_value,
                 raw=raw,
@@ -509,10 +597,10 @@ class MemoryActionBroker:
         if rejection is not None:
             if rejection.reason.startswith("lifecycle bypass:"):
                 transition = rejection.reason.split(":", 1)[1].strip()
-                return self._make_proposal_receipt(
+                return self._propose_lifecycle_action(
                     kind=self._proposal_kind(transition),
                     requested_transition=transition,
-                    raw=raw,
+                    raw={"operation": transition, "phase": phase, "scope": scope, "payload": payload},
                     context_id=context_id,
                     context_hash=resolved_context_hash,
                     scope=scope,
@@ -579,6 +667,74 @@ class MemoryActionBroker:
             redaction_results=effect.redaction_results,
         )
 
+    def _raw_operation_value(self, raw: Mapping[str, Any]) -> str:
+        op = raw.get("operation")
+        if isinstance(op, MemoryOperation):
+            return op.value
+        return str(op) if op is not None else "invalid"
+
+    def _safe_clock(self) -> int:
+        try:
+            return self._clock()
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _safe_tokens(raw: Mapping[str, Any]) -> int:
+        try:
+            return len(canonical_json(raw).split())
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _safe_resolve_context_hash(
+        *,
+        context_id: str,
+        context: Mapping[str, Any] | None,
+        context_hash: str | None,
+        scope: ContextScope,
+    ) -> tuple[str, str | None]:
+        """FIX-8: when both context and context_hash are supplied, verify the
+        hash matches the canonical-JSON(context). Returns (hash, rejection_or_None).
+        FIX-2: never let serialization raise; if context is not JSON-safe,
+        return a zero hash and a rejection message."""
+
+        if context_hash is not None and not _SHA256_RE.fullmatch(context_hash):
+            return "sha256:" + "0" * 64, "context_hash is not a sha256 digest"
+        if context is None:
+            if context_hash is not None:
+                return context_hash, None
+            material = {
+                "context_id": context_id,
+                "scope": scope.model_dump(mode="json"),
+            }
+            return calculate_content_hash(material), None
+        try:
+            material = {
+                "context_id": context_id,
+                "scope": scope.model_dump(mode="json"),
+                "context": context,
+            }
+            computed = calculate_content_hash(material)
+        except (TypeError, ValueError):
+            return "sha256:" + "0" * 64, "context is not JSON-serializable"
+        if context_hash is not None and context_hash != computed:
+            return computed, "context_hash does not match canonical-JSON(context)"
+        return computed, None
+
+    def _safe_context_hash(
+        self,
+        *,
+        context_id: str,
+        context: Mapping[str, Any] | None,
+        context_hash: str | None,
+        scope: ContextScope,
+    ) -> str:
+        return self._safe_resolve_context_hash(
+            context_id=context_id, context=context,
+            context_hash=context_hash, scope=scope,
+        )[0]
+
     def _validate_action(self, action: MemoryAction) -> _BrokerRejection | None:
         if self.snapshot.lifecycle_state is not LifecycleState.ACTIVE:
             return _BrokerRejection("snapshot lifecycle is not active")
@@ -590,7 +746,8 @@ class MemoryActionBroker:
             return _BrokerRejection("operation is not permitted by the phase contract")
         if self._contains_path_traversal(action.payload):
             return _BrokerRejection("path traversal is forbidden in memory action payloads")
-        if any(key in action.payload for key in self._DOMAIN_PAYLOAD_KEYS):
+        # FIX-13: domain-marker check is recursive, not top-level only.
+        if self._payload_keys(action.payload) & self._DOMAIN_PAYLOAD_KEYS:
             return _BrokerRejection("domain task actions have no authority through the shadow memory broker")
         if action.operation in self._WRITE_OPERATIONS:
             immutable_kind = action.payload.get("target_kind", action.payload.get("source_kind"))
@@ -650,12 +807,18 @@ class MemoryActionBroker:
             raise _BrokerRejection("search requires a non-empty query")
         lifecycle_filters = self._lifecycle_filters(action.payload)
         requested_kind = self._optional_kind(action.payload.get("kind"))
-        terms = tuple(dict.fromkeys(normalize_text(query).split()))
-        ranked: list[tuple[int, float, int, str, str, MemoryRecord]] = []
+        terms = tuple(token for token in normalize_text(query).split() if token)
+        if not terms:
+            raise _BrokerRejection("search requires at least one lexical term")
+        # FIX-12: lexical matching uses the FTS5 index for token-level match.
+        # FTS5 bm25 is non-deterministic across platforms so we treat the
+        # index only as a membership filter; the visible-candidate ordering
+        # is fully determined by creation_seq + record_id + store_name.
+        fts_store, fts_matches = self._fts_intersect(terms)
+        ranked: list[tuple[int, str, str, MemoryRecord]] = []
         redacted = 0
         for store_name, store in self._stores.items():
-            records = store.list(project_id=action.scope.project_id, include_tombstoned=True)
-            for record in records:
+            for record in store.list(project_id=action.scope.project_id, include_tombstoned=True):
                 if not self._record_visible(action.scope, record):
                     continue
                 if record.activation_state is not ActivationState.ACTIVE:
@@ -664,23 +827,29 @@ class MemoryActionBroker:
                     continue
                 if requested_kind is not None and record.kind is not requested_kind:
                     continue
-                score = sum(record.normalized_content.count(term) for term in terms)
-                if score < self.snapshot.query_min_lexical_score:
+                if fts_matches is not None and record.id not in fts_matches:
                     continue
                 if record.sensitivity not in self.snapshot.allowed_sensitivities:
                     redacted += 1
                     continue
-                ranked.append((-score, -record.confidence, record.creation_seq, record.id, store_name, record))
-        ranked.sort(key=lambda item: item[:5])
-        considered = tuple(item[5].id for item in ranked)
+                ranked.append((record.creation_seq, record.id, store_name, record))
+        # FIX-11: deterministically suppress any record whose id appears in
+        # another record's `supersedes` (latest-in-chain wins).
+        superseded_ids = {
+            sup_id
+            for _, _, _, rec in ranked
+            for sup_id in rec.supersedes
+        }
+        ranked = [item for item in ranked if item[1] not in superseded_ids]
+        ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+        considered = tuple(item[1] for item in ranked)
         raw_limit = action.payload.get("limit", self.snapshot.query_max_results)
         if not isinstance(raw_limit, int) or isinstance(raw_limit, bool) or raw_limit <= 0:
             raise _BrokerRejection("search limit must be a positive integer")
         limit = min(raw_limit, self.snapshot.query_max_results)
         selected: list[MemoryRecord] = []
         used_tokens = 0
-        for item in ranked:
-            record = item[5]
+        for _, _, _, record in ranked:
             record_tokens = self._tokens(record.content)
             if used_tokens + record_tokens > self.snapshot.context_budget_tokens:
                 continue
@@ -691,6 +860,7 @@ class MemoryActionBroker:
         redaction_results = (
             f"sensitivity_filtered:{redacted}",
             "context_budget:applied",
+            "fts_token_match:applied" if fts_matches is not None else "fts_token_match:bypassed",
         )
         return _ExecutionEffect(
             reason="scoped deterministic search completed",
@@ -700,15 +870,74 @@ class MemoryActionBroker:
             output_tokens=used_tokens,
         )
 
+    def _fts_intersect(self, terms: tuple[str, ...]) -> tuple[MemoryStore | None, frozenset[str] | None]:
+        """FIX-12: run an FTS5 prefix-AND-query across the terms. Returns
+        (fts_store, matching_ids). If no store has an FTS5 index (e.g. an
+        in-memory store with no pre-populated rows), returns (None, None)
+        so the search path falls back to per-record visibility checks
+        without resurrecting the dead substring-scoring path.
+        """
+
+        candidates: list[tuple[MemoryStore, set[str]]] = []
+        for store in self._stores.values():
+            conn = getattr(store, "_conn", None)
+            if conn is None:
+                continue
+            try:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE name='records_fts'"
+                ).fetchone()
+            except Exception:
+                continue
+            if row is None:
+                continue
+            try:
+                # FIX-12: exact-token AND-match across the query terms. FTS5
+                # without the ``*`` suffix is a whole-token match, so 'cat'
+                # matches 'cat' but NOT 'category'. Multiple terms are
+                # combined with a space (FTS5 implicit AND).
+                match_expression = " ".join(terms)
+                rows = conn.execute(
+                    "SELECT record_id FROM records_fts WHERE records_fts MATCH ?",
+                    (match_expression,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                continue
+            ids = {row[0] for row in rows}
+            candidates.append((store, ids))
+        if not candidates:
+            return None, None
+        intersected: set[str] | None = None
+        chosen_store: MemoryStore | None = None
+        for store, ids in candidates:
+            intersected = ids if intersected is None else (intersected & ids)
+            chosen_store = store
+            if not intersected:
+                return store, frozenset()
+        return chosen_store, frozenset(intersected or ())
+
     def _read(self, action: MemoryAction) -> _ExecutionEffect:
         record_ids = self._record_ids(action.payload)
         if not record_ids:
             raise _BrokerRejection("read requires record_ids")
+        lifecycle_filters = self._lifecycle_filters(action.payload)
         records: list[tuple[str, MemoryRecord]] = []
         for record_id in record_ids:
             _, record = self._find_record(record_id, action.payload)
             if not self._record_visible(action.scope, record):
                 raise _BrokerRejection("cross-scope record id rejected", considered=record_ids)
+            # FIX-5: reads enforce the same activation/lifecycle visibility as
+            # search, and the receipt records the filters actually applied.
+            if record.activation_state is ActivationState.TOMBSTONED:
+                raise _BrokerRejection(
+                    "read refuses tombstoned record",
+                    considered=record_ids,
+                )
+            if record.lifecycle_state not in lifecycle_filters:
+                raise _BrokerRejection(
+                    "read refuses record outside the requested lifecycle filters",
+                    considered=record_ids,
+                )
             if record.sensitivity not in self.snapshot.allowed_sensitivities:
                 raise _BrokerRejection(
                     "redaction violation: selected record exceeds sensitivity policy",
@@ -829,14 +1058,68 @@ class MemoryActionBroker:
         input_tokens: int,
         validation: list[str],
     ) -> MemoryActionReceipt:
+        # FIX-4: proposals go through the same validation gates as every
+        # other operation. Cross-scope or invalid targets produce a
+        # REJECTED receipt, never a stored proposal. Only in-scope, well-
+        # typed lifecycle operations are converted to PROPOSED.
         target_ids = self._record_ids(payload)
+        if not target_ids:
+            return self._emit_receipt(
+                context_id=context_id,
+                context_hash=context_hash,
+                scope=scope,
+                phase=phase,
+                operation=operation,
+                payload=payload,
+                observed_at=observed_at,
+                input_tokens=input_tokens,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason="lifecycle operation requires in-scope target record_ids",
+                validation=tuple(validation) + ("lifecycle_direct_mutation:rejected",),
+            )
+        try:
+            validated_targets: list[str] = []
+            for target_id in target_ids:
+                _, record = self._find_record(target_id, payload)
+                if not self._record_visible(scope, record):
+                    return self._emit_receipt(
+                        context_id=context_id,
+                        context_hash=context_hash,
+                        scope=scope,
+                        phase=phase,
+                        operation=operation,
+                        payload=payload,
+                        observed_at=observed_at,
+                        input_tokens=input_tokens,
+                        outcome=MemoryActionOutcome.REJECTED,
+                        reason="lifecycle proposal cross-scope target rejected",
+                        validation=tuple(validation) + ("lifecycle_direct_mutation:rejected",),
+                        considered=target_ids,
+                    )
+                validated_targets.append(target_id)
+        except _BrokerRejection as exc:
+            return self._emit_receipt(
+                context_id=context_id,
+                context_hash=context_hash,
+                scope=scope,
+                phase=phase,
+                operation=operation,
+                payload=payload,
+                observed_at=observed_at,
+                input_tokens=input_tokens,
+                outcome=MemoryActionOutcome.REJECTED,
+                reason=f"lifecycle proposal target validation failed: {exc.reason}",
+                validation=tuple(validation) + ("lifecycle_direct_mutation:rejected",),
+                considered=exc.considered,
+                redaction_results=exc.redaction_results,
+            )
         proposal = MemoryLifecycleProposal(
             proposal_id=self._proposal_id_factory(),
             proposal_kind=kind,
             snapshot_id=self.snapshot.snapshot_id,
             snapshot_content_hash=self.snapshot.content_hash,
             scope=scope,
-            target_record_ids=target_ids,
+            target_record_ids=tuple(validated_targets),
             requested_transition=requested_transition,
             reason="direct lifecycle mutation rejected; human review is required",
             observed_at=observed_at,
@@ -853,10 +1136,14 @@ class MemoryActionBroker:
             input_tokens=input_tokens,
             outcome=MemoryActionOutcome.PROPOSED,
             reason="lifecycle bypass rejected and converted to a reviewable proposal",
-            validation=validation + ["lifecycle_direct_mutation:rejected", "proposal:emitted"],
-            considered=target_ids,
+            validation=tuple(validation) + ("lifecycle_direct_mutation:rejected", "proposal:emitted"),
+            considered=tuple(validated_targets),
             proposal_ids=(proposal.proposal_id,),
         )
+
+    # FIX-4 alias: keep a private alias for the typed-action code path.
+    def _propose_lifecycle_action(self, **kwargs: Any) -> MemoryActionReceipt:
+        return self._make_proposal_receipt(**kwargs)
 
     def _emit_receipt(
         self,
@@ -1000,15 +1287,21 @@ class MemoryActionBroker:
 
     @staticmethod
     def _requested_lifecycle_transition(payload: Mapping[str, Any]) -> str | None:
+        # FIX-14: normalize enum values via .value to avoid str(LifecycleState.X)
+        # false-positives (str() of an Enum is the qualified name).
         for key in ("delete", "tombstone", "activate", "expire", "expiry"):
             if key in payload and payload[key] not in (False, None, ""):
                 return key
         lifecycle = payload.get("lifecycle_state")
-        if lifecycle is not None and str(lifecycle) != LifecycleState.CANDIDATE.value:
-            return str(lifecycle)
+        if lifecycle is not None:
+            value = lifecycle.value if isinstance(lifecycle, LifecycleState) else str(lifecycle)
+            if value != LifecycleState.CANDIDATE.value:
+                return value
         activation = payload.get("activation_state")
-        if activation is not None and str(activation) != ActivationState.ACTIVE.value:
-            return str(activation)
+        if activation is not None:
+            value = activation.value if isinstance(activation, ActivationState) else str(activation)
+            if value != ActivationState.ACTIVE.value:
+                return value
         return None
 
     @staticmethod
@@ -1048,10 +1341,27 @@ class MemoryActionBroker:
         return tuple(dict.fromkeys(values))
 
     def _validate_source_records(self, record_ids: tuple[str, ...], scope: ContextScope) -> None:
+        # FIX-6: a SECRET same-scope record referenced as source must not be
+        # silently carried into a PUBLIC candidate. Source records must satisfy
+        # the snapshot's allowed sensitivities and be non-tombstoned + visible.
+        lifecycle_filters = self.snapshot.query_lifecycle_states
         for record_id in record_ids:
             _, record = self._find_record(record_id, {})
             if not self._record_visible(scope, record):
                 raise _BrokerRejection("cross-scope source record id rejected", considered=record_ids)
+            if record.activation_state is ActivationState.TOMBSTONED:
+                raise _BrokerRejection("source record is tombstoned", considered=record_ids)
+            if record.lifecycle_state not in lifecycle_filters:
+                raise _BrokerRejection(
+                    "source record is outside the snapshot lifecycle filters",
+                    considered=record_ids,
+                )
+            if record.sensitivity not in self.snapshot.allowed_sensitivities:
+                raise _BrokerRejection(
+                    "redaction violation: source record sensitivity exceeds snapshot policy",
+                    considered=record_ids,
+                    redaction_results=("sensitivity:rejected",),
+                )
 
     def _find_record(self, record_id: str, payload: Mapping[str, Any]) -> tuple[MemoryStore, MemoryRecord]:
         selected_store = payload.get("store")

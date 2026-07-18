@@ -19,6 +19,7 @@ from metaharness.context import ContextScope, Sensitivity
 from metaharness.context.models import (
     SHA256_PATTERN,
     FrozenModel,
+    canonical_json,
     content_hash,
 )
 
@@ -165,27 +166,27 @@ class MemoryMutationReceipt(FrozenModel):
     mutation_reason: str = Field(default="receipted supersede", min_length=1)
     content_hash: str = Field(pattern=SHA256_PATTERN)
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def _fill_content_hash(cls, data: Any) -> Any:
-        """Auto-fill content_hash when caller omits or blanks it. Pydantic
-        applies the SHA256_PATTERN constraint after this fills. Material
-        matches the (after) ``model_dump(mode='json', ...)`` output so the
-        re-validated hash agrees — including ``schema_version`` which the
-        caller may not have passed explicitly."""
+    def _validate_content_hash(cls, data: Any, handler: Any) -> "MemoryMutationReceipt":
+        """FIX-9: build the fully-defaulted model, then derive the content_hash
+        from its model_dump. This matches the broker's _self_verifying_model
+        pattern so omitting any defaulted field (mutation_reason) produces a
+        valid construction instead of a hash mismatch.
 
+        When the caller supplies an explicit content_hash, the post-construction
+        recompute must agree, otherwise the value is rejected (tamper check).
+        """
+
+        if isinstance(data, dict) and "content_hash" in data and data["content_hash"]:
+            model = handler(data)
+            material = model.model_dump(mode="json", exclude={"content_hash"})
+            if model.content_hash != content_hash(material):
+                raise ValueError("memory mutation receipt content_hash mismatch")
+            return model
         if isinstance(data, dict):
-            existing = data.get("content_hash")
-            if not existing:
-                material = {key: value for key, value in data.items() if key != "content_hash"}
-                if "schema_version" not in material:
-                    material["schema_version"] = 1
-                data["content_hash"] = content_hash(material)
-        return data
-
-    @model_validator(mode="after")
-    def _validate_content_hash(self) -> "MemoryMutationReceipt":
-        material = self.model_dump(mode="json", exclude={"content_hash"})
-        if self.content_hash != content_hash(material):
-            raise ValueError("memory mutation receipt content_hash mismatch")
-        return self
+            data = {**data, "content_hash": "sha256:" + "0" * 64}
+        model = handler(data)
+        material = model.model_dump(mode="json", exclude={"content_hash"})
+        object.__setattr__(model, "content_hash", content_hash(material))
+        return model

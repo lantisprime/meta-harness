@@ -24,6 +24,7 @@ the corpus contract, the former exercise the wider API.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sqlite3
@@ -34,6 +35,7 @@ import pytest
 from pydantic import ValidationError
 
 from metaharness.context import ContextScope, Sensitivity
+from metaharness.context.models import content_hash
 from metaharness.memory import (
     ActivationState,
     EpisodicMemoryStore,
@@ -269,6 +271,52 @@ def test_specialist_task_action_rejects_static_forbidden_authorities():
             action.authorize(allowed_actions={forbidden})
 
 
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        "deploy", "deployment", "Deploy", "DEPLOY ",
+        "promote", "promotes", "promoted", "promoting", "promotion", "promotional",
+        "evaluate", "evaluator", "evaluated", "evaluation",
+        "self_approve", "self-approved", "self_approval",
+        "widen_visibility", "widen-visibility",
+        "commit_domain", "commit-domain-action",
+    ],
+)
+def test_FIX_03_forbidden_actions_reject_stems_and_normalization(forbidden):
+    """FIX-3: forbidden-action check is morphological, not literal. The
+    normalized action is compared against the closed stem set with a
+    bounded alpha-suffix bound covering the standard English derivations
+    (s, ed, ing, ment, tion, ation, action, inator)."""
+
+    action = SpecialistTaskAction(
+        specialist_id="rogue",
+        action=forbidden,
+        scope=ContextScope(project_id="meta-harness"),
+    )
+    with pytest.raises(UnauthorizedTaskActionError):
+        action.authorize(allowed_actions={forbidden})
+
+
+@pytest.mark.parametrize(
+    "legitimate",
+    [
+        "write_test", "read_only", "candidate", "search", "log",
+        "reporter", "narrator", "promotion_party", "narrator_action",
+        "narrow_down",
+    ],
+)
+def test_FIX_03_legitimate_actions_still_authorize(legitimate):
+    """FIX-3 parity: actions that are NOT forbidden and not morphological
+    extensions of a forbidden action must still authorize."""
+
+    action = SpecialistTaskAction(
+        specialist_id="normal",
+        action=legitimate,
+        scope=ContextScope(project_id="meta-harness"),
+    )
+    action.authorize(allowed_actions={legitimate})  # no raise
+
+
 # -- circuit breaker -----------------------------------------------------------
 
 
@@ -463,3 +511,271 @@ def test_default_clock_is_not_wall_clock_but_a_deterministic_sequence():
     # Strict monotonic non-decreasing counter (no wall-clock involvement).
     assert observed == sorted(observed)
     assert len(set(observed)) == len(observed)
+
+
+# ---------------------------------------------------------------------------
+# META-6 fix-batch-1 regression tests (each cites its FIX id in the docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_FIX_01_mutate_rolls_back_record_when_receipt_insert_fails():
+    """FIX-1 (atomicity): a record insert + FTS row + mutation receipt must
+    be one transaction. A failure between them rolls back the record too.
+    """
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        store = MemoryStore(path=path)
+        record = store.commit(
+            kind="episodic_memory",
+            content="original",
+            lifecycle_state=LifecycleState.CANDIDATE,
+        )
+        # Drop the mutations table to force an OperationalError on receipt insert.
+        store._conn.execute("DROP TABLE mutations")
+        with pytest.raises(sqlite3.OperationalError):
+            store.mutate(record.id, content="revised", receipt="permit", mutation_reason="boom")
+        rows = store._conn.execute("SELECT id, content FROM records ORDER BY creation_seq").fetchall()
+        assert rows == [(record.id, "original")]
+        # Mutations table dropped by the probe must still be absent, confirming
+        # the rolled-back transaction did not partially create it.
+        exists = store._conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'mutations'"
+        ).fetchone()
+        assert exists is None
+        store.close()
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            p = path + suffix
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+def test_FIX_01_mutate_receipt_construction_failure_aborts_before_insert():
+    """FIX-1 (build-first): the receipt is constructed before any insert so
+    a construction failure aborts cleanly."""
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        store = MemoryStore(path=path)
+        record = store.commit(
+            kind="episodic_memory",
+            content="original",
+            lifecycle_state=LifecycleState.CANDIDATE,
+        )
+        # Force a construction failure by replacing the class with a
+        # version whose __init__ always raises.
+        from metaharness.memory.records import MemoryMutationReceipt
+
+        class _BoomReceipt(MemoryMutationReceipt):
+            def __init__(self, *args, **kwargs):
+                raise ValueError("SIMULATED receipt construction failure")
+
+        original_class = store.__class__
+        try:
+            import metaharness.memory.stores as stores_module
+
+            stores_module.MemoryMutationReceipt = _BoomReceipt
+            with pytest.raises(ValueError, match="SIMULATED"):
+                store.mutate(record.id, content="revised", receipt="permit", mutation_reason="boom")
+        finally:
+            stores_module.MemoryMutationReceipt = MemoryMutationReceipt
+        rows = store._conn.execute("SELECT id, content FROM records ORDER BY creation_seq").fetchall()
+        assert rows == [(record.id, "original")]
+        store.close()
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            p = path + suffix
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+def test_FIX_07_reopen_durable_store_continues_id_and_creation_seq_monotonic():
+    """FIX-7: a durable store reopened with default id/clock factories must
+    not collide with existing ids and must keep creation_seq monotonic."""
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        a = MemoryStore(path=path)
+        first = a.commit(kind="episodic_memory", content="a")
+        second = a.commit(kind="episodic_memory", content="b")
+        third = a.commit(kind="episodic_memory", content="c")
+        a.close()
+        b = MemoryStore(path=path)
+        # No UNIQUE-constraint collision on the first reopen commit.
+        n = b.commit(kind="episodic_memory", content="d-after-reopen")
+        # All ids must remain unique.
+        ids = {first.id, second.id, third.id, n.id}
+        assert len(ids) == 4
+        # creation_seq must remain monotonic across the reopen.
+        all_seqs = [r.creation_seq for r in [first, second, third, n]]
+        assert all_seqs == sorted(all_seqs) and len(set(all_seqs)) == len(all_seqs)
+        for i in range(20):
+            b.commit(kind="episodic_memory", content=f"x{i}")
+        total = b.list(limit=None)
+        assert len(total) == 4 + 20
+        b.close()
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            p = path + suffix
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+def test_FIX_09_mutation_receipt_construction_with_omitted_default_fields():
+    """FIX-9: MemoryMutationReceipt must accept constructions that omit any
+    defaulted field (e.g. mutation_reason) without raising a hash mismatch."""
+
+    receipt = MemoryMutationReceipt(
+        mutation_id="mut-x",
+        target_record_id="t-1",
+        supersede_record_id="s-1",
+        before_content_hash="sha256:" + "a" * 64,
+        after_content_hash="sha256:" + "b" * 64,
+        before_lifecycle=LifecycleState.ACTIVE,
+        after_lifecycle=LifecycleState.SUPERSEDED,
+        actor_id="alice",
+        observed_at=0,
+    )
+    # Auto-filled content_hash must agree with the dump of the defaulted model.
+    material = receipt.model_dump(mode="json", exclude={"content_hash"})
+    assert receipt.content_hash == content_hash(material)
+    # And omitting schema_version must also be accepted.
+    receipt_b = MemoryMutationReceipt(
+        mutation_id="mut-y",
+        target_record_id="t-2",
+        supersede_record_id="s-2",
+        before_content_hash="sha256:" + "c" * 64,
+        after_content_hash="sha256:" + "d" * 64,
+        before_lifecycle=LifecycleState.ACTIVE,
+        after_lifecycle=LifecycleState.SUPERSEDED,
+        actor_id="bob",
+        observed_at=1,
+        mutation_reason="custom",
+    )
+    material_b = receipt_b.model_dump(mode="json", exclude={"content_hash"})
+    assert receipt_b.content_hash == content_hash(material_b)
+def test_FIX_09_hash_bearing_models_robust_to_omitted_defaulted_fields():
+    """FIX-9 (parity): every hash-bearing model in the memory package must
+    auto-fill its content_hash from the fully-defaulted model dump. Tested
+    with one omitted defaulted field per model."""
+
+    from metaharness.memory.broker import (
+        MemoryActionReceipt,
+        MemoryCognitiveSkillSnapshot,
+        MemoryLifecycleProposal,
+        MemoryProposalKind,
+    )
+
+    # MemoryLifecycleProposal — omit schema_version (defaulted).
+    proposal = MemoryLifecycleProposal(
+        proposal_id="prop-1",
+        proposal_kind=MemoryProposalKind.ACTIVATE,
+        snapshot_id="snap-1",
+        snapshot_content_hash="sha256:" + "1" * 64,
+        scope=ContextScope(project_id="meta-harness"),
+        target_record_ids=("record-1",),
+        requested_transition="activate",
+        reason="review",
+        observed_at=0,
+    )
+    material = proposal.model_dump(mode="json", exclude={"content_hash"})
+    assert proposal.content_hash == content_hash(material)
+
+    # MemoryActionReceipt — omit schema_version and proposal_ids (defaulted).
+    receipt = MemoryActionReceipt(
+        receipt_id="r-1",
+        snapshot_id="snap-1",
+        snapshot_content_hash="sha256:" + "1" * 64,
+        skill_id="shadow-skill",
+        context_id="ctx-1",
+        context_content_hash="sha256:" + "2" * 64,
+        store_high_water_marks=(),
+        policy_versions=(("compression", "compression:v1"),),
+        phase="log",
+        operation="create_candidate",
+        source_record_ids=(),
+        considered_targets=(),
+        selected_targets=("rec-1",),
+        scope=ContextScope(project_id="meta-harness"),
+        lifecycle_filters=(LifecycleState.CANDIDATE,),
+        before_content_hashes=(),
+        after_content_hashes=(("rec-1", "sha256:" + "3" * 64),),
+        validation_results=("broker_mode:shadow",),
+        redaction_results=("redaction:clear",),
+        input_tokens=0,
+        output_tokens=1,
+        context_budget_tokens=1024,
+        latency_ms=0,
+        accepted=True,
+        outcome="accepted",
+        effect_or_rejection_reason="ok",
+        observed_at=0,
+    )
+    material = receipt.model_dump(mode="json", exclude={"content_hash"})
+    assert receipt.content_hash == content_hash(material)
+
+    # MemoryCognitiveSkillSnapshot — omit schema_version (defaulted).
+    snap = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-1",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    material = snap.model_dump(mode="json", exclude={"content_hash"})
+    assert snap.content_hash == content_hash(material)
+
+
+def test_FIX_10_mutation_emits_exactly_one_audit_event_with_correct_state():
+    """FIX-10: CommitOrderedMemoryStore.mutate() emits exactly one
+    ``memory.mutation_committed`` event (no double-count from a
+    dynamic-dispatched ``commit``), and the event fires only after the
+    mutation receipt is durable."""
+
+    events: list[tuple[str, dict]] = []
+    unbind = bind_sink(lambda kind, payload: events.append((kind, payload)))
+    try:
+        store = CommitOrderedMemoryStore()
+        original = store.commit(kind="episodic_memory", content="orig")
+        # Reset events to isolate the mutation path.
+        events.clear()
+        new = store.mutate(
+            original.id,
+            content="revised",
+            receipt="permit",
+            mutation_reason="r",
+        )
+        assert [kind for kind, _ in events] == ["memory.mutation_committed"]
+        event_kind, payload = events[0]
+        assert event_kind == "memory.mutation_committed"
+        assert payload["commit_state"] == "committed"
+        assert payload["record_id"] == new.id
+        # The mutation receipt must already be durable when the event fires.
+        mut_rows = store._conn.execute(
+            "SELECT target_record_id, supersede_record_id FROM mutations"
+        ).fetchall()
+        assert (original.id, new.id) in mut_rows
+    finally:
+        unbind()
+        reset_sink()
+
+
+def test_FIX_15_docstring_states_exact_durability_guarantee():
+    """FIX-15: ``stores.py`` and ``audit.py`` docstrings must state the
+    precise guarantee — durable across close/reopen and process crash, not
+    across OS crash / power loss — and not over-claim WAL+synchronous=NORMAL.
+    """
+
+    from metaharness import memory
+
+    stores_doc = inspect.getsource(memory.stores)
+    audit_doc = inspect.getsource(memory.audit)
+    assert "process crash" in stores_doc or "process crash" in audit_doc
+    assert "OS crash" in stores_doc or "OS crash" in audit_doc
+    assert "power loss" in stores_doc or "power loss" in audit_doc
+    # And the explicit PRAGMA note must call out the close/reopen guarantee.
+    assert "close/reopen" in stores_doc
