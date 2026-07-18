@@ -22,7 +22,6 @@ from metaharness.memory.records import (
     LifecycleState,
     MemoryKind,
     MemoryRecord,
-    normalize_text,
 )
 from metaharness.memory.stores import MemoryStore
 
@@ -412,6 +411,10 @@ class MemoryActionBroker:
         self._receipt_sink = receipt_sink
         self._receipts: list[MemoryActionReceipt] = []
         self._proposals: list[MemoryLifecycleProposal] = []
+        # FIX-16: track every receipt id this broker has emitted so the
+        # safe-receipt-id path can guarantee uniqueness across a mix of
+        # factory-returned and fallback ids.
+        self._emitted_receipt_ids: set[str] = set()
 
     @property
     def receipts(self) -> tuple[MemoryActionReceipt, ...]:
@@ -807,17 +810,22 @@ class MemoryActionBroker:
             raise _BrokerRejection("search requires a non-empty query")
         lifecycle_filters = self._lifecycle_filters(action.payload)
         requested_kind = self._optional_kind(action.payload.get("kind"))
-        terms = tuple(token for token in normalize_text(query).split() if token)
-        if not terms:
-            raise _BrokerRejection("search requires at least one lexical term")
         # FIX-12: lexical matching uses the FTS5 index for token-level match.
         # FTS5 bm25 is non-deterministic across platforms so we treat the
         # index only as a membership filter; the visible-candidate ordering
         # is fully determined by creation_seq + record_id + store_name.
-        fts_store, fts_matches = self._fts_intersect(terms)
+        # FIX-17: per-store matching. Each store is queried independently;
+        # a record in store A is selected only if A's FTS index reports it
+        # as a match. No global intersection.
+        fts_matches_by_store = self._fts_per_store(query)
         ranked: list[tuple[int, str, str, MemoryRecord]] = []
         redacted = 0
         for store_name, store in self._stores.items():
+            # FIX-17: per-store membership set. None means "no FTS available
+            # for this store" and falls back to per-record visibility; an
+            # empty set means "FTS is available but produced no matches"
+            # and yields no records (fail-closed, FIX-18).
+            store_matches = fts_matches_by_store.get(store_name)
             for record in store.list(project_id=action.scope.project_id, include_tombstoned=True):
                 if not self._record_visible(action.scope, record):
                     continue
@@ -827,7 +835,7 @@ class MemoryActionBroker:
                     continue
                 if requested_kind is not None and record.kind is not requested_kind:
                     continue
-                if fts_matches is not None and record.id not in fts_matches:
+                if store_matches is not None and record.id not in store_matches:
                     continue
                 if record.sensitivity not in self.snapshot.allowed_sensitivities:
                     redacted += 1
@@ -860,7 +868,7 @@ class MemoryActionBroker:
         redaction_results = (
             f"sensitivity_filtered:{redacted}",
             "context_budget:applied",
-            "fts_token_match:applied" if fts_matches is not None else "fts_token_match:bypassed",
+            "fts_token_match:applied" if fts_matches_by_store else "fts_token_match:bypassed",
         )
         return _ExecutionEffect(
             reason="scoped deterministic search completed",
@@ -870,51 +878,67 @@ class MemoryActionBroker:
             output_tokens=used_tokens,
         )
 
-    def _fts_intersect(self, terms: tuple[str, ...]) -> tuple[MemoryStore | None, frozenset[str] | None]:
-        """FIX-12: run an FTS5 prefix-AND-query across the terms. Returns
-        (fts_store, matching_ids). If no store has an FTS5 index (e.g. an
-        in-memory store with no pre-populated rows), returns (None, None)
-        so the search path falls back to per-record visibility checks
-        without resurrecting the dead substring-scoring path.
+    def _fts_per_store(self, query: str) -> dict[str, frozenset[str] | None]:
+        """FIX-12 / FIX-17 / FIX-18.
+
+        Returns a mapping ``{store_name: matching_ids | None}`` where
+        ``None`` means "FTS is not available for this store" (fall back to
+        per-record visibility) and an empty frozenset means "FTS is
+        available but produced no matches" (fail-closed: no records
+        match).
+
+        Per-store independence: a record in store A is selected only when
+        store A's FTS index reports it; the global intersection that the
+        previous implementation used would suppress legitimate matches
+        whenever any other store had no FTS row for that record id.
+
+        User text is treated as terms, not raw FTS query syntax:
+        Unicode word runs are extracted (the regex pattern for one-or-
+        more Unicode word characters), and each run is individually
+        double-quoted in the FTS5 ``MATCH`` expression. Multiple quoted
+        phrases are still implicit AND, and bare FTS operators such as
+        ``OR``, ``AND``, ``NOT`` are first-class Unicode word runs that
+        therefore become literal search tokens. If no usable terms
+        remain, every store is returned with an empty frozenset so the
+        search fails closed.
         """
 
-        candidates: list[tuple[MemoryStore, set[str]]] = []
-        for store in self._stores.values():
+        terms = re.findall(r"\w+", query)
+        if not terms:
+            return {store_name: frozenset() for store_name in self._stores}
+        # FTS5 phrase syntax: double-quoted runs are literal tokens;
+        # adjacent quoted phrases are combined with implicit AND. Embed
+        # any double-quote inside a term by doubling it (FTS5 escape rule)
+        # so an attacker cannot break out of the literal context.
+        match_expression = " ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+        result: dict[str, frozenset[str] | None] = {}
+        for store_name, store in self._stores.items():
             conn = getattr(store, "_conn", None)
             if conn is None:
+                result[store_name] = None
                 continue
             try:
                 row = conn.execute(
                     "SELECT name FROM sqlite_master WHERE name='records_fts'"
                 ).fetchone()
             except Exception:
+                result[store_name] = None
                 continue
             if row is None:
+                result[store_name] = None
                 continue
             try:
-                # FIX-12: exact-token AND-match across the query terms. FTS5
-                # without the ``*`` suffix is a whole-token match, so 'cat'
-                # matches 'cat' but NOT 'category'. Multiple terms are
-                # combined with a space (FTS5 implicit AND).
-                match_expression = " ".join(terms)
                 rows = conn.execute(
                     "SELECT record_id FROM records_fts WHERE records_fts MATCH ?",
                     (match_expression,),
                 ).fetchall()
             except sqlite3.OperationalError:
+                # FIX-18: any FTS parse/execution failure must fail
+                # closed, not bypass the filter.
+                result[store_name] = frozenset()
                 continue
-            ids = {row[0] for row in rows}
-            candidates.append((store, ids))
-        if not candidates:
-            return None, None
-        intersected: set[str] | None = None
-        chosen_store: MemoryStore | None = None
-        for store, ids in candidates:
-            intersected = ids if intersected is None else (intersected & ids)
-            chosen_store = store
-            if not intersected:
-                return store, frozenset()
-        return chosen_store, frozenset(intersected or ())
+            result[store_name] = frozenset(row[0] for row in rows)
+        return result
 
     def _read(self, action: MemoryAction) -> _ExecutionEffect:
         record_ids = self._record_ids(action.payload)
@@ -926,11 +950,15 @@ class MemoryActionBroker:
             _, record = self._find_record(record_id, action.payload)
             if not self._record_visible(action.scope, record):
                 raise _BrokerRejection("cross-scope record id rejected", considered=record_ids)
-            # FIX-5: reads enforce the same activation/lifecycle visibility as
-            # search, and the receipt records the filters actually applied.
-            if record.activation_state is ActivationState.TOMBSTONED:
+            # FIX-5 / FIX-19: reads enforce the same activation visibility
+            # as search. The original FIX-5 contract requires
+            # ``activation_state == ACTIVE``; a synthetically DORMANT
+            # record must be rejected by direct read just as it would be
+            # excluded from a search.
+            if record.activation_state is not ActivationState.ACTIVE:
                 raise _BrokerRejection(
-                    "read refuses tombstoned record",
+                    "read refuses non-active record "
+                    f"(activation_state={record.activation_state.value})",
                     considered=record_ids,
                 )
             if record.lifecycle_state not in lifecycle_filters:
@@ -1145,6 +1173,39 @@ class MemoryActionBroker:
     def _propose_lifecycle_action(self, **kwargs: Any) -> MemoryActionReceipt:
         return self._make_proposal_receipt(**kwargs)
 
+    def _safe_receipt_id(self) -> str:
+        """FIX-16: the receipt-ID helper is the last thing consulted before a
+        receipt is emitted, so it MUST not raise. A persistent factory
+        failure (or any unexpected exception) falls back to a per-broker
+        monotonic counter so every invocation still produces exactly one
+        self-verifying receipt. The fallback id is unique within the broker
+        instance and preserves the original action outcome.
+
+        Collision avoidance: every id this broker has already emitted is
+        tracked in ``_emitted_receipt_ids``. A factory return that
+        collides with a previously-emitted id (including a previous
+        fallback id) is replaced with a fresh fallback id. This holds
+        even when the factory alternates between a colliding string and
+        an exception.
+        """
+
+        try:
+            candidate = self._receipt_id_factory()
+            if isinstance(candidate, str) and candidate and candidate not in self._emitted_receipt_ids:
+                self._emitted_receipt_ids.add(candidate)
+                return candidate
+        except Exception:
+            pass
+        # Fallback: pick the next counter id and skip any already-emitted
+        # value (in case a prior factory return produced the same string).
+        for _ in range(2**32):
+            fallback = f"memory-action-fallback-{next(self._receipt_counter):08x}"
+            if fallback not in self._emitted_receipt_ids:
+                self._emitted_receipt_ids.add(fallback)
+                return fallback
+        # Unreachable in practice; the loop is bounded by counter width.
+        raise RuntimeError("memory action receipt id space exhausted")
+
     def _emit_receipt(
         self,
         *,
@@ -1168,7 +1229,7 @@ class MemoryActionBroker:
         proposal_ids: Iterable[str] = (),
     ) -> MemoryActionReceipt:
         receipt = MemoryActionReceipt(
-            receipt_id=self._receipt_id_factory(),
+            receipt_id=self._safe_receipt_id(),
             snapshot_id=self.snapshot.snapshot_id,
             snapshot_content_hash=self.snapshot.content_hash,
             skill_id=self.snapshot.skill_id,

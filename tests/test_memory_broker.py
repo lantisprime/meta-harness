@@ -997,3 +997,264 @@ def test_FIX_14_lifecycle_enum_in_payload_does_not_trigger_false_proposal():
     assert receipt.outcome is MemoryActionOutcome.ACCEPTED
     assert receipt.selected_targets
     assert broker.proposals == ()
+
+
+# ---------------------------------------------------------------------------
+# META-6 fix-batch-2 regression tests. Each cites its FIX id.
+# ---------------------------------------------------------------------------
+
+
+def _always_raising_receipt_id_factory():
+    def _raise() -> str:
+        raise RuntimeError("SIMULATED receipt-id factory failure")
+    return _raise
+
+
+def test_FIX_16_rejected_invocation_with_broken_receipt_factory_emits_receipt():
+    """FIX-16: a persistent receipt-id factory failure must NOT escape
+    invoke(); the broker must emit exactly one self-verifying receipt
+    whose outcome preserves the original action result."""
+
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix16",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    broker = MemoryActionBroker(
+        snapshot=snapshot,
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+        receipt_id_factory=_always_raising_receipt_id_factory(),
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "../../etc/passwd"},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "traversal" in receipt.effect_or_rejection_reason
+    assert receipt.receipt_id.startswith("memory-action-fallback-")
+    assert len(broker.receipts) == 1
+    assert content_hash(receipt.model_dump(mode="json", exclude={"content_hash"})) == receipt.content_hash
+
+
+def test_FIX_16_accepted_create_candidate_with_broken_receipt_factory_emits_receipt():
+    """FIX-16: an accepted CREATE_CANDIDATE with a broken receipt-id
+    factory must still produce exactly one self-verifying receipt and
+    the durable record must be the one the receipt attests to."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix16-ok",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    broker = MemoryActionBroker(
+        snapshot=snapshot,
+        stores={"episodic_memory": store},
+        clock=lambda: 0,
+        receipt_id_factory=_always_raising_receipt_id_factory(),
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.CREATE_CANDIDATE,
+            phase=MemoryPhase.LOG,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"kind": "episodic_memory", "content": "candidate that must persist"},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.ACCEPTED
+    assert receipt.selected_targets
+    assert receipt.receipt_id.startswith("memory-action-fallback-")
+    assert len(broker.receipts) == 1
+    persisted = store.get(receipt.selected_targets[0])
+    assert persisted is not None and persisted.content == "candidate that must persist"
+    assert content_hash(receipt.model_dump(mode="json", exclude={"content_hash"})) == receipt.content_hash
+
+
+def test_FIX_16_factory_returning_a_colliding_id_is_replaced_with_a_fresh_fallback():
+    """FIX-16 (compact collision case): a factory that first returns a
+    string that already names a fallback id and then raises must NOT
+    produce a duplicate receipt id. Both invocations stay self-verifying."""
+
+    state = {"n": 0}
+
+    def colliding_factory() -> str:
+        state["n"] += 1
+        if state["n"] == 1:
+            return "memory-action-fallback-00000000"
+        raise RuntimeError("SIMULATED factory failure after first call")
+
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix16-collision",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    broker = MemoryActionBroker(
+        snapshot=snapshot,
+        stores={"episodic_memory": EpisodicMemoryStore(clock=lambda: 0)},
+        clock=lambda: 0,
+        receipt_id_factory=colliding_factory,
+    )
+    action = MemoryAction(
+        operation=MemoryOperation.SEARCH,
+        phase=MemoryPhase.CONSULT,
+        scope=ContextScope(project_id="meta-harness"),
+        payload={"query": "alpha"},
+    )
+    first = broker.invoke(action)
+    second = broker.invoke(action)
+    ids = {r.receipt_id for r in broker.receipts}
+    assert len(ids) == 2
+    assert first.receipt_id == "memory-action-fallback-00000000"
+    assert second.receipt_id == "memory-action-fallback-00000001"
+
+
+def test_FIX_17_multi_store_fts_isolates_per_store_matches():
+    """FIX-17: a query that matches a record in exactly one of two stores
+    is selected from that store, not suppressed by the other store."""
+
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix17",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    ep = EpisodicMemoryStore(clock=lambda: 0)
+    wo = WorkingMemoryStore(clock=lambda: 0)
+    matched = ep.commit(kind="episodic_memory", content="deterministic token under test")
+    wo.commit(kind="working_memory", content="unrelated noise in working")
+    broker = MemoryActionBroker(
+        snapshot=snapshot,
+        stores={"episodic_memory": ep, "working_memory": wo},
+        clock=lambda: 0,
+    )
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "deterministic", "limit": 5},
+        )
+    )
+    assert matched.id in receipt.selected_targets
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("!!??", "none"),
+        ('foo "bar', "both_terms"),
+    ],
+)
+def test_FIX_18_user_text_is_tokenized_and_quoted(query, expected):
+    """FIX-18: user text is treated as terms, not raw FTS query syntax.
+    Punctuation-only queries yield no usable terms and select nothing;
+    mixed quoted text tokenizes to its Unicode word runs and selects
+    only the both-terms record (never a foo-only record). FTS
+    operators like OR/AND/NOT are extracted as literal word tokens and
+    are covered by the dedicated regression below."""
+
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix18",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    foo_only = store.commit(kind="episodic_memory", content="foo first observation")
+    foo_bar = store.commit(kind="episodic_memory", content="foo bar both terms present")
+    broker = MemoryActionBroker(snapshot=snapshot, stores={"episodic_memory": store}, clock=lambda: 0)
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": query, "limit": 5},
+        )
+    )
+    if expected == "none":
+        assert receipt.selected_targets == ()
+    else:
+        assert receipt.selected_targets == (foo_bar.id,)
+    assert foo_only.id not in receipt.selected_targets
+
+
+def test_FIX_18_or_operator_is_a_literal_token_not_a_disjunction():
+    """FIX-18 (compact OR regression): a query like ``foo OR bar``
+    tokenizes to ``foo`` ``OR`` ``bar`` (3 terms AND'd), so foo-only
+    and bar-only records are NEVER selected. A record that contains
+    all three tokens is selected."""
+
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix18-or",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    foo_only = store.commit(kind="episodic_memory", content="foo only first observation")
+    bar_only = store.commit(kind="episodic_memory", content="bar only second observation")
+    both_with_or = store.commit(
+        kind="episodic_memory",
+        content="foo bar OR combined all three tokens present",
+    )
+    broker = MemoryActionBroker(snapshot=snapshot, stores={"episodic_memory": store}, clock=lambda: 0)
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.SEARCH,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"query": "foo OR bar", "limit": 5},
+        )
+    )
+    assert foo_only.id not in receipt.selected_targets
+    assert bar_only.id not in receipt.selected_targets
+    assert both_with_or.id in receipt.selected_targets
+
+
+def test_FIX_19_direct_read_rejects_dormant_record():
+    """FIX-19: a direct read against a DORMANT record is rejected;
+    reads enforce the same ``activation_state == ACTIVE`` visibility
+    as search."""
+
+    store = EpisodicMemoryStore(clock=lambda: 0)
+    rec = store.commit(
+        kind="episodic_memory",
+        content="synthetically dormant",
+        scope=ContextScope(project_id="meta-harness"),
+        lifecycle_state=LifecycleState.CANDIDATE,
+        activation_state=ActivationState.DORMANT,
+    )
+    snapshot = MemoryCognitiveSkillSnapshot(
+        snapshot_id="snap-fix19",
+        skill_id="shadow-skill",
+        scope=ContextScope(project_id="meta-harness"),
+        goal_families=("retrieval",),
+        roles=("builder",),
+    )
+    broker = MemoryActionBroker(snapshot=snapshot, stores={"episodic_memory": store}, clock=lambda: 0)
+    receipt = broker.invoke(
+        MemoryAction(
+            operation=MemoryOperation.READ,
+            phase=MemoryPhase.CONSULT,
+            scope=ContextScope(project_id="meta-harness"),
+            payload={"record_ids": [rec.id]},
+        )
+    )
+    assert receipt.outcome is MemoryActionOutcome.REJECTED
+    assert "non-active" in receipt.effect_or_rejection_reason
+    assert "dormant" in receipt.effect_or_rejection_reason
+    assert rec.id not in receipt.selected_targets
