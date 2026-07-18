@@ -29,7 +29,12 @@ from typing import Any, Iterable, Optional
 
 import yaml
 
-from selflearn.evidence import MARK_HALF_LIFE_DAYS, decay_factor, laplace_score
+from selflearn.evidence import (
+    MARK_HALF_LIFE_DAYS,
+    decay_factor,
+    laplace_score,
+    laplace_variance,
+)
 
 from selflearn.contracts import (
     CandidateEntry,
@@ -93,6 +98,23 @@ class StoredEntry:
         bucket_harmful *= factor
         return ((bucket_helpful + smoothing * global_score)
                 / (bucket_helpful + bucket_harmful + smoothing))
+
+    def uncertainty_for(self, task_type: str = "",
+                        now: Optional["datetime"] = None,
+                        half_life_days: float = MARK_HALF_LIFE_DAYS) -> float:
+        """Epistemic uncertainty about this entry — the variance of the same
+        decayed Beta posterior ``score_for`` reads the mean of (design note
+        §3.2). High for thin/stale evidence, low once well-observed. With a
+        ``task_type`` bucket, the conditional evidence is used; otherwise the
+        global counters. Decayed evidence widens the posterior, so stale
+        knowledge reads as more uncertain — exactly the intended signal."""
+        factor = (decay_factor(self.marks_updated_at, now, half_life_days)
+                  if now is not None else 1.0)
+        if task_type and task_type in self.marks_by_task:
+            helpful, harmful = self.marks_by_task[task_type]
+        else:
+            helpful, harmful = self.helpful, self.harmful
+        return laplace_variance(helpful * factor, harmful * factor)
 
 
 @dataclass

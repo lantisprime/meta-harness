@@ -176,12 +176,15 @@ reverse that. Both transitions are journaled in pack provenance.
 Prioritized next-best-action advice computed from the store's state:
 quarantined candidates to review, candidates awaiting verification,
 published entries whose marks say they hurt (deprecate/refresh), stale
-entries (sources aged and evidence faded), claimed-but-uncovered topics,
-and missing embeddings. Each suggestion states *why* and, where a single
-CLI incantation exists, gives the copy-pasteable command (re-indexing
-embeddings has none, so that suggestion is advice-only). Advisory-only —
-nothing is executed. If the store fails to load, it exits 2 and points at
-`doctor`.
+entries (sources aged and evidence faded), **thinly-evidenced published
+knowledge to strengthen proactively** (the epistemic/uncertainty signal —
+see the learning-loop chapter), claimed-but-uncovered topics, and missing
+embeddings. Within a priority tier, suggestions are ordered by expected
+free energy (how much acting is expected to help). Each suggestion states
+*why* and, where a single CLI incantation exists, gives the copy-pasteable
+command (re-indexing embeddings has none, so that suggestion is
+advice-only). Advisory-only — nothing is executed. If the store fails to
+load, it exits 2 and points at `doctor`.
 
 ### `selflearn doctor [--fix]`
 Diagnose store corruption and inconsistency with tolerant parsers: corrupt
@@ -439,7 +442,8 @@ before anything is deprecated.
 ```python
 learner.gap_signals("fastapi")        # coverage / quality signals
 learner.staleness_signals("fastapi")  # old sources + decayed score
-learner.suggestions("fastapi")        # advisory dicts with proposed actions
+learner.epistemic_signals("fastapi")  # thinly-evidenced published topics
+learner.suggestions("fastapi")        # advisory dicts, EFE-ranked
 ```
 
 - **coverage** gap: ≥ 2 failures in a claimed-but-uncovered topic (or
@@ -451,6 +455,16 @@ learner.suggestions("fastapi")        # advisory dicts with proposed actions
   can't launder a historically bad entry above the bar, and old entries
   still earning helpful marks are left alone. Retrieval priors decay with
   the same clock, so ranking and staleness never contradict each other.
+- **uncertainty** (epistemic, forward-looking): a published topic whose
+  decayed Beta-posterior variance exceeds `uncertainty_min` (≈ untested
+  knowledge) → propose probing/corroborating it *before* it fails. This is
+  the only *proactive* signal — the others react to failures or age. It reads
+  the variance of the same posterior whose mean is the evidence score
+  (`StoredEntry.uncertainty_for`), and is read-only. `suggestions` and
+  `selflearn next` order everything by `expected_free_energy_value`
+  (pragmatic + epistemic) within each priority tier — active-inference
+  expected-free-energy ranking; see
+  `docs/selflearn-learning-module-improvements.md`.
 
 Guardrails: a topic that just signaled is backoff-suppressed for 2 sweeps
 (even if fresh failures keep arriving); a signal **consumes** its failure

@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from selflearn.evidence import decay_factor
+from selflearn.learning.gaps import expected_free_energy_value
 from selflearn.learning.marks import DEPRECATE_THRESHOLD
 from selflearn.store.packstore import PackStore
 
@@ -33,6 +34,9 @@ from selflearn.store.packstore import PackStore
 # through evidence.py, so the advisor can never disagree with the loop.
 LOW_SCORE = 0.35
 MIN_EVIDENCE = 4.0
+# EFE prior for a coverage gap (knowledge missing) — matches the coverage
+# weighting in expected_free_energy_value so gaps sort above weaker signals.
+COVERAGE_GAP_EFE = 2.0
 
 
 @dataclass(frozen=True)
@@ -40,10 +44,12 @@ class Suggestion:
     """One proposed operator move. ``command`` is empty when the action has
     no single CLI incantation (e.g. re-index with an embedding endpoint)."""
 
-    priority: int          # 1 = most urgent; ties keep discovery order
+    priority: int          # 1 = most urgent; ties broken by efe then order
     action: str            # short imperative headline
     reason: str            # why the store's state implies this action
     command: str = ""      # copy-pasteable CLI command, when one exists
+    efe: float = 0.0       # acquisition value (negative expected free energy);
+    #                        higher floats up WITHIN a priority tier (§3.1)
 
 
 def suggest_actions(store: PackStore,
@@ -121,7 +127,18 @@ def suggest_actions(store: PackStore,
                     sig.evidence,
                     f"selflearn acquire \"search:{sig.topic}\" --pack {pack} "
                     f"--topic {sig.topic} --store {s} --workdir <w> "
-                    f"--endpoint <url> --model <id>"))
+                    f"--endpoint <url> --model <id>",
+                    efe=expected_free_energy_value(sig)))
+            # proactive epistemic signal (§3.1): strengthen thinly-evidenced
+            # published knowledge BEFORE it fails — the acquisition loop's
+            # only forward-looking suggestion
+            for sig in learner.epistemic_signals(pack, now):
+                out.append(Suggestion(
+                    5, f"strengthen low-confidence knowledge in "
+                       f"{pack!r}/{sig.topic}",
+                    sig.evidence,
+                    f"selflearn verify --pack {pack} --store {s}",
+                    efe=expected_free_energy_value(sig)))
 
         cov = store.coverage(pack)
         for topic in sorted(t for t, v in cov.items() if v != "covered"):
@@ -131,7 +148,8 @@ def suggest_actions(store: PackStore,
                 "covers it",
                 f"selflearn acquire \"search:{topic}\" --pack {pack} "
                 f"--topic {topic} --store {s} --workdir <w> "
-                f"--endpoint <url> --model <id>"))
+                f"--endpoint <url> --model <id>",
+                efe=COVERAGE_GAP_EFE))
 
         unindexed = [e for e in published if not e.vector]
         if unindexed:
@@ -149,7 +167,10 @@ def suggest_actions(store: PackStore,
             "and no coverage gaps detected",
             f"selflearn retrieve \"<question>\" --packs {' '.join(packs)} "
             f"--store {s}"))
-    return sorted(out, key=lambda x: x.priority)
+    # priority tiers first (qualitatively different actions), then highest
+    # expected-free-energy-reduction within a tier (§3.1), then discovery
+    # order — a stable sort preserves the last for equal keys
+    return sorted(out, key=lambda x: (x.priority, -x.efe))
 
 
 def render_suggestions(suggestions: list[Suggestion]) -> str:
