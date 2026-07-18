@@ -178,7 +178,8 @@ class MemoryStore:
             existing = self._fetch_record_locked(record_id)
             if existing is None:
                 raise KeyError(f"no memory record with id {record_id!r}")
-            observed = commit_kwargs.pop("observed_at", None) or self._clock_fn()
+            requested_observed = commit_kwargs.pop("observed_at", None)
+            observed = requested_observed if requested_observed is not None else self._clock_fn()
             new_record = self.commit(
                 kind=existing.kind,
                 content=content,
