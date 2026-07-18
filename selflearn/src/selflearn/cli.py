@@ -7,6 +7,9 @@
     selflearn seed-yt  distilled/some-lecture --pack lectures --store S
     selflearn list     --store S
     selflearn retrieve "how do lifespan handlers work" --packs fastapi --store S
+    selflearn next     --store S        # prioritized next-best-action advice
+    selflearn doctor   --store S --fix  # diagnose and repair the store
+    selflearn wizard                    # interactive, wizard-driven front door
 
 Distilled entries land as candidates (quarantined ones flagged); the gates
 that publish them arrive with M4/M5 — the CLI says so rather than
@@ -308,6 +311,51 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_deprecate(args) -> int:
+    store = PackStore(Path(args.store))
+    store.deprecate(args.entry_id, reason=args.reason)
+    print(f"deprecated {args.entry_id} (probes retired; reversible with "
+          f"'selflearn restore {args.entry_id} --store {args.store} "
+          "--reason ...')")
+    return 0
+
+
+def cmd_restore(args) -> int:
+    store = PackStore(Path(args.store))
+    store.restore(args.entry_id, reason=args.reason)
+    print(f"restored {args.entry_id} to published (probes un-retired)")
+    return 0
+
+
+def cmd_next(args) -> int:
+    from selflearn.advisor import render_suggestions, suggest_actions
+
+    try:
+        store = PackStore(Path(args.store))
+    except Exception as exc:
+        print(f"store failed to load: {exc}", file=sys.stderr)
+        print(f"diagnose and repair with: selflearn doctor "
+              f"--store {args.store} --fix", file=sys.stderr)
+        return 2      # a broken store is an error, per the exit contract
+    print(f"next best actions for {args.store}:")
+    print(render_suggestions(suggest_actions(store)))
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    from selflearn.doctor import run_doctor
+
+    report = run_doctor(Path(args.store), fix=args.fix)
+    print(report.render())
+    return 0 if report.ok else 1
+
+
+def cmd_wizard(args) -> int:
+    from selflearn.wizard import run_wizard
+
+    return run_wizard(runner=main, store=args.store)
+
+
 def cmd_retrieve(args) -> int:
     store = PackStore(Path(args.store))
     retriever = Retriever(store, embedder=None)   # degraded mode, loudly
@@ -431,6 +479,37 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--packs", nargs="+", required=True)
     p.add_argument("-k", type=int, default=3)
     p.set_defaults(fn=cmd_retrieve)
+
+    p = sub.add_parser("deprecate", parents=[store_p],
+                       help="pull a published entry out of retrieval "
+                            "(reversible)")
+    p.add_argument("entry_id")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(fn=cmd_deprecate)
+
+    p = sub.add_parser("restore", parents=[store_p],
+                       help="restore a deprecated entry to published")
+    p.add_argument("entry_id")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(fn=cmd_restore)
+
+    p = sub.add_parser("next", parents=[store_p],
+                       help="suggest the next best action for this store")
+    p.set_defaults(fn=cmd_next)
+
+    p = sub.add_parser("doctor", parents=[store_p],
+                       help="diagnose store issues; --fix repairs them")
+    p.add_argument("--fix", action="store_true",
+                   help="apply repairs (default: report only)")
+    p.set_defaults(fn=cmd_doctor)
+
+    p = sub.add_parser("wizard",
+                       help="interactive wizard: walks every workflow "
+                            "step by step")
+    p.add_argument("--store", default="",
+                   help="knowledge store to start with (asked "
+                        "interactively when omitted)")
+    p.set_defaults(fn=cmd_wizard)
 
     args = parser.parse_args(argv)
     try:

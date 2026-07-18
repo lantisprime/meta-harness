@@ -168,6 +168,43 @@ Packs with entry counts by lifecycle state, probe-suite size, coverage.
 Show the exact injection block a specialist would receive. Without an
 embedding endpoint this runs keyword-degraded and warns loudly.
 
+### `selflearn deprecate ENTRY_ID --reason "…"` / `selflearn restore ENTRY_ID --reason "…"`
+Pull a published entry out of retrieval (its probes retire with it), or
+reverse that. Both transitions are journaled in pack provenance.
+
+### `selflearn next`
+Prioritized next-best-action advice computed from the store's state:
+quarantined candidates to review, candidates awaiting verification,
+published entries whose marks say they hurt (deprecate/refresh), stale
+entries (sources aged and evidence faded), claimed-but-uncovered topics,
+and missing embeddings. Each suggestion states *why* and, where a single
+CLI incantation exists, gives the copy-pasteable command (re-indexing
+embeddings has none, so that suggestion is advice-only). Advisory-only —
+nothing is executed. If the store fails to load, it exits 2 and points at
+`doctor`.
+
+### `selflearn doctor [--fix]`
+Diagnose store corruption and inconsistency with tolerant parsers: corrupt
+or missing manifests, dangling/orphaned/status-mismatched manifest rows,
+unreadable entry files, invalid lifecycle states, quarantined-but-published
+contradictions, negative mark counters, corrupt vector sidecars, broken or
+invariant-violating probe records, and corrupt learner state. Report-only
+by default (exit 1 when anything is found, files untouched). With `--fix`
+it applies the narrowest repair that makes the store load again: entry
+`.md` files are the source of truth and manifests are rebuilt around them;
+unreadable entry files are moved aside to `<pack>/broken/` (never
+deleted); regenerable artifacts (vectors) are reset; unvalidated probes
+are retired. The run ends with a real `PackStore` load to prove the store
+boots — exit 0 only when everything is repaired and the store loads.
+
+### `selflearn wizard [--store PATH]`
+Interactive, wizard-driven front door to everything above: shows a store
+status snapshot with the top `next` suggestions, then walks each workflow
+(acquire/gather/distill, seeding, verify/approve/release, retrieve,
+status, next, doctor) prompting for every parameter with defaults. Before
+running anything it prints the exact equivalent non-interactive command,
+so the wizard teaches the plain CLI rather than replacing it.
+
 ---
 
 ## 5. Source refs and plugins
@@ -495,6 +532,8 @@ from metaharness.knowledge import (
 | `retrieval running WITHOUT an embedding endpoint` (warning) | keyword-degraded mode; configure `--embedding-endpoint` for semantic quality |
 | `entry … no longer passes verification; refusing approval` | the world changed between verify and approve — re-run `selflearn verify` |
 | `no suite baseline for pack '…'` | snapshot one after a known-good state before checking regression |
+| `corrupt manifest for pack '…'` / `manifest … lists '…' but … is missing` / any `StoreError` at boot | the store's loader is deliberately loud; run `selflearn doctor --store S` to see every problem, then `--fix` to repair (entry files win, broken files are moved aside, nothing is deleted) |
+| not sure what to do next | `selflearn next --store S` prints a prioritized to-do list; `selflearn wizard` walks you through it interactively |
 
 ---
 
