@@ -1932,6 +1932,48 @@ def create_app(state: HarnessState) -> FastAPI:
             for t in state.tools.all()
         ]
 
+    # -- knowledge (selflearn) --------------------------------------------------------
+
+    @app.get("/api/knowledge/graph")
+    async def knowledge_graph(packs: Optional[str] = None) -> dict[str, Any]:
+        """Read-only graph projection of the selflearn knowledge store:
+        packs, topics, entries, procedure steps, source domains, and task
+        types with their edges. Degrades to {"available": false, reason}
+        instead of erroring when selflearn or a store is absent, so the
+        dashboard can render setup guidance."""
+        def project() -> dict[str, Any]:
+            try:
+                from metaharness.knowledge import (
+                    DEFAULT_KNOWLEDGE_ROOT,
+                    open_store,
+                )
+                from selflearn.graph import build_graph, to_json
+            except Exception as exc:
+                return {"available": False,
+                        "reason": f"selflearn is not installed: {exc}"}
+            if not DEFAULT_KNOWLEDGE_ROOT.exists():
+                return {"available": False,
+                        "reason": "no knowledge store yet at "
+                                  f"{DEFAULT_KNOWLEDGE_ROOT} — seed or "
+                                  "acquire a pack first (try: selflearn "
+                                  "wizard)"}
+            try:
+                store = open_store()
+            except Exception as exc:
+                return {"available": False,
+                        "reason": f"store failed to load: {exc}; run "
+                                  f"'selflearn doctor --store "
+                                  f"{DEFAULT_KNOWLEDGE_ROOT} --fix'"}
+            selected = [p for p in (packs or "").split(",") if p] or None
+            try:
+                graph = build_graph(store, packs=selected)
+            except ValueError as exc:      # unknown pack filter
+                return {"available": False, "reason": str(exc)}
+            return {"available": True,
+                    "root": str(DEFAULT_KNOWLEDGE_ROOT),
+                    "packs": store.packs(), **to_json(graph)}
+        return await asyncio.to_thread(project)
+
     # -- routing / learning -----------------------------------------------------------
 
     @app.get("/api/matrix")

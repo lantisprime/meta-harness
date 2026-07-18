@@ -1229,3 +1229,52 @@ async def test_create_draft_from_base_version(wired_state_with_store):
         assert created["name"] == "v1"
         assert created["base_version"] == 1
         assert created["owner"] == "local-user"
+
+
+# ---------------------------------------------------------------------------
+# Knowledge graph endpoint (selflearn projection)
+# ---------------------------------------------------------------------------
+
+async def test_knowledge_graph_endpoint(client, tmp_path, monkeypatch):
+    """/api/knowledge/graph degrades gracefully with no store, then projects
+    a real store once one exists at the (patched) default root."""
+    import metaharness.knowledge as knowledge
+
+    root = tmp_path / "knowledge"
+    monkeypatch.setattr(knowledge, "DEFAULT_KNOWLEDGE_ROOT", root)
+
+    resp = await client.get("/api/knowledge/graph")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is False and "no knowledge store" in body["reason"]
+
+    selflearn = pytest.importorskip("selflearn")
+    from selflearn.contracts import CandidateEntry, EntrySource, PublishDecision
+
+    store = selflearn.PackStore(root)
+    store.add_candidate(CandidateEntry(
+        id="kg-e1", pack="fastapi", kind="knowledge", body="lifespan facts",
+        claims=("a claim",), topic="lifespan",
+        sources=(EntrySource(url="https://fastapi.tiangolo.com/x",
+                             fetched_at="2026-07-01", sha256="0" * 64,
+                             tier="official"),)))
+    store.publish("kg-e1", PublishDecision(
+        entry_id="kg-e1", publish=True, basis=("test",),
+        identity_basis="test"))
+
+    resp = await client.get("/api/knowledge/graph")
+    body = resp.json()
+    assert body["available"] is True and body["packs"] == ["fastapi"]
+    kinds = {n["kind"] for n in body["nodes"]}
+    assert {"pack", "topic", "entry", "domain"} <= kinds
+    assert body["stats"]["edges"] >= 3
+
+    # pack filter: unknown pack degrades with the reason, not a 500
+    resp = await client.get("/api/knowledge/graph?packs=nope")
+    body = resp.json()
+    assert body["available"] is False and "unknown pack" in body["reason"]
+
+
+async def test_dashboard_has_knowledge_view(client):
+    resp = await client.get("/")
+    assert "view-knowledge" in resp.text and "nav-knowledge" in resp.text

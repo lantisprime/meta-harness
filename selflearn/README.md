@@ -65,6 +65,10 @@ selflearn next --store ~/.selflearn
 # Store won't load / looks inconsistent? Diagnose, then repair:
 selflearn doctor --store ~/.selflearn
 selflearn doctor --store ~/.selflearn --fix
+
+# See the store as a map (packs, topics, entries, source domains, task
+# types) — read-only projection; also feeds the harness UI's Knowledge tab:
+selflearn graph --store ~/.selflearn --format mermaid
 ```
 
 Auto-publish (eval-gated, no human in the loop) activates when a distinct

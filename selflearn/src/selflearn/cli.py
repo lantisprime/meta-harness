@@ -342,6 +342,30 @@ def cmd_next(args) -> int:
     return 0
 
 
+def cmd_graph(args) -> int:
+    from selflearn.graph import build_graph, to_dot, to_json, to_mermaid
+
+    store = PackStore(Path(args.store))
+    if not store.packs():
+        print("store has no packs yet — nothing to project", file=sys.stderr)
+        return 1
+    graph = build_graph(store, packs=args.packs or None)
+    if args.fmt == "dot":
+        text = to_dot(graph)
+    elif args.fmt == "mermaid":
+        text = to_mermaid(graph)
+    else:
+        text = json.dumps(to_json(graph), indent=1, sort_keys=True)
+    if args.out:
+        Path(args.out).write_text(text + "\n")
+        stats = graph.stats()
+        print(f"wrote {args.fmt} graph ({stats['nodes']} nodes, "
+              f"{stats['edges']} edges) to {args.out}")
+    else:
+        print(text)
+    return 0
+
+
 def cmd_doctor(args) -> int:
     from selflearn.doctor import run_doctor
 
@@ -496,6 +520,17 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("next", parents=[store_p],
                        help="suggest the next best action for this store")
     p.set_defaults(fn=cmd_next)
+
+    p = sub.add_parser("graph", parents=[store_p],
+                       help="export a read-only graph projection of the "
+                            "store (json/dot/mermaid)")
+    p.add_argument("--packs", nargs="*", default=None,
+                   help="limit to these packs (default: all)")
+    p.add_argument("--format", choices=["json", "dot", "mermaid"],
+                   default="json", dest="fmt")
+    p.add_argument("--out", default="",
+                   help="write to this file instead of stdout")
+    p.set_defaults(fn=cmd_graph)
 
     p = sub.add_parser("doctor", parents=[store_p],
                        help="diagnose store issues; --fix repairs them")

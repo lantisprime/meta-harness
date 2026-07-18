@@ -2,8 +2,8 @@
 
 ``selflearn wizard`` walks an operator through every workflow — acquisition
 (gather/distill or the full pipeline), seeding, verification and approval,
-quarantine release, retrieval, next-best-action advice, and store
-diagnostics — prompting for each parameter with sensible defaults. Before
+quarantine release, retrieval, next-best-action advice, store diagnostics,
+and the graph export — prompting for each parameter with sensible defaults. Before
 running anything it prints the exact equivalent non-interactive command, so
 the wizard *teaches* the plain CLI instead of replacing it.
 
@@ -37,6 +37,7 @@ what would you like to do?
    9) status    - packs, entries, suites, coverage
   10) next      - suggest the next best action for this store
   11) doctor    - diagnose (and optionally repair) the store
+  12) graph     - export the store's knowledge graph (json/dot/mermaid)
    q) quit"""
 
 
@@ -221,11 +222,24 @@ def _flow_doctor(con: Console, store: str) -> list[str]:
     return argv
 
 
+def _flow_graph(con: Console, store: str) -> list[str]:
+    fmt = con.ask("output format", default="mermaid",
+                  choices=["json", "dot", "mermaid"])
+    argv = ["graph", "--store", store, "--format", fmt]
+    packs = _ask_tokens(con, "limit to packs (empty for all)")
+    if packs:
+        argv += ["--packs", *packs]
+    out = con.ask("write to file (empty for stdout)")
+    if out:
+        argv += ["--out", out]
+    return argv
+
+
 FLOWS: dict[str, Callable[[Console, str], list[str]]] = {
     "1": _flow_acquire, "2": _flow_gather, "3": _flow_distill,
     "4": _flow_seed, "5": _flow_verify, "6": _flow_approve,
     "7": _flow_release, "8": _flow_retrieve, "9": _flow_list,
-    "10": _flow_next, "11": _flow_doctor,
+    "10": _flow_next, "11": _flow_doctor, "12": _flow_graph,
 }
 
 
