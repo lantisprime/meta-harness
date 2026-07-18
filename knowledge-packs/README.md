@@ -12,6 +12,7 @@ is ephemeral, but these files re-seed it deterministically.
 |---|---|---|---|
 | `human-learning` | Allen, Redish & Kizilcec, *Fundamental Mechanisms of Human Learning* ([arXiv:2509.17202](https://arxiv.org/abs/2509.17202)) | 10 | Four-system neuroscience model of learning (perceptual/instinctual/deliberative/procedural), system boundaries, and teaching implications. |
 | `mathematical-learning` | Katayose, *Learning principle and mathematical realization of the learning mechanism in the brain* ([arXiv:2311.13341](https://arxiv.org/abs/2311.13341)) | 7 | Learning as probability estimation, the log-loss/self-information principle, exact normalization methods, and local/backprop-free optimization. |
+| `active-inference` | Ghasimi & Movarraei, *A New Approach for Knowledge Generation Using Active Inference* ([arXiv:2501.15105](https://arxiv.org/abs/2501.15105)) | 6 | Free Energy Principle model of generating declarative/procedural/conditional knowledge; perception+action loops, expected-free-energy policy selection, and unsupervised concept growth. |
 
 ## Seeding a pack into a store
 
