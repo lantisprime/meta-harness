@@ -36,7 +36,11 @@ Remaining plan milestone M7 (meta-harness Web UI surfaces) lives host-side.
 
 ```bash
 pip install -e './selflearn[dev,pdf]'
-python -m pytest selflearn/tests -q          # 120 tests
+python -m pytest selflearn/tests -q
+
+# New here? The wizard walks every workflow interactively, showing the
+# equivalent plain command before running it:
+selflearn wizard
 
 # Bulk-seed existing material (no model needed):
 selflearn seed-yt distilled/some-lecture --pack lectures --store ~/.selflearn --publish
@@ -54,6 +58,13 @@ selflearn approve <entry-id> --store ~/.selflearn --approved-by you@example.com
 
 # Test what a specialist would be handed:
 selflearn retrieve "lifespan startup shutdown" --packs fastapi --store ~/.selflearn
+
+# Not sure what to do next? A prioritized, executable to-do list:
+selflearn next --store ~/.selflearn
+
+# Store won't load / looks inconsistent? Diagnose, then repair:
+selflearn doctor --store ~/.selflearn
+selflearn doctor --store ~/.selflearn --fix
 ```
 
 Auto-publish (eval-gated, no human in the loop) activates when a distinct
