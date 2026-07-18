@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from selflearn.acquisition import AcquireContext, PluginRegistry
-from selflearn.contracts import CandidateEntry, SourceRef
+from selflearn.contracts import SourceRef
 from selflearn.distillation import Distiller
 from selflearn.ports import ProvenancePort
 from selflearn.store.packstore import PackStore, StoreError
@@ -32,11 +32,16 @@ class AcquisitionReport:
     gathered: int = 0
     distilled: int = 0
     quarantined: list[str] = field(default_factory=list)
-    verified: list[str] = field(default_factory=list)
     rejected: dict[str, list[str]] = field(default_factory=dict)
     held_for_approval: list[str] = field(default_factory=list)
     published: list[str] = field(default_factory=list)
     skipped_existing: list[str] = field(default_factory=list)
+
+    @property
+    def verified(self) -> list[str]:
+        """Derived, not stored (review fix: a third counter that must stay
+        in sync with the other two is a self-contradiction waiting)."""
+        return self.held_for_approval + self.published
 
     def summary(self) -> str:
         tail = (f"{len(self.published)} auto-published (eval-gated)"
@@ -107,7 +112,6 @@ def run_acquisition(
             event({"event": "acquisition.item.rejected", "entry": entry.id,
                    "reasons": vreport.rejected})
             continue
-        report.verified.append(entry.id)
         if not auto:
             report.held_for_approval.append(entry.id)
             event({"event": "acquisition.item.verified", "entry": entry.id,

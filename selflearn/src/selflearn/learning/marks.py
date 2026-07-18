@@ -36,28 +36,20 @@ HELPFUL_WEIGHT = 1.0
 APPLIED_WEIGHT = 2.0
 HARMFUL_WEIGHT = 1.0
 DEPRECATE_THRESHOLD = 3.0
-MARK_HALF_LIFE_DAYS = 90.0
 
+# canonical implementations live in selflearn.evidence (one formula, one
+# clock for every consumer); re-exported here for compatibility
+from selflearn.evidence import (  # noqa: E402
+    MARK_HALF_LIFE_DAYS,
+    decay_factor,
+    laplace_score,
+    parse_iso as _parse_iso,
+)
 
-def _parse_iso(value: str) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
-def decay_factor(last_marked_iso: str, now: datetime,
-                 half_life_days: float = MARK_HALF_LIFE_DAYS) -> float:
-    """0.5 per half-life elapsed since the last mark event; 1.0 when the
-    entry has never been marked or the timestamp is unparseable."""
-    last = _parse_iso(last_marked_iso)
-    if last is None or half_life_days <= 0:
-        return 1.0
-    elapsed_days = max(0.0, (now - last).total_seconds() / 86400.0)
-    return 0.5 ** (elapsed_days / half_life_days)
+__all__ = ["MarkReport", "apply_outcome", "effective_counts", "decay_factor",
+           "laplace_score", "MARK_HALF_LIFE_DAYS", "_parse_iso",
+           "HELPFUL_WEIGHT", "APPLIED_WEIGHT", "HARMFUL_WEIGHT",
+           "DEPRECATE_THRESHOLD"]
 
 
 def effective_counts(stored: StoredEntry, now: datetime,

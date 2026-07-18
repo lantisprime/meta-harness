@@ -17,21 +17,7 @@ from selflearn.acquisition import (
 )
 from selflearn.acquisition.plugins import WebPlugin
 from selflearn.contracts import SourceRef
-
-
-class HashEmbedder:
-    embedder_id = "hash-v1"
-
-    def embed(self, texts):
-        out = []
-        for t in texts:
-            v = [0.0] * 64
-            for tok in re.findall(r"[a-z0-9]{3,}", t.lower()):
-                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1.0
-            n = math.sqrt(sum(x * x for x in v)) or 1.0
-            out.append(tuple(x / n for x in v))
-        return out
-
+from selflearn.testing import HashEmbedder
 
 def test_rank_passages_semantic_mode_uses_embeddings():
     chunks = (
@@ -136,14 +122,25 @@ def test_cli_backend_selection(monkeypatch):
     assert isinstance(_search_backend(ns(search_backend="ddg",
                                          brave_key="ignored")),
                       DuckDuckGoBackend)
-    # auto honors brave key (flag or env) then searxng
+    # auto: explicit flags beat the environment (review fix — an exported
+    # BRAVE_API_KEY must never override a user's explicit --searxng)
     b = _search_backend(ns(brave_key="flag-key"))
     assert isinstance(b, BraveBackend) and b.api_key == "flag-key"
     monkeypatch.setenv("BRAVE_API_KEY", "env-key")
-    assert isinstance(_search_backend(ns()), BraveBackend)
+    assert isinstance(_search_backend(ns(searxng="https://sx.local")),
+                      SearxngBackend)
+    assert isinstance(_search_backend(ns()), BraveBackend)   # env when nothing explicit
     monkeypatch.delenv("BRAVE_API_KEY")
     assert isinstance(_search_backend(ns(searxng="https://sx.local")),
                       SearxngBackend)
+    # forced choices, loud when their config is missing
+    assert isinstance(_search_backend(
+        ns(search_backend="searxng", searxng="https://sx.local")),
+        SearxngBackend)
+    with pytest.raises(AcquisitionError, match="brave needs"):
+        _search_backend(ns(search_backend="brave"))
+    with pytest.raises(AcquisitionError, match="searxng needs"):
+        _search_backend(ns(search_backend="searxng"))
 
 
 def test_web_plugin_search_end_to_end_with_semantic_ranking(tmp_path):

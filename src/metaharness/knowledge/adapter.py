@@ -12,9 +12,7 @@ without it degrades loudly to keyword mode inside selflearn.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
-
-import httpx
+from typing import Callable, Sequence
 
 from metaharness.core.types import Task
 
@@ -39,35 +37,13 @@ KNOWLEDGE_ARCHETYPES: dict[str, str] = {
 }
 
 
-class OpenAICompatEmbedding:
-    """selflearn EmbeddingPort over an OpenAI-compatible embeddings endpoint."""
+# THE embedding client is selflearn's (review fix: two divergent clients
+# emitted the same embedder_id, invisible to reindex_needed). Re-exported
+# here so existing imports keep working.
+from selflearn.ports import OpenAICompatEmbedding  # noqa: E402,F401
 
-    def __init__(self, base_url: str, model: str, api_key: str = "",
-                 timeout_s: float = 30.0):
-        if not base_url or not model:
-            raise ValueError("OpenAICompatEmbedding needs base_url and model")
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.api_key = api_key
-        self.timeout_s = timeout_s
-        self.embedder_id = f"openai-compat:{model}"
-
-    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        with httpx.Client(timeout=self.timeout_s) as client:
-            resp = client.post(f"{self.base_url}/embeddings",
-                               headers=headers,
-                               json={"model": self.model, "input": texts})
-            resp.raise_for_status()
-            payload = resp.json()
-        data = sorted(payload["data"], key=lambda d: d["index"])
-        if len(data) != len(texts):
-            raise RuntimeError(
-                f"embedding endpoint returned {len(data)} vectors for "
-                f"{len(texts)} inputs")
-        return [tuple(d["embedding"]) for d in data]
+__all__ = ["KNOWLEDGE_ARCHETYPES", "OpenAICompatEmbedding",
+           "make_knowledge_hints", "record_qualification"]
 
 
 def record_qualification(matrix, qualification, task_types=("general",)) -> None:

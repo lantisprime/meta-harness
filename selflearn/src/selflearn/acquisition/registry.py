@@ -10,7 +10,7 @@ one plugin's output is revocable as a unit.
 from __future__ import annotations
 
 from importlib.metadata import entry_points
-from typing import Any, Iterable, Optional, Protocol, runtime_checkable
+from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from selflearn.acquisition.context import AcquireContext, AcquisitionError
 from selflearn.contracts import SourceDocument, SourceRef

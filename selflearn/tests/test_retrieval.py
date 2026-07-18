@@ -8,25 +8,7 @@ import pytest
 from selflearn.contracts import CandidateEntry, EntrySource, PublishDecision
 from selflearn.retrieval import Retriever, render_injection_block
 from selflearn.store import PackStore, StoreError
-
-
-class HashEmbedder:
-    """Deterministic embedding stand-in with real cosine geometry."""
-
-    def __init__(self, embedder_id="hash-v1", dim=64):
-        self.embedder_id = embedder_id
-        self.dim = dim
-
-    def embed(self, texts):
-        out = []
-        for t in texts:
-            v = [0.0] * self.dim
-            for tok in re.findall(r"[a-z0-9]{3,}", t.lower()):
-                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % self.dim] += 1.0
-            n = math.sqrt(sum(x * x for x in v)) or 1.0
-            out.append(tuple(x / n for x in v))
-        return out
-
+from selflearn.testing import HashEmbedder
 
 SRC = EntrySource(url="https://docs.example.org/x", fetched_at="t",
                   sha256="0" * 64, tier="official")

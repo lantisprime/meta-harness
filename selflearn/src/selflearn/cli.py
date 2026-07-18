@@ -35,7 +35,7 @@ from selflearn.acquisition import (
 )
 from selflearn.contracts import SourceRef
 from selflearn.distillation import Distiller
-from selflearn.ports import JsonlProvenance
+from selflearn.ports import JsonlProvenance, OpenAICompatEmbedding
 from selflearn.retrieval import Retriever, render_injection_block
 from selflearn.store import PackStore, seed_knowledge_base, seed_ytdistill
 
@@ -95,53 +95,48 @@ def _extract_json(content: str) -> dict:
         raise
 
 
-class OpenAICompatEmbeddingClient:
-    """Minimal EmbeddingPort over an OpenAI-compatible /embeddings endpoint."""
-
-    def __init__(self, base_url: str, model: str, api_key: str = "",
-                 timeout_s: float = 60.0):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.api_key = api_key
-        self.timeout_s = timeout_s
-        self.embedder_id = f"openai-compat:{model}"
-
-    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
-        req = urllib.request.Request(
-            f"{self.base_url}/embeddings",
-            data=json.dumps({"model": self.model, "input": texts}).encode(),
-            headers={"Content-Type": "application/json",
-                     **({"Authorization": f"Bearer {self.api_key}"}
-                        if self.api_key else {})})
-        with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-            payload = json.loads(resp.read())
-        data = sorted(payload["data"], key=lambda d: d["index"])
-        return [tuple(d["embedding"]) for d in data]
-
-
 def _search_backend(args):
-    """Selection: explicit choice > Brave key > SearXNG url > DuckDuckGo.
+    """Selection: explicit --search-backend choice > explicit flags
+    (--brave-key, then --searxng) > BRAVE_API_KEY env > DuckDuckGo default.
 
-    DuckDuckGo is the zero-config default — no key, no subscription.
+    Explicit flags ALWAYS beat the environment (review finding: an exported
+    BRAVE_API_KEY silently overrode a user's --searxng choice, sending
+    queries to a third party they had deliberately avoided).
     """
+    from selflearn.acquisition import AcquisitionError
+
     choice = getattr(args, "search_backend", "auto")
+    brave_flag = getattr(args, "brave_key", "")
+    searxng_flag = getattr(args, "searxng", "")
+    env_key = os.environ.get("BRAVE_API_KEY", "")
     if choice == "wikipedia":
         return WikipediaBackend()
     if choice == "ddg":
         return DuckDuckGoBackend()
-    brave_key = getattr(args, "brave_key", "") or os.environ.get("BRAVE_API_KEY", "")
-    if brave_key:
-        return BraveBackend(brave_key)
-    if getattr(args, "searxng", ""):
-        return SearxngBackend(args.searxng)
+    if choice == "brave":
+        if not (brave_flag or env_key):
+            raise AcquisitionError("--search-backend brave needs --brave-key "
+                                   "or BRAVE_API_KEY")
+        return BraveBackend(brave_flag or env_key)
+    if choice == "searxng":
+        if not searxng_flag:
+            raise AcquisitionError("--search-backend searxng needs --searxng URL")
+        return SearxngBackend(searxng_flag)
+    # auto: explicit flags first, environment after, keyless default last
+    if brave_flag:
+        return BraveBackend(brave_flag)
+    if searxng_flag:
+        return SearxngBackend(searxng_flag)
+    if env_key:
+        return BraveBackend(env_key)
     return DuckDuckGoBackend()
 
 
 def _embedder(args):
     if getattr(args, "embedding_endpoint", ""):
-        return OpenAICompatEmbeddingClient(args.embedding_endpoint,
-                                           args.embedding_model,
-                                           args.api_key or "")
+        return OpenAICompatEmbedding(args.embedding_endpoint,
+                                     args.embedding_model,
+                                     args.api_key or "")
     return None
 
 
@@ -245,6 +240,14 @@ def cmd_verify(args) -> int:
         return 1
     ok_n = 0
     for stored in candidates:
+        # quarantine is its own display state (review fix: it was collapsed
+        # into generic REJECTED, contradicting the pipeline's reporting)
+        if stored.cand.quarantined:
+            print(f"  [QUARANTINED] {stored.cand.id} — "
+                  f"{stored.cand.quarantine_reason}; release with "
+                  f"'selflearn release {stored.cand.id} --store {args.store} "
+                  f"--reason ... --by you@example.com'")
+            continue
         report = verifier.verify(stored.cand)
         state = "ELIGIBLE" if report.ok else "REJECTED"
         ok_n += report.ok
@@ -252,6 +255,14 @@ def cmd_verify(args) -> int:
         print(f"  [{state}] {stored.cand.id} — {detail}")
     print(f"{ok_n}/{len(candidates)} eligible; publish each with "
           f"'selflearn approve <id> --store {args.store}'")
+    return 0
+
+
+def cmd_release(args) -> int:
+    store = PackStore(Path(args.store))
+    store.release_quarantine(args.entry_id, reason=args.reason, released_by=args.by)
+    print(f"released {args.entry_id} from quarantine (journaled; it is a "
+          "normal candidate again and must pass verification to publish)")
     return 0
 
 
@@ -313,103 +324,111 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="selflearn")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("gather", help="acquire refs into source documents")
+    # Shared flag groups (review fix: copy-pasted argparse blocks had
+    # already drifted — lost help texts). One declaration per flag.
+    store_p = argparse.ArgumentParser(add_help=False)
+    store_p.add_argument("--store", required=True,
+                         help="knowledge store root directory")
+    search_p = argparse.ArgumentParser(add_help=False)
+    search_p.add_argument("--search-backend", default="auto",
+                          choices=["auto", "ddg", "wikipedia", "searxng",
+                                   "brave"],
+                          help="auto = explicit flags, then BRAVE_API_KEY, "
+                               "then DuckDuckGo (keyless default); explicit "
+                               "choices force one backend")
+    search_p.add_argument("--brave-key", default="",
+                          help="Brave Search API key (also read from "
+                               "BRAVE_API_KEY; explicit flags beat the env)")
+    search_p.add_argument("--searxng", default="",
+                          help="self-hosted SearXNG instance base url "
+                               "(free, no key)")
+    search_p.add_argument("--embedding-endpoint", default="",
+                          help="OpenAI-compatible base url for SEMANTIC "
+                               "passage ranking (keyword fallback without it)")
+    search_p.add_argument("--embedding-model", default="")
+    net_p = argparse.ArgumentParser(add_help=False)
+    net_p.add_argument("--tier", default="",
+                       help="operator-asserted tier hint for local sources")
+    net_p.add_argument("--no-network", action="store_true",
+                       help="offline: file:// refs only")
+    model_p = argparse.ArgumentParser(add_help=False)
+    model_p.add_argument("--endpoint", required=True,
+                         help="OpenAI-compatible base url, e.g. "
+                              "http://127.0.0.1:1234/v1")
+    model_p.add_argument("--model", required=True)
+    judge_p = argparse.ArgumentParser(add_help=False)
+    judge_p.add_argument("--judge-endpoint", default="",
+                         help="optional second endpoint for the "
+                              "knowledge-judge role")
+    judge_p.add_argument("--judge-model", default="")
+    key_p = argparse.ArgumentParser(add_help=False)
+    key_p.add_argument("--api-key", default="")
+
+    p = sub.add_parser("gather", parents=[search_p, net_p, key_p],
+                       help="acquire refs into source documents")
     p.add_argument("refs", nargs="+")
     p.add_argument("--workdir", required=True)
     p.add_argument("--out", default="sources.json")
-    p.add_argument("--tier", default="")
-    p.add_argument("--no-network", action="store_true")
-    p.add_argument("--search-backend", default="auto",
-                   choices=["auto", "ddg", "wikipedia"],
-                   help="auto = Brave if keyed, else SearXNG if given, else "
-                        "DuckDuckGo (keyless default); 'wikipedia' uses the "
-                        "official MediaWiki API")
-    p.add_argument("--brave-key", default="",
-                   help="optional Brave Search API key (also read from "
-                        "BRAVE_API_KEY)")
-    p.add_argument("--searxng", default="",
-                   help="self-hosted SearXNG instance base url (free, no key)")
-    p.add_argument("--embedding-endpoint", default="",
-                   help="OpenAI-compatible base url for SEMANTIC passage "
-                        "ranking (keyword fallback without it)")
-    p.add_argument("--embedding-model", default="")
-    p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_gather)
 
     p = sub.add_parser("acquire",
+                       parents=[store_p, search_p, net_p, model_p, judge_p,
+                                key_p],
                        help="full pipeline: gather → distill → verify → hold")
     p.add_argument("refs", nargs="+")
     p.add_argument("--pack", required=True)
     p.add_argument("--topic", required=True)
-    p.add_argument("--store", required=True)
     p.add_argument("--workdir", required=True)
-    p.add_argument("--endpoint", required=True)
-    p.add_argument("--model", required=True)
-    p.add_argument("--api-key", default="")
-    p.add_argument("--tier", default="")
-    p.add_argument("--no-network", action="store_true")
-    p.add_argument("--search-backend", default="auto",
-                   choices=["auto", "ddg", "wikipedia"])
-    p.add_argument("--brave-key", default="")
-    p.add_argument("--searxng", default="")
-    p.add_argument("--embedding-endpoint", default="")
-    p.add_argument("--embedding-model", default="")
-    p.add_argument("--judge-endpoint", default="",
-                   help="optional second endpoint for the knowledge-judge role")
-    p.add_argument("--judge-model", default="")
     p.set_defaults(fn=cmd_acquire)
 
-    p = sub.add_parser("verify", help="verify a pack's candidates (strict mode)")
+    p = sub.add_parser("verify", parents=[store_p, judge_p, key_p],
+                       help="verify a pack's candidates (strict mode)")
     p.add_argument("--pack", required=True)
-    p.add_argument("--store", required=True)
-    p.add_argument("--judge-endpoint", default="")
-    p.add_argument("--judge-model", default="")
-    p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_verify)
 
-    p = sub.add_parser("approve",
+    p = sub.add_parser("approve", parents=[store_p, judge_p, key_p],
                        help="human approval: re-verify then publish one entry")
     p.add_argument("entry_id")
-    p.add_argument("--store", required=True)
     p.add_argument("--approved-by", default="human")
-    p.add_argument("--judge-endpoint", default="")
-    p.add_argument("--judge-model", default="")
-    p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_approve)
 
-    p = sub.add_parser("distill", help="distill gathered sources into candidates")
+    p = sub.add_parser("release", parents=[store_p],
+                       help="journaled human release of a quarantined entry")
+    p.add_argument("entry_id")
+    p.add_argument("--reason", required=True)
+    p.add_argument("--by", required=True,
+                   help="identity of the releasing human")
+    p.set_defaults(fn=cmd_release)
+
+    p = sub.add_parser("distill", parents=[store_p, model_p, key_p],
+                       help="distill gathered sources into candidates")
     p.add_argument("sources")
     p.add_argument("--pack", required=True)
     p.add_argument("--topic", required=True)
-    p.add_argument("--store", required=True)
-    p.add_argument("--endpoint", required=True,
-                   help="OpenAI-compatible base url, e.g. http://127.0.0.1:1234/v1")
-    p.add_argument("--model", required=True)
-    p.add_argument("--api-key", default="")
     p.set_defaults(fn=cmd_distill)
 
-    p = sub.add_parser("seed-kb", help="bulk-seed a knowledge-base directory")
+    p = sub.add_parser("seed-kb", parents=[store_p],
+                       help="bulk-seed a knowledge-base directory")
     p.add_argument("dir")
     p.add_argument("--pack", required=True)
-    p.add_argument("--store", required=True)
     p.add_argument("--publish", action="store_true")
     p.set_defaults(fn=cmd_seed_kb)
 
-    p = sub.add_parser("seed-yt", help="bulk-seed a yt-distill lecture folder")
+    p = sub.add_parser("seed-yt", parents=[store_p],
+                       help="bulk-seed a yt-distill lecture folder")
     p.add_argument("dir")
     p.add_argument("--pack", required=True)
-    p.add_argument("--store", required=True)
     p.add_argument("--publish", action="store_true")
     p.set_defaults(fn=cmd_seed_yt)
 
-    p = sub.add_parser("list", help="show packs, entries, suites, coverage")
-    p.add_argument("--store", required=True)
+    p = sub.add_parser("list", parents=[store_p],
+                       help="show packs, entries, suites, coverage")
     p.set_defaults(fn=cmd_list)
 
-    p = sub.add_parser("retrieve", help="test retrieval (keyword-degraded mode)")
+    p = sub.add_parser("retrieve", parents=[store_p],
+                       help="test retrieval (keyword-degraded mode)")
     p.add_argument("query")
     p.add_argument("--packs", nargs="+", required=True)
-    p.add_argument("--store", required=True)
     p.add_argument("-k", type=int, default=3)
     p.set_defaults(fn=cmd_retrieve)
 

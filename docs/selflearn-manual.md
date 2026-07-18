@@ -144,11 +144,18 @@ Distill previously gathered documents into candidate entries.
 
 ### `selflearn verify --pack P`
 Run the verification gates over a pack's candidates; prints
-`[ELIGIBLE]`/`[REJECTED]` per entry with the first basis/reason.
+`[ELIGIBLE]`/`[REJECTED]`/`[QUARANTINED]` per entry with the first
+basis/reason. Quarantined entries are a distinct state — no gate can clear
+them.
 
 ### `selflearn approve ENTRY_ID [--approved-by WHO]`
 Strict-mode publish: **re-verifies** first (refuses if the entry no longer
 passes), then publishes with the approval recorded in provenance.
+
+### `selflearn release ENTRY_ID --reason "…" --by WHO`
+The journaled human transition out of quarantine. The entry becomes an
+ordinary candidate again — it must still pass verification to publish —
+and the release (reason + releasing human) lands in pack provenance.
 
 ### `selflearn seed-kb DIR --pack P [--publish]` / `selflearn seed-yt DIR --pack P [--publish]`
 Bulk-seed a research-cache directory of `.md` files / a yt-distill
@@ -197,9 +204,12 @@ every document, so one plugin's output is revocable as a unit.
 | SearXNG | free, self-hosted | `--searxng https://your-instance` | full-web, no scraping fragility; one `docker run` to host |
 | Brave | paid API | `--brave-key` or `BRAVE_API_KEY` | full-web, official API |
 
-Selection order: explicit `--search-backend` > Brave key > SearXNG URL >
-DuckDuckGo. In meta-harness, a connected MCP search server can also serve as
-a backend through the adapter.
+Selection order: explicit `--search-backend` choice (all four backends are
+explicit choices) > explicit flags (`--brave-key`, then `--searxng`) >
+`BRAVE_API_KEY` environment > DuckDuckGo. **Explicit flags always beat the
+environment** — an exported Brave key never overrides a deliberate
+`--searxng`. In meta-harness, a connected MCP search server can also serve
+as a backend through the adapter.
 
 ---
 
@@ -343,11 +353,16 @@ a mark), a passing outcome cannot implicate, and unknown entry ids fail
 loudly.
 
 **Fast loop (per outcome, automatic):**
-- verified PASS → `helpful+1` per injected entry, `+2` when cited as applied;
+- verified PASS → `helpful+1` per injected entry (and per plan-seeding
+  `seeded_by` entry), `+2` when cited as applied;
 - verified FAIL → `harmful+1` **only** for entries listed in `implicated`
-  (grounded reflection cited them) — injection alone never harms;
-- harmful ≥ 3 and > helpful → auto-deprecation (journaled, reversible,
-  probes retired).
+  (grounded reflection cited them; plan-seeding entries may be implicated
+  too) — injection alone never harms;
+- auto-deprecation fires on **3 consecutive harmful marks** (a decay-free
+  event streak — a helpful mark resets it) **and** decayed harmful >
+  decayed helpful, so the guarantee holds at any cadence: slow-trickle
+  failures deprecate just like rapid ones, while strong *recent* helpful
+  history still delays it. Journaled, reversible, probes retired.
 
 **Per-task-type granularity**: every mark also lands in a per-task bucket
 (`marks_by_task`), and retrieval takes a `task_type` so the prior comes
@@ -379,8 +394,11 @@ learner.suggestions("fastapi")        # advisory dicts with proposed actions
   nothing was retrieved) → propose acquiring the topic;
 - **quality** gap: failures despite retrieval → propose re-verifying the
   implicated entries;
-- **staleness**: sources older than 180 days AND score ≤ 0.45 → propose
-  re-fetch. Old entries still earning helpful marks are left alone.
+- **staleness**: sources older than 180 days AND evidence score ≤ 0.45 →
+  propose re-fetch. The score is `min(lifetime, decayed)`, so long silence
+  can't launder a historically bad entry above the bar, and old entries
+  still earning helpful marks are left alone. Retrieval priors decay with
+  the same clock, so ranking and staleness never contradict each other.
 
 Guardrails: a topic that just signaled is backoff-suppressed for 2 sweeps
 (even if fresh failures keep arriving); a signal **consumes** its failure
@@ -473,7 +491,7 @@ from metaharness.knowledge import (
 | `SchemaGuard: …` | the distiller/probe model returned malformed output; the batch failed rather than storing half-entries |
 | `identity violation: probe validator must be a distinct worker` | author and validator resolve to the same model; configure a second endpoint |
 | `skill declares an executable check but no ExecutionPort is bound` | bind a sandbox (meta-harness: evals/execution.py) or drop the check |
-| `X published entries lack vectors from embedder '…'` | embedder changed; run `Retriever.index(pack)` to re-embed |
+| entries published without vectors | handled automatically: retrieval lazily embeds them on the next call and persists the vectors |
 | `retrieval running WITHOUT an embedding endpoint` (warning) | keyword-degraded mode; configure `--embedding-endpoint` for semantic quality |
 | `entry … no longer passes verification; refusing approval` | the world changed between verify and approve — re-run `selflearn verify` |
 | `no suite baseline for pack '…'` | snapshot one after a known-good state before checking regression |

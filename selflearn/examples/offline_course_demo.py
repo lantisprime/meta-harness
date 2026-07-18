@@ -37,6 +37,7 @@ from selflearn.acquisition.plugins import LocalPlugin
 from selflearn.contracts import SourceRef
 from selflearn.distillation import Distiller
 from selflearn.ports import JsonlProvenance, ModelIdIdentity
+from selflearn.testing import HashEmbedder
 
 SEARCH_NOTES = """\
 Uninformed search methods explore a state space without domain knowledge: \
@@ -149,21 +150,6 @@ class IgnorantModel:
 
     def complete(self, role, prompt, context):
         return {"answer": "no idea"}
-
-
-class HashEmbedder:
-    embedder_id = "hash-v1"
-
-    def embed(self, texts):
-        out = []
-        for t in texts:
-            v = [0.0] * 64
-            for tok in _WORD.findall(t.lower()):
-                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1.0
-            n = math.sqrt(sum(x * x for x in v)) or 1.0
-            out.append(tuple(x / n for x in v))
-        return out
-
 
 def main() -> int:
     print(__doc__.split("What it")[0])

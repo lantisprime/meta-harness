@@ -191,6 +191,118 @@ def test_long_pack_topic_ids_keep_digest_distinct():
     assert len(id1) <= 80 and len(id2) <= 80
 
 
+# -- below-cap batch --------------------------------------------------------
+
+def test_vectors_live_in_sidecar_not_manifest(tmp_path):
+    """C17: a mark update must not rewrite embedding vectors."""
+    store = PackStore(tmp_path)
+    publish(store, "kn-vec")
+    store.set_vector("kn-vec", (0.1, 0.2, 0.3), "emb-v1")
+    manifest = json.loads((tmp_path / "fastapi" / "manifest.json").read_text())
+    assert "vector" not in manifest["entries"]["kn-vec"]
+    sidecar = json.loads((tmp_path / "fastapi" / "vectors.json").read_text())
+    assert sidecar["kn-vec"]["vector"] == [0.1, 0.2, 0.3]
+    reloaded = PackStore(tmp_path)
+    assert reloaded.get("kn-vec").vector == (0.1, 0.2, 0.3)
+
+
+def test_release_quarantine_is_journaled_and_gated(tmp_path):
+    """C29: quarantine now has a journaled human release transition."""
+    store = PackStore(tmp_path)
+    q = CandidateEntry(id="kn-q", pack="fastapi", kind="knowledge", body="b",
+                       claims=("c",), sources=(SRC,), topic="t",
+                       quarantined=True, quarantine_reason="injection screen")
+    store.add_candidate(q)
+    with pytest.raises(Exception, match="quarantined"):
+        store.publish("kn-q", PublishDecision(entry_id="kn-q", publish=True,
+                                              basis=("t",), identity_basis="m"))
+    with pytest.raises(Exception, match="reason"):
+        store.release_quarantine("kn-q", reason="", released_by="x")
+    store.release_quarantine("kn-q", reason="false positive: benign vocabulary",
+                             released_by="dev@znp.pw")
+    assert not store.get("kn-q").cand.quarantined
+    prov = (tmp_path / "fastapi" / "provenance.jsonl").read_text()
+    assert "quarantine.released" in prov and "dev@znp.pw" in prov
+    # released entries are ordinary candidates: gates still apply
+    assert store.get("kn-q").status == "candidate"
+    with pytest.raises(Exception, match="not a quarantined"):
+        store.release_quarantine("kn-q", reason="again", released_by="x")
+
+
+def test_staleness_keeps_flagging_historically_bad_entries(tmp_path):
+    """C15: silence must not launder a low lifetime score above the bar."""
+    from selflearn.learning import Learner
+
+    store = PackStore(tmp_path)
+    e = CandidateEntry(id="kn-bad-old", pack="fastapi", kind="knowledge",
+                       body="b", claims=("c",), topic="t",
+                       sources=(EntrySource(url="https://docs.example.org/x",
+                                            fetched_at="2025-01-01T00:00:00Z",
+                                            sha256="0" * 64, tier="official"),))
+    store.add_candidate(e)
+    store.publish(e.id, PublishDecision(entry_id=e.id, publish=True,
+                                        basis=("t",), identity_basis="m"))
+    store.mark(e.id, helpful=1.0, harmful=2.0,
+               now_iso="2025-02-01T00:00:00+00:00")   # lifetime score 0.4
+    learner = Learner(store)
+    much_later = datetime(2027, 7, 17, tzinfo=timezone.utc)
+    signals = learner.staleness_signals("fastapi", now=much_later)
+    assert any("kn-bad-old" in s.evidence for s in signals)
+
+
+def test_arxiv_single_file_gzip_and_pdf_routing(tmp_path):
+    """C5: gzip'd single-file submissions parse; pdf URLs reach PdfPlugin."""
+    import gzip as gz
+
+    from selflearn.acquisition import AcquireContext, PluginRegistry, builtin_plugins
+    from selflearn.acquisition.plugins import ArxivPlugin, PdfPlugin
+    from selflearn.contracts import SourceRef
+
+    class Fetcher:
+        def fetch(self, url):
+            return gz.compress(
+                rb"\section{Intro} Attention mechanisms weigh token pairs.")
+
+    ctx = AcquireContext(workdir=tmp_path / "w", fetcher=Fetcher(),
+                         min_fetch_interval_s=0.0)
+    docs = ArxivPlugin().acquire(
+        SourceRef(uri="https://arxiv.org/abs/1706.03762"), ctx)
+    assert "Attention mechanisms" in docs[0].blocks[0]
+    # pdf URLs are no longer shadowed by the arxiv plugin
+    registry = PluginRegistry(builtin_plugins())
+    plugin = registry.resolve(SourceRef(uri="https://arxiv.org/pdf/1706.03762"))
+    assert plugin.id == "pdf"
+
+
+def test_ytdistill_parser_is_shared_and_consistent(tmp_path):
+    """C28: one parser; unknown record types and empty text are skipped
+    identically by the plugin and the seeder."""
+    from selflearn.acquisition.ytdistill import parse_chunks
+
+    lines = [
+        json.dumps({"record_type": "summary", "text": "sum", "start": 0}),
+        json.dumps({"record_type": "chapter_marker", "text": "ch1"}),   # unknown
+        json.dumps({"text": "", "start": 1}),                            # empty
+        json.dumps({"text": "real chunk", "start": 3.0, "end": 9.0,
+                    "source_url": "https://youtu.be/x"}),
+    ]
+    parsed = parse_chunks("\n".join(lines))
+    assert parsed.skipped_unknown == 1 and parsed.skipped_empty == 1
+    assert [r.text for r in parsed.chunks] == ["real chunk"]
+    assert parsed.chunks[0].locator == "t=3-9s"
+    assert parsed.records[0].is_summary
+
+
+def test_report_verified_is_derived():
+    """C24: verified cannot desynchronize from held + published."""
+    from selflearn.pipeline import AcquisitionReport
+
+    report = AcquisitionReport(pack="p", topic="t")
+    report.held_for_approval.append("a")
+    report.published.append("b")
+    assert report.verified == ["a", "b"]
+
+
 # -- F10: think-block/fence tolerant JSON extraction (finding 10) ------------
 
 def test_extract_json_handles_think_blocks_and_fences():

@@ -92,14 +92,24 @@ class WikipediaBackend:
                + urllib.parse.urlencode({"action": "query", "list": "search",
                                          "srsearch": query, "format": "json",
                                          "srlimit": max_results}))
+        payload = _fetch_json(self.transport, api, {}, "Wikipedia")
         try:
-            payload = json.loads(self.transport(api, {}))
             hits = payload["query"]["search"]
-        except (json.JSONDecodeError, KeyError) as exc:
-            raise AcquisitionError(f"Wikipedia API unparseable payload: {exc}")
+        except (KeyError, TypeError) as exc:
+            raise AcquisitionError(f"Wikipedia API unexpected shape: {exc}")
         base = f"https://{self.lang}.wikipedia.org/wiki/"
         return [base + urllib.parse.quote(h["title"].replace(" ", "_"))
                 for h in hits][:max_results]
+
+
+def _fetch_json(transport: Transport, url: str, headers: dict, who: str) -> dict:
+    """Shared GET+parse: unparseable payloads become one loud error class.
+    (Replaces per-backend copies whose except-tuples had unreachable
+    KeyError arms — review finding.)"""
+    try:
+        return json.loads(transport(url, headers))
+    except json.JSONDecodeError as exc:
+        raise AcquisitionError(f"{who} returned unparseable payload: {exc}")
 
 
 class SearxngBackend:
@@ -113,10 +123,7 @@ class SearxngBackend:
     def search(self, query: str, max_results: int) -> list[str]:
         url = (f"{self.base_url}/search?"
                + urllib.parse.urlencode({"q": query, "format": "json"}))
-        try:
-            payload = json.loads(self.transport(url, {}))
-        except (json.JSONDecodeError, KeyError) as exc:
-            raise AcquisitionError(f"SearXNG returned unparseable payload: {exc}")
+        payload = _fetch_json(self.transport, url, {}, "SearXNG")
         urls = [r["url"] for r in payload.get("results", []) if r.get("url")]
         return urls[:max_results]
 
@@ -136,9 +143,6 @@ class BraveBackend:
             {"q": query, "count": max_results})
         headers = {"Accept": "application/json",
                    "X-Subscription-Token": self.api_key}
-        try:
-            payload = json.loads(self.transport(url, headers))
-        except (json.JSONDecodeError, KeyError) as exc:
-            raise AcquisitionError(f"Brave returned unparseable payload: {exc}")
+        payload = _fetch_json(self.transport, url, headers, "Brave")
         results = payload.get("web", {}).get("results", [])
         return [r["url"] for r in results if r.get("url")][:max_results]

@@ -6,14 +6,13 @@ size-capped); artifacts only through ``ctx.artifact_path`` (jailed).
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
-import json
 import re
 import shutil
 import subprocess
 import tarfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -91,33 +90,18 @@ class LocalPlugin:
         return docs
 
     def _ytdistill_chunks(self, ref: SourceRef, f: Path, text: str) -> SourceDocument:
-        chunks, url = [], f"file://{f}"
-        starts: list[float] = []
-        ends: list[float] = []
-        for line in text.splitlines():
-            rec = json.loads(line)
-            # schema tolerance (simulation finding 6): absent record_type => chunk
-            if rec.get("record_type", "transcript_chunk") != "transcript_chunk":
-                continue
-            chunks.append(str(rec.get("text", "")))
-            url = str(rec.get("source_url", url))
-            if rec.get("start") is not None:
-                starts.append(float(rec["start"]))
-            if rec.get("end") is not None:
-                ends.append(float(rec["end"]))
+        from selflearn.acquisition.ytdistill import parse_chunks
+
+        parsed = parse_chunks(text, default_url=f"file://{f}")
+        chunks = [r.text for r in parsed.chunks]
         if not chunks:
             raise AcquisitionError(f"{f} contains no transcript chunks")
-        # locator covers the whole span, not the first chunk's start (a
-        # real-data finding: doc-level t=0s lost the range entirely)
-        locator = ""
-        if starts:
-            hi = max(ends) if ends else max(starts)
-            locator = f"t={min(starts):.0f}-{hi:.0f}s"
+        url = parsed.chunks[0].source_url
         return SourceDocument(
             ref=ref, blocks=("\n".join(chunks),), chunks=tuple(chunks), assets=(),
             provenance=Provenance(url=url, fetched_at=_now(), sha256=_sha(text),
                                   plugin=self.id, plugin_version=self.version,
-                                  locator=locator),
+                                  locator=parsed.span_locator),
             tier="primary")
 
 
@@ -164,29 +148,27 @@ def html_to_text(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-_QWORD = re.compile(r"[a-z0-9]{3,}")
-
-
 def rank_passages(query: str, chunks: tuple[str, ...], top: int = 8,
                   embedder=None) -> tuple[str, ...]:
     """Question-ranked passages, not raw order — the web-RAG step.
 
-    Semantic (embedding cosine) when an EmbeddingPort is supplied — the same
-    scorer family pack retrieval uses (decision 2) — keyword overlap as the
-    degraded fallback otherwise.
+    Reuses the retrieval module's scorer (decision 2 parity for real, not
+    just by claim — review finding: an inlined zip dot-product silently
+    truncated dimension mismatches where retrieval.cosine scores them 0.0).
     """
+    from selflearn.retrieval.retriever import _words, cosine
+
     if not chunks:
         return chunks
     if embedder is not None:
         vectors = embedder.embed([query, *chunks])
         qv, cvs = vectors[0], vectors[1:]
-        scored = [(sum(a * b for a, b in zip(qv, cv)), c)
-                  for cv, c in zip(cvs, chunks)]
+        scored = [(cosine(qv, cv), c) for cv, c in zip(cvs, chunks)]
     else:
-        qwords = set(_QWORD.findall(query.lower()))
+        qwords = _words(query)
         scored = []
         for c in chunks:
-            cwords = set(_QWORD.findall(c.lower()))
+            cwords = _words(c)
             scored.append((len(qwords & cwords) / (len(cwords) ** 0.5 or 1.0), c))
     ranked = [c for s, c in sorted(scored, key=lambda t: -t[0]) if s > 0]
     return tuple(ranked[:top]) or chunks[:top]
@@ -241,7 +223,7 @@ class WebPlugin:
 # arxiv: LaTeX source tarball fast path (decision 5), pdf fallback
 # ---------------------------------------------------------------------------
 
-_ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf|e-print)/(?P<id>\d{4}\.\d{4,5})")
+_ARXIV = re.compile(r"arxiv\.org/(?:abs|e-print)/(?P<id>\d{4}\.\d{4,5})")
 
 
 class ArxivPlugin:
@@ -250,6 +232,8 @@ class ArxivPlugin:
     requires: tuple[str, ...] = ()
 
     def can_handle(self, ref: SourceRef) -> bool:
+        # abs/e-print only: arxiv.org/pdf/... routes to the pdf plugin, so
+        # the prescribed fallback is actually reachable (review finding)
         return bool(_ARXIV.search(ref.uri))
 
     def acquire(self, ref: SourceRef, ctx: AcquireContext) -> list[SourceDocument]:
@@ -270,15 +254,20 @@ class ArxivPlugin:
 
     @staticmethod
     def _latex_text(raw: bytes) -> str:
+        texts: list[str] = []
         try:
             tf = tarfile.open(fileobj=io.BytesIO(raw), mode="r:*")
+            texts = [tf.extractfile(m).read().decode(errors="replace")
+                     for m in tf.getmembers() if m.name.endswith(".tex")]
         except tarfile.TarError:
-            return ""
+            # single-file submissions are served as plain gzip of one .tex,
+            # not a tarball (review finding, reproduced with ReadError)
+            try:
+                texts = [gzip.decompress(raw).decode(errors="replace")]
+            except (OSError, gzip.BadGzipFile):
+                return ""
         parts: list[str] = []
-        for member in tf.getmembers():
-            if not member.name.endswith(".tex"):
-                continue
-            tex = tf.extractfile(member).read().decode(errors="replace")
+        for tex in texts:
             tex = re.sub(r"(?<!\\)%.*", "", tex)                # comments
             # exact equations and captions are the point of the fast path
             for cap in re.findall(r"\\caption\{([^{}]+)\}", tex):
@@ -302,7 +291,9 @@ class PdfPlugin:
 
     def can_handle(self, ref: SourceRef) -> bool:
         uri = ref.uri.lower().split("?")[0]
-        return uri.endswith(".pdf")
+        # arxiv.org/pdf/<id> serves a PDF without the extension — this is
+        # the fallback target the arxiv plugin prescribes (review finding)
+        return uri.endswith(".pdf") or "arxiv.org/pdf/" in uri
 
     def acquire(self, ref: SourceRef, ctx: AcquireContext) -> list[SourceDocument]:
         try:

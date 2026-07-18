@@ -25,18 +25,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from selflearn.contracts import ContractError, GapSignal, TaskOutcome
-from selflearn.learning.marks import (
-    MARK_HALF_LIFE_DAYS,
-    MarkReport,
-    apply_outcome,
-    effective_counts,
-)
+from selflearn.evidence import MARK_HALF_LIFE_DAYS, laplace_score, parse_iso
+from selflearn.learning.marks import MarkReport, apply_outcome, effective_counts
 from selflearn.store.packstore import PackStore
 
 ACTIONS = {
@@ -188,7 +184,8 @@ class Learner:
             # consumed failures produced their signal; they never re-signal
             self._failures = [f for f in self._failures
                               if f.topic not in consumed_topics]
-        self._save_state()
+        if consumed_topics or suppressed:
+            self._save_state()      # only when state actually changed
         return signals
 
     def staleness_signals(self, pack: str,
@@ -197,21 +194,23 @@ class Learner:
         horizon = now - timedelta(days=self.config.staleness_max_age_days)
         signals = []
         for stored in self.store.published(pack):
-            fetched = _parse_when(stored.cand.sources[0].fetched_at)
+            fetched = parse_iso(stored.cand.sources[0].fetched_at)
             if fetched is None or fetched > horizon:
                 continue
-            # time-decayed evidence, not lifetime counters: an entry helpful
-            # 100 times last year but silent since decays toward the prior
+            # min(lifetime, decayed): decayed alone converges to the 0.5
+            # prior under silence, silently un-flagging historically bad
+            # entries (review finding); lifetime alone never forgets. The
+            # minimum keeps both failure modes covered.
             helpful, harmful = effective_counts(
                 stored, now, self.config.mark_half_life_days)
-            score = (helpful + 1.0) / (helpful + harmful + 2.0)
+            score = min(stored.score, laplace_score(helpful, harmful))
             if score > self.config.staleness_score_max:
                 continue                        # old but still earning its keep
             age_days = (now - fetched).days
             signals.append(GapSignal(
                 pack=pack, topic=stored.cand.topic, kind="staleness",
                 evidence=f"{stored.cand.id}: sources {age_days}d old, "
-                         f"decayed score {score:.2f} "
+                         f"evidence score {score:.2f} "
                          f"(decayed helpful={helpful:.1f}, "
                          f"harmful={harmful:.1f})"))
         return signals
@@ -229,13 +228,3 @@ class Learner:
         return out
 
 
-def _parse_when(value: str) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed

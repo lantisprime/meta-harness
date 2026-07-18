@@ -83,21 +83,30 @@ def run_probe(model: ModelPort, probe: Probe, knowledge_block: str = "",
 
 def run_pack_suite(model: ModelPort, store: PackStore, pack: str,
                    injected: bool,
-                   execution: Optional[ExecutionPort] = None) -> SuiteResult:
+                   execution: Optional[ExecutionPort] = None,
+                   reuse_execution: Optional[dict[str, bool]] = None) -> SuiteResult:
     """Run every live probe in the pack against ``model``, with or without
     that probe's entry injected — the with/without pair is the honesty
-    measurement."""
+    measurement. ``reuse_execution`` maps probe id -> result for execution
+    probes already run this round (their outcome cannot depend on
+    injection, so re-running the sandbox is pure waste — review finding)."""
     result = SuiteResult(model_id=getattr(model, "model_id", "?"), pack=pack,
                          injected=injected)
+    reuse_execution = reuse_execution if reuse_execution is not None else {}
     for stored in store.entries_for(pack):
         probes = store.probes_for(stored.cand.id)
         if not probes:
             continue
         block = stored.cand.body if injected else ""
         for probe in probes:
-            passed = run_probe(model, probe, knowledge_block=block,
-                               execution=execution,
-                               skill_check=dict(stored.cand.skill_check))
+            if probe.check_kind == "execution" and probe.id in reuse_execution:
+                passed = reuse_execution[probe.id]
+            else:
+                passed = run_probe(model, probe, knowledge_block=block,
+                                   execution=execution,
+                                   skill_check=dict(stored.cand.skill_check))
+                if probe.check_kind == "execution":
+                    reuse_execution[probe.id] = passed
             result.results.append(ProbeResult(probe.id, probe.kind, passed))
     return result
 
@@ -124,10 +133,13 @@ class QualificationResult:
 
 def qualify_model(model: ModelPort, store: PackStore, pack: str,
                   execution: Optional[ExecutionPort] = None) -> QualificationResult:
+    shared_execution: dict[str, bool] = {}     # sandbox checks run once
     with_inj = run_pack_suite(model, store, pack, injected=True,
-                              execution=execution)
+                              execution=execution,
+                              reuse_execution=shared_execution)
     without = run_pack_suite(model, store, pack, injected=False,
-                             execution=execution)
+                             execution=execution,
+                             reuse_execution=shared_execution)
     return QualificationResult(
         model_id=with_inj.model_id, pack=pack,
         with_injection=with_inj.pass_rate,
@@ -158,10 +170,15 @@ def eval_gated_decision(
                 "eval gate: no second-model-validated probes — cannot "
                 "auto-publish; use strict human approval",),
             identity_basis=identity_basis)
-    failed = [p.id for p in validated
-              if not run_probe(answer_model, p, knowledge_block=entry.body,
-                               execution=execution,
-                               skill_check=dict(entry.skill_check))]
+    # Execution probes are skipped at the gate: the verifier already ran the
+    # identical sandbox check moments earlier in this pipeline iteration
+    # (review finding: a flaky check could produce a self-contradictory
+    # basis, and every skill auto-publish paid double sandbox cost). Their
+    # probes still enter the suite for qualification/regression runs.
+    failed = [p.id for p in validated if p.check_kind != "execution"
+              and not run_probe(answer_model, p, knowledge_block=entry.body,
+                                execution=execution,
+                                skill_check=dict(entry.skill_check))]
     if failed:
         return PublishDecision(
             entry_id=entry.id, publish=False,

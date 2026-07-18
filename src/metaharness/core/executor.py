@@ -12,6 +12,7 @@ plateau detection across attempts, and step-repetition dedup.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Awaitable, Callable, Optional
 
@@ -160,7 +161,10 @@ class TaskExecutor:
         else:
             task_for_attempts = task
         if self.playbook_hints:
-            advice.extend(self.playbook_hints(task))
+            # off the event loop: knowledge-pack hints may embed the query
+            # over the network (blocking HTTP), and a cold endpoint would
+            # otherwise stall every run on the loop for up to its timeout
+            advice.extend(await asyncio.to_thread(self.playbook_hints, task))
 
         with tracer().start_as_current_span("task.execute") as span:
             span.set_attribute("task.id", task.id)

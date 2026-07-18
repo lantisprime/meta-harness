@@ -23,21 +23,7 @@ from selflearn.learning import (
 from selflearn.retrieval import Retriever
 from selflearn.store import PackStore, StoreError
 from selflearn.verification.suite import SuiteResult, ProbeResult
-
-
-class HashEmbedder:
-    embedder_id = "hash-v1"
-
-    def embed(self, texts):
-        out = []
-        for t in texts:
-            v = [0.0] * 64
-            for tok in re.findall(r"[a-z0-9]{3,}", t.lower()):
-                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1.0
-            n = math.sqrt(sum(x * x for x in v)) or 1.0
-            out.append(tuple(x / n for x in v))
-        return out
-
+from selflearn.testing import HashEmbedder
 
 def src(fetched_at="2026-07-01T00:00:00Z"):
     return EntrySource(url="https://docs.example.org/x", fetched_at=fetched_at,

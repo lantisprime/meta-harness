@@ -14,6 +14,7 @@ import math
 import re
 import warnings
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 from selflearn.ports import EmbeddingPort
@@ -35,8 +36,10 @@ def cosine(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _keyword_overlap(query_words: set[str], entry: StoredEntry) -> float:
-    entry_words = _words(entry.cand.body + " " + " ".join(entry.cand.claims))
+def _keyword_overlap(query_words: set[str], entry: StoredEntry,
+                     entry_words: Optional[set[str]] = None) -> float:
+    if entry_words is None:
+        entry_words = _words(entry.cand.body + " " + " ".join(entry.cand.claims))
     if not query_words or not entry_words:
         return 0.0
     return len(query_words & entry_words) / math.sqrt(len(entry_words))
@@ -59,6 +62,24 @@ class Retriever:
         self.embedder = embedder
         self.degraded = embedder is None
         self._warned = False
+        # bounded caches (review fix: every call re-embedded the query over
+        # the network and re-tokenized every entry body)
+        self._query_vectors: dict[str, tuple[float, ...]] = {}
+        self._entry_words: dict[str, set[str]] = {}
+
+    def _query_vector(self, query: str) -> tuple[float, ...]:
+        if query not in self._query_vectors:
+            if len(self._query_vectors) >= 128:
+                self._query_vectors.pop(next(iter(self._query_vectors)))
+            self._query_vectors[query] = self.embedder.embed([query])[0]
+        return self._query_vectors[query]
+
+    def _words_for(self, entry: StoredEntry) -> set[str]:
+        eid = entry.cand.id
+        if eid not in self._entry_words:
+            self._entry_words[eid] = _words(
+                entry.cand.body + " " + " ".join(entry.cand.claims))
+        return self._entry_words[eid]
 
     # ------------------------------------------------------------------
     # Indexing (re-index on embedder swap)
@@ -93,6 +114,8 @@ class Retriever:
         if not candidates:
             return []
         query_words = _words(query)
+        # one clock per call: priors decay consistently with staleness views
+        now = datetime.now(timezone.utc)
 
         if self.degraded:
             if not self._warned:
@@ -101,8 +124,8 @@ class Retriever:
                     "degraded keyword-only scoring (decision 1 wants semantic "
                     "scoring — configure an EmbeddingPort)", stacklevel=2)
                 self._warned = True
-            scored = [(_keyword_overlap(query_words, e)
-                       * e.score_for(task_type), e)
+            scored = [(_keyword_overlap(query_words, e, self._words_for(e))
+                       * e.score_for(task_type, now=now), e)
                       for e in candidates]
         else:
             if len(candidates) > PREFILTER_THRESHOLD:
@@ -123,8 +146,8 @@ class Retriever:
                 for entry, vector in zip(stale, vectors):
                     self.store.set_vector(entry.cand.id, vector,
                                           self.embedder.embedder_id)
-            qv = self.embedder.embed([query])[0]
-            scored = [(cosine(qv, e.vector) * e.score_for(task_type), e)
+            qv = self._query_vector(query)
+            scored = [(cosine(qv, e.vector) * e.score_for(task_type, now=now), e)
                       for e in candidates]
 
         ranked = sorted(scored, key=lambda t: -t[0])

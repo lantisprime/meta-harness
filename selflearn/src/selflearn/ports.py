@@ -90,6 +90,42 @@ class JsonlProvenance:
             f.write(json.dumps(event, sort_keys=True) + "\n")
 
 
+class OpenAICompatEmbedding:
+    """EmbeddingPort over any OpenAI-compatible /embeddings endpoint.
+
+    THE embedding client — hosts and the CLI share this one implementation
+    (review finding: two divergent clients emitted the same embedder_id, so
+    behavioral differences were invisible to reindex_needed)."""
+
+    def __init__(self, base_url: str, model: str, api_key: str = "",
+                 timeout_s: float = 30.0):
+        if not base_url or not model:
+            raise ValueError("OpenAICompatEmbedding needs base_url and model")
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+        self.embedder_id = f"openai-compat:{model}"
+
+    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{self.base_url}/embeddings",
+            data=json.dumps({"model": self.model, "input": texts}).encode(),
+            headers={"Content-Type": "application/json",
+                     **({"Authorization": f"Bearer {self.api_key}"}
+                        if self.api_key else {})})
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+            payload = json.loads(resp.read())
+        data = sorted(payload["data"], key=lambda d: d["index"])
+        if len(data) != len(texts):
+            raise RuntimeError(
+                f"embedding endpoint returned {len(data)} vectors for "
+                f"{len(texts)} inputs")
+        return [tuple(d["embedding"]) for d in data]
+
+
 class ModelIdIdentity:
     """Standalone IdentityPort: compares model ids. Weaker than a signed
     worker identity, and the recorded basis says so."""

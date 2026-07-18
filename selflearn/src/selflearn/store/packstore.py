@@ -21,11 +21,15 @@ Publishing demands a positive PublishDecision; nothing else flips status.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import yaml
+
+from selflearn.evidence import MARK_HALF_LIFE_DAYS, decay_factor, laplace_score
 
 from selflearn.contracts import (
     CandidateEntry,
@@ -67,17 +71,27 @@ class StoredEntry:
 
     @property
     def score(self) -> float:
-        """Laplace-smoothed retrieval prior from the learning marks."""
-        return (self.helpful + 1.0) / (self.helpful + self.harmful + 2.0)
+        """Laplace-smoothed lifetime prior from the learning marks."""
+        return laplace_score(self.helpful, self.harmful)
 
-    def score_for(self, task_type: str = "", smoothing: float = 2.0) -> float:
-        """Task-type-aware prior: the task bucket's evidence shrunk toward
-        the global score (hierarchical smoothing — `smoothing` pseudo-counts
-        of the global prior). No bucket evidence -> global score."""
+    def score_for(self, task_type: str = "", smoothing: float = 2.0,
+                  now: Optional["datetime"] = None,
+                  half_life_days: float = MARK_HALF_LIFE_DAYS) -> float:
+        """Task-type-aware evidence prior. With ``now``, counters are
+        time-decayed first (review fix: retrieval ranked on undecayed
+        lifetime counters while staleness used decayed ones — one clock for
+        every consumer now). Bucket evidence shrinks toward the global
+        score with ``smoothing`` pseudo-counts; no bucket -> global."""
+        factor = (decay_factor(self.marks_updated_at, now, half_life_days)
+                  if now is not None else 1.0)
+        global_score = laplace_score(self.helpful * factor,
+                                     self.harmful * factor)
         if not task_type or task_type not in self.marks_by_task:
-            return self.score
+            return global_score
         bucket_helpful, bucket_harmful = self.marks_by_task[task_type]
-        return ((bucket_helpful + smoothing * self.score)
+        bucket_helpful *= factor
+        bucket_harmful *= factor
+        return ((bucket_helpful + smoothing * global_score)
                 / (bucket_helpful + bucket_harmful + smoothing))
 
 
@@ -95,7 +109,26 @@ class PackStore:
         self._entries: dict[str, StoredEntry] = {}
         self._probes: dict[str, list[StoredProbe]] = {}
         self._coverage: dict[str, dict[str, str]] = {}
+        self._deferred: Optional[set[str]] = None   # packs pending flush
         self._load()
+
+    @contextmanager
+    def deferred_persist(self):
+        """Batch mode for bulk operations (review fix: per-entry manifest
+        rewrites made seeding O(N²)). Entry .md files still write
+        immediately; manifests/probes/vectors flush once at exit."""
+        if self._deferred is not None:
+            yield          # already batching (nested) — no-op
+            return
+        self._deferred = set()
+        try:
+            yield
+        finally:
+            packs, self._deferred = self._deferred, None
+            for pack in sorted(packs):
+                self._persist_manifest(pack)
+                self._persist_probes(pack)
+                self._persist_vectors(pack)
 
     # ------------------------------------------------------------------
     # Boot loading
@@ -111,6 +144,14 @@ class PackStore:
             except json.JSONDecodeError as exc:
                 raise StoreError(f"corrupt manifest for pack {pack_dir.name!r}: {exc}")
             self._coverage[pack_dir.name] = dict(manifest.get("coverage", {}))
+            vectors_path = pack_dir / "vectors.json"
+            sidecar: dict[str, dict] = {}
+            if vectors_path.exists():
+                try:
+                    sidecar = json.loads(vectors_path.read_text())
+                except json.JSONDecodeError as exc:
+                    raise StoreError(
+                        f"corrupt vectors.json for pack {pack_dir.name!r}: {exc}")
             for entry_id, meta in manifest.get("entries", {}).items():
                 md_path = pack_dir / "entries" / f"{entry_id}.md"
                 if not md_path.exists():
@@ -132,7 +173,10 @@ class PackStore:
                     consecutive_harmful=int(meta.get("consecutive_harmful", 0)),
                     marks_updated_at=meta.get("marks_updated_at", ""),
                     embedder_id=meta.get("embedder_id", ""),
-                    vector=tuple(meta.get("vector", [])))
+                    # sidecar first; "vector" in the manifest is the legacy
+                    # pre-sidecar layout, still readable
+                    vector=tuple(sidecar.get(entry_id, {}).get(
+                        "vector", meta.get("vector", []))))
             probes_path = pack_dir / "evals" / "probes.jsonl"
             if probes_path.exists():
                 for line in probes_path.read_text().splitlines():
@@ -186,6 +230,8 @@ class PackStore:
         cov[stored.cand.topic] = "covered"
         self._persist_entry(stored)
         self._persist_probes(stored.cand.pack)
+        if stored.vector and self._deferred is None:
+            self._persist_vectors(stored.cand.pack)
         self._event({"event": "entry.published", "entry": entry_id,
                      "pack": stored.cand.pack, "basis": list(decision.basis),
                      "identity_basis": decision.identity_basis,
@@ -259,6 +305,27 @@ class PackStore:
         stored.vector = tuple(vector)
         stored.embedder_id = embedder_id
         self._persist_entry(stored)
+        if self._deferred is None:
+            self._persist_vectors(stored.cand.pack)
+
+    def release_quarantine(self, entry_id: str, reason: str,
+                           released_by: str) -> StoredEntry:
+        """The journaled human transition out of quarantine (review fix: the
+        only prior way out was hand-editing frontmatter, bypassing
+        provenance). The entry returns to ordinary candidate state and must
+        still pass every gate to publish."""
+        stored = self._get(entry_id)
+        if stored.status != "candidate" or not stored.cand.quarantined:
+            raise StoreError(f"{entry_id!r} is not a quarantined candidate")
+        if not reason or not released_by:
+            raise StoreError("release_quarantine requires a reason and the "
+                             "releasing human's identity")
+        stored.cand = replace(stored.cand, quarantined=False,
+                              quarantine_reason="")
+        self._persist_entry(stored)
+        self._event({"event": "quarantine.released", "entry": entry_id,
+                     "reason": reason, "released_by": released_by})
+        return stored
 
     def claim_topics(self, pack: str, topics: Iterable[str]) -> None:
         cov = self._coverage.setdefault(pack, {})
@@ -322,9 +389,14 @@ class PackStore:
         pack_dir = self._pack_dir(stored.cand.pack)
         md_path = pack_dir / "entries" / f"{stored.cand.id}.md"
         md_path.write_text(_entry_md(stored))
-        self._persist_manifest(stored.cand.pack)
+        if self._deferred is not None:
+            self._deferred.add(stored.cand.pack)
+        else:
+            self._persist_manifest(stored.cand.pack)
 
     def _persist_manifest(self, pack: str) -> None:
+        # vectors live in a sidecar (review fix: inlining them made every
+        # two-float mark update rewrite megabytes of JSON at scale)
         pack_dir = self._pack_dir(pack)
         manifest = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -340,7 +412,6 @@ class PackStore:
                     "consecutive_harmful": e.consecutive_harmful,
                     "marks_updated_at": e.marks_updated_at,
                     "embedder_id": e.embedder_id,
-                    "vector": list(e.vector),
                 }
                 for e in self._entries.values() if e.cand.pack == pack
             },
@@ -348,7 +419,19 @@ class PackStore:
         (pack_dir / "manifest.json").write_text(json.dumps(manifest, indent=1,
                                                            sort_keys=True))
 
+    def _persist_vectors(self, pack: str) -> None:
+        pack_dir = self._pack_dir(pack)
+        vectors = {e.cand.id: {"embedder_id": e.embedder_id,
+                               "vector": list(e.vector)}
+                   for e in self._entries.values()
+                   if e.cand.pack == pack and e.vector}
+        (pack_dir / "vectors.json").write_text(json.dumps(vectors,
+                                                          sort_keys=True))
+
     def _persist_probes(self, pack: str) -> None:
+        if self._deferred is not None:
+            self._deferred.add(pack)
+            return
         pack_dir = self._pack_dir(pack)
         lines = []
         for e in self.entries_for(pack):

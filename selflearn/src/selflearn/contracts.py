@@ -11,7 +11,7 @@ schema-tolerant sources, corroboration independence by registrable domain).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 ENTRY_KINDS = ("knowledge", "skill", "workflow")

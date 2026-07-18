@@ -19,21 +19,7 @@ from selflearn.contracts import (  # noqa: E402
 
 from metaharness.knowledge import knowledge_tools, plan_from_knowledge  # noqa: E402
 from metaharness.tools.registry import ToolError  # noqa: E402
-
-
-class HashEmbedder:
-    embedder_id = "hash-v1"
-
-    def embed(self, texts):
-        out = []
-        for t in texts:
-            v = [0.0] * 64
-            for tok in re.findall(r"[a-z0-9]{3,}", t.lower()):
-                v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1.0
-            n = math.sqrt(sum(x * x for x in v)) or 1.0
-            out.append(tuple(x / n for x in v))
-        return out
-
+from selflearn.testing import HashEmbedder
 
 # -- template ---------------------------------------------------------------
 
