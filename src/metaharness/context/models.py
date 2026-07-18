@@ -8,6 +8,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+
+def _contains_traversal_segment(value: str) -> bool:
+    """A segment equal to '..' (forward or backslash separated) is path traversal."""
+    if not value:
+        return False
+    return ".." in value.replace("\\", "/").split("/")
+
+
 SHA256_PATTERN = r"^sha256:[0-9a-f]{64}$"
 
 
@@ -76,7 +84,16 @@ class CompressionAction(str, Enum):
 
 
 class ContextVersionBindings(FrozenModel):
-    """The immutable evidence/lineage tuple for one context assembly."""
+    """The immutable evidence/lineage tuple for one context assembly.
+
+    Cross-axis convention (documented): a `harness_version` self-declaring
+    a breaking schema change (a '-breaking-' segment in the version string)
+    must not bind a non-None `memory_snapshot_version` or
+    `evidence_snapshot_version`. Reusing those snapshots across a breaking
+    bump silently passes the per-axis checks today; the convention forces
+    callers to pick a fresh (or explicitly-None) snapshot pair, with a
+    future reconciliation marker providing the opt-in to reuse.
+    """
 
     model_portfolio_version: str = Field(min_length=1)
     harness_version: str = Field(min_length=1)
@@ -91,6 +108,15 @@ class ContextVersionBindings(FrozenModel):
     def validate_lineage(self) -> "ContextVersionBindings":
         if self.parent_candidate_version == self.candidate_version:
             raise ValueError("candidate and parent versions must differ")
+        if "breaking" in self.harness_version.split("-"):
+            if self.memory_snapshot_version is not None or self.evidence_snapshot_version is not None:
+                raise ValueError(
+                    "harness_version declares a breaking schema change "
+                    "('-breaking-' segment); memory_snapshot_version and "
+                    "evidence_snapshot_version must be None rather than "
+                    "reusing prior-version snapshots across the bump "
+                    "(future reconciliation marker: not yet supported)"
+                )
         return self
 
 
@@ -129,6 +155,25 @@ class ContextSourceRef(FrozenModel):
             raise ValueError("exactly one of content_hash or high_water_mark is required")
         if self.fetchable != (self.artifact_ref is not None):
             raise ValueError("fetchable sources require exactly one artifact_ref")
+        if _contains_traversal_segment(self.source_id):
+            raise ValueError(
+                "source_id must not contain path-traversal sequences "
+                "(e.g. '..' / '..\\..\\' segments)"
+            )
+        if self.artifact_ref is not None and _contains_traversal_segment(self.artifact_ref):
+            raise ValueError(
+                "artifact_ref must not contain path-traversal sequences "
+                "(e.g. '..' / '..\\..\\' segments)"
+            )
+        if (
+            self.kind is ContextSourceKind.EVALUATOR_RECEIPT
+            and self.trust is ContextTrust.INSTRUCTION
+        ):
+            raise ValueError(
+                "evaluator_receipt sources are evidence and may never "
+                "carry INSTRUCTION trust (no self-promotion to instruction "
+                "authority)"
+            )
         return self
 
 
@@ -195,6 +240,25 @@ class ContextEnvelope(FrozenModel):
         priorities = [section.ordering_priority for section in self.sections]
         if priorities != list(range(len(self.sections))):
             raise ValueError("sections must have unique contiguous priorities")
+        project_ids = {section.source.scope.project_id for section in self.sections}
+        if len(project_ids) > 1:
+            raise ValueError(
+                "envelope sections must share a single source scope "
+                "project_id (no cross-project scope bleed); got "
+                f"{sorted(project_ids)}"
+            )
+        identity_by_source_id: dict[str, set[str]] = {}
+        for section in self.sections:
+            mode = "pinned" if section.source.content_hash is not None else "live"
+            identity_by_source_id.setdefault(section.source.source_id, set()).add(mode)
+        for source_id, modes in identity_by_source_id.items():
+            if len(modes) > 1:
+                raise ValueError(
+                    f"envelope sections sharing source_id={source_id!r} mix "
+                    "pinned (content_hash) and live (high_water_mark) identity "
+                    "without an explicit reconciliation marker (future "
+                    "marker: not yet supported)"
+                )
         material = self.model_dump(mode="json", exclude={"content_hash"})
         if self.content_hash != content_hash(material):
             raise ValueError("envelope content_hash mismatch")
@@ -210,6 +274,29 @@ class CompressionReceipt(FrozenModel):
     original_tokens: int = Field(ge=0)
     final_tokens: int = Field(ge=0)
     reason: str = Field(min_length=1)
+    fidelity_loss_estimate: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_fidelity_loss_estimate(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "fidelity_loss_estimate" in data:
+            return data
+        action = data.get("action")
+        original = data.get("original_tokens") or 0
+        final = data.get("final_tokens") or 0
+        if action is CompressionAction.NONE:
+            data["fidelity_loss_estimate"] = 0.0
+            return data
+        if original <= 0:
+            data["fidelity_loss_estimate"] = 0.0 if final <= 0 else 1.0
+            return data
+        loss = 1.0 - (final / original)
+        if loss < 0.0:
+            loss = 0.0
+        elif loss > 1.0:
+            loss = 1.0
+        data["fidelity_loss_estimate"] = loss
+        return data
 
     @model_validator(mode="after")
     def validate_change(self) -> "CompressionReceipt":
@@ -292,6 +379,18 @@ class ContextManifest(FrozenModel):
         envelope = ContextEnvelope.model_validate(redacted_envelope)
         if envelope.content_hash != redacted_envelope.get("content_hash"):
             raise ValueError("redacted envelope content hash mismatch")
+        required_artifact_refs = {
+            section.source.artifact_ref
+            for section in envelope.sections
+            if section.source.fetchable and section.source.artifact_ref is not None
+        }
+        provided_artifact_refs = set(self.artifact_refs)
+        missing = required_artifact_refs - provided_artifact_refs
+        if missing:
+            raise ValueError(
+                "artifact_refs must include every fetchable source's "
+                f"artifact_ref; missing: {sorted(missing)}"
+            )
         return self
 
     def reconstruct_messages(self) -> list[dict[str, Any]]:

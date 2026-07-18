@@ -53,19 +53,19 @@
       "id": "traversal-source-id-path-escape",
       "category": "traversal",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-002",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.source_id / memory-skill artifact resolution",
-      "description": "A memory-skill artifact loader that resolves source_id/artifact_ref onto a filesystem or object-store path must reject path-traversal sequences (e.g. '../../etc/passwd'). No such resolver or validation exists yet; the bare pydantic model accepts these strings today."
+      "description": "A memory-skill artifact loader that resolves source_id/artifact_ref onto a filesystem or object-store path must reject path-traversal sequences (e.g. '../../etc/passwd'). ContextSourceRef now rejects any '..' segment in source_id (and artifact_ref) under both '/' and '\\' separators; legit ids ('artifact:evidence-42', 'event-seq:1', 'lineage-42') pass."
     },
     {
       "id": "traversal-artifact-ref-path-escape",
       "category": "traversal",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-002",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.artifact_ref / memory-skill artifact resolution",
-      "description": "artifact_ref values are opaque strings today with no traversal guard; a future memory-skill artifact fetcher must reject traversal-shaped refs before dereferencing them."
+      "description": "artifact_ref values used to be opaque strings with no traversal guard; ContextSourceRef now rejects '..' segments in artifact_ref under both '/' and '\\' separators before the value can be handed to a memory-skill fetcher."
     },
     {
       "id": "cross-scope-task-requires-run",
@@ -89,10 +89,10 @@
       "id": "cross-scope-envelope-mixed-projects",
       "category": "cross_scope_access",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-003",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextEnvelope",
-      "description": "A future memory-skill assembler must refuse to bind sections whose sources carry different project_id/run_id scopes into a single envelope (no cross-run/cross-project bleed). ContextEnvelope has no scope-consistency validator today, so mixed-scope sections currently assemble without error."
+      "description": "A memory-skill assembler must refuse to bind sections whose sources carry different project_id scopes into a single envelope (no cross-project bleed). ContextEnvelope now rejects an envelope whose sections span more than one project_id; run_id / task_id consistency is delegated to ContextScope's existing nesting rules."
     },
     {
       "id": "immutable-frozen-attribute-mutation",
@@ -125,10 +125,10 @@
       "id": "immutable-memory-record-in-place-rewrite",
       "category": "immutable_evidence_rewrites",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-001",
-      "target": "metaharness.memory (does not exist)",
-      "description": "A future episodic/semantic memory store must refuse in-place rewrites of committed memory records (append-only with tombstone/supersede, not destructive update). No metaharness.memory module exists yet to enforce this."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "MemoryStore.overwrite / metaharness.memory.stores",
+      "description": "MemoryStore is append-only: every variant of EpisodicMemoryStore/SemanticMemoryStore/WorkingMemoryStore/ProceduralMemoryStore.now exposes overwrite(record_id, ...) that raises ImmutableRecordError. Mutation must go through mutate() with a receipt, which appends a superseding record + MemoryMutationReceipt instead."
     },
     {
       "id": "premature-logging-entry-receipt-alignment",
@@ -143,10 +143,10 @@
       "id": "premature-logging-write-ahead-commit-ordering",
       "category": "premature_logging",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-005",
-      "target": "metaharness.memory (does not exist)",
-      "description": "A future memory-skill write path must guarantee a memory mutation is durably committed before any observability event describing it is emitted (no premature logging of not-yet-committed memory state). No commit-then-log contract exists yet outside the unrelated context.manifest.shadow event."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "metaharness.memory.audit.CommitOrderedMemoryStore",
+      "description": "metaharness.memory.audit.bind_sink(fn) registers a process-wide sink; CommitOrderedMemoryStore.commit() returns only after the underlying SQLite COMMIT completes durably (WAL mode + autocommit transactions), then emits the audit event with payload[\"commit_state\"] == \"committed\". Mutations emit memory.mutation_committed the same way."
     },
     {
       "id": "lossy-compression-receipt-hash-consistency",
@@ -161,37 +161,37 @@
       "id": "lossy-compression-fidelity-bound",
       "category": "lossy_compression",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-006",
-      "target": "CompressionReceipt / metaharness.memory (does not exist)",
-      "description": "A future memory-skill compaction contract must attach a bounded fidelity/information-loss estimate to lossy compression (e.g. STRUCTURED_SUMMARY) receipts so downstream consumers can reason about what was dropped. CompressionReceipt today records only before/after hashes and token counts, with no loss bound."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "CompressionReceipt",
+      "description": "CompressionReceipt now carries a bounded fidelity_loss_estimate in [0,1], auto-computed by a model validator when absent: clamped 1 - final_tokens/original_tokens for lossy actions, 0.0 for NONE. Assembled receipts (assembly.py) get the field for free; live fitting output is unchanged."
     },
     {
       "id": "activation-lifecycle-states",
       "category": "activation_or_tombstoning",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-007",
-      "target": "metaharness.memory (does not exist)",
-      "description": "A future memory-skill record must carry an activation lifecycle (active/dormant/tombstoned) so retrieval can exclude tombstoned records without deleting evidence. No such lifecycle type exists in this codebase."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "MemoryRecord / ActivationState / LifecycleState",
+      "description": "MemoryRecord carries independent activation_state (ACTIVE/DORMANT/TOMBSTONED) and lifecycle_state (CANDIDATE/ACTIVE/SUPERSEDED/REJECTED/EXPIRED/TOMBSTONED) axes. record.tombstone(reason=...) returns a NEW record with activation_state=TOMBSTONED and content preserved (evidence, not destruction)."
     },
     {
       "id": "specialist-task-action-contract",
       "category": "specialist_task_actions",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-008",
-      "target": "metaharness.memory.skills (does not exist)",
-      "description": "A future specialist sub-agent must expose a typed task-action contract (bounded action vocabulary, authorized scope) distinct from a general worker's free-form tool calls. No specialist task-action type exists yet."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "SpecialistTaskAction / metaharness.memory.skills",
+      "description": "SpecialistTaskAction (frozen, extra='forbid') records WHAT a specialist wants to do plus scope; .authorize(allowed_actions=set) raises UnauthorizedTaskActionError for any action outside the set, and static-domain authorities (deploy, promote, self_approve, widen_visibility, evaluate, commit_domain) are rejected at the type level regardless of allowlist."
     },
     {
       "id": "unreceipted-mutation-requires-receipt",
       "category": "unreceipted_mutation",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-004",
-      "target": "metaharness.memory (does not exist)",
-      "description": "Every mutation of a committed memory record must produce a receipt (analogous to CompressionReceipt) linking before/after state; a future memory-skill store must refuse unreceipted mutation. No memory store exists yet to enforce this."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "MemoryStore.mutate / UnreceiptedMutationError",
+      "description": "MemoryStore.mutate(record_id, content=..., receipt=None) raises UnreceiptedMutationError WITHOUT any database write. With receipt!=None, mutate() appends a superseding record and a self-verifying MemoryMutationReceipt (content_hash covers all fields except itself), so every mutation is audit-attested and tamper-detectable."
     },
     {
       "id": "task-action-training-target-schema",
@@ -215,10 +215,10 @@
       "id": "hw-confounding-cross-section-lineage",
       "category": "hw_confounding",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-010",
-      "target": "ContextEnvelope / metaharness.memory (does not exist)",
-      "description": "A future memory-skill assembler must refuse to bind a high-water-mark-tracked (live) section and a content-hash-pinned (immutable) section to the same underlying lineage without an explicit reconciliation marker, to avoid confounding live state with a pinned snapshot. No such cross-section lineage check exists in ContextEnvelope today."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "ContextEnvelope",
+      "description": "ContextEnvelope now rejects an envelope in which two sections share a source_id but one is content_hash-pinned (immutable) and the other is high_water_mark-tracked (live); the error names a future reconciliation marker (out of scope for this stage). The within-source identity XOR check on ContextSourceRef is unchanged."
     },
     {
       "id": "repeated-set-promotion-gate",
@@ -233,19 +233,19 @@
       "id": "incompatible-reuse-version-lineage",
       "category": "incompatible_reuse",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-012",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextVersionBindings",
-      "description": "A future compatibility check must refuse to reuse a memory_snapshot_version/evidence_snapshot_version pair across an incompatible harness_version bump (e.g. a breaking schema change) even though the two version axes are individually well-formed. ContextVersionBindings validates only self/parent candidate lineage, not cross-axis compatibility."
+      "description": "ContextVersionBindings now enforces the documented cross-axis convention: a harness_version self-declaring a breaking schema change (a '-breaking-' segment in the version string) must not bind a non-None memory_snapshot_version or evidence_snapshot_version. Reuse across a breaking bump is rejected with a message naming the future reconciliation marker."
     },
     {
       "id": "unhealthy-fallback-health-signal",
       "category": "unhealthy_fallback",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-013",
-      "target": "metaharness.memory.health (does not exist)",
-      "description": "A future memory-skill subsystem must expose a health signal so repeated assembly failures trip a circuit breaker instead of silently falling back to the legacy fitter on every call. No health-check or circuit-breaker module exists yet; today a single failure always falls back with no unhealthy-state tracking."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "MemorySkillCircuitBreaker / metaharness.memory.health",
+      "description": "MemorySkillCircuitBreaker(failure_threshold=N) exposes record_failure()/record_success()/is_healthy()/require_healthy()/snapshot(). Once failures >= threshold, is_healthy() returns False and require_healthy() raises CircuitOpenError; resets via record_success() or reset(). No auto half-open probe; orchestrator decides fallback deliberately."
     },
     {
       "id": "incomplete-packaging-manifest-alignment",
@@ -260,19 +260,19 @@
       "id": "incomplete-packaging-artifact-refs-completeness",
       "category": "incomplete_packaging",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-014",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextManifest.artifact_refs",
-      "description": "A future packaging contract must guarantee every fetchable section's artifact_ref appears in the manifest's artifact_refs list, so a downstream consumer can retrieve everything the manifest claims is fetchable. ContextManifest has no such completeness validator today, so an incompletely packaged manifest (fetchable source, absent artifact_ref) currently constructs without error."
+      "description": "ContextManifest now parses redacted_envelope_json, collects every fetchable source's artifact_ref, and requires each to appear in artifact_refs. Live assembly output stays valid because emitted sources are non-fetchable and the empty artifact_refs check passes trivially."
     },
     {
       "id": "evaluator-receipt-instruction-self-promotion",
       "category": "evaluator_non_self_approval",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-015",
+      "status": "enforced",
+      "requirement_id": null,
       "target": "ContextSourceRef.kind / ContextSourceRef.trust",
-      "description": "Evaluator receipts are evidence and must never acquire instruction authority. ContextSourceRef currently accepts an EVALUATOR_RECEIPT with trust=INSTRUCTION, so a future memory-skill assembler must enforce a source-kind trust ceiling before the receipt can enter an instruction-bearing section."
+      "description": "ContextSourceRef now enforces the source-kind trust ceiling: EVALUATOR_RECEIPT with trust=INSTRUCTION is rejected at construction. Other kind/trust combinations (e.g. EVALUATOR_RECEIPT with VERIFIED_FACT or UNTRUSTED_EVIDENCE) remain valid; the ceiling is the single forbidden pair."
     }
   ]
 }
