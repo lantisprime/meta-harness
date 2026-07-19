@@ -247,6 +247,26 @@ def test_readiness_rejects_probe_validated_by_optimizer(tmp_path):
                for reason in report.reasons)
 
 
+def test_readiness_rejects_probe_validated_by_evaluator(tmp_path):
+    probe = Probe(
+        id="p-label", entry_id="entry-labels", kind="recall",
+        question="Which label applies?", expected="order",
+        check_kind="deterministic", validated=True,
+        validated_by="frozen-evaluator-v1",
+    )
+    store = _published_store(tmp_path, probe=probe)
+    report = assess_domain_readiness(
+        SpecialistSpec(
+            name="classifier", packs=("classification",),
+            improvement_policy=_policy(),
+        ),
+        store,
+    )
+    assert not report.ready
+    assert any("validated by the evaluator" in reason
+               for reason in report.reasons)
+
+
 def test_ready_specialist_has_high_signal_evidence_and_yaml_round_trip(tmp_path):
     store = _published_store(tmp_path)
     spec = SpecialistSpec(

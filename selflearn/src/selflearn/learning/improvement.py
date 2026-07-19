@@ -360,6 +360,9 @@ def assess_domain_readiness(spec: "SpecialistSpec",
             elif probe.validated_by == policy.optimizer_identity:
                 criterion_reasons.append(
                     f"probe {probe_id!r} was validated by the optimizer")
+            elif probe.validated_by == policy.evaluator_identity:
+                criterion_reasons.append(
+                    f"probe {probe_id!r} was validated by the evaluator")
             elif probe.check_kind != criterion.check_kind:
                 criterion_reasons.append(
                     f"probe {probe_id!r} check kind does not match")
