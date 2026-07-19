@@ -1,5 +1,7 @@
-"""Learning module: fast-loop marks (M2) + slow-loop gap detection,
-staleness, advisory suggestions, and suite regression (M6)."""
+"""Learning module: fast-loop marks (M2), slow-loop gap detection,
+staleness, advisory suggestions, suite regression (M6), and the
+evidence contracts for bounded specialist improvement campaigns
+(readiness assessment, evaluation splits, trial eligibility)."""
 from selflearn.learning.gaps import Learner, LearningConfig, label_topic
 from selflearn.learning.improvement import (
     DomainReadinessReport,
