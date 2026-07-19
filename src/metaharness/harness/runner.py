@@ -31,7 +31,7 @@ class WorkerTimeout(RuntimeError):
         self.timeout_s = timeout_s
 
 
-CURRENT_RESULT_SIGNATURE_VERSION = 2
+CURRENT_RESULT_SIGNATURE_VERSION = 3
 
 
 def result_signing_bytes(result: WorkerResult, *, version: Optional[int] = None) -> bytes:
@@ -41,7 +41,10 @@ def result_signing_bytes(result: WorkerResult, *, version: Optional[int] = None)
     not become unverifiable. Version 2 additionally attests ``workspace_root``
     and ``timed_out``: both now affect control flow (automatic test execution and
     timeout classification), so treating them as mutable bookkeeping would let a
-    valid signature bless attacker-selected behavior.
+    valid signature bless attacker-selected behavior. Version 3 (META-19 FIX-7,
+    codex#8) additionally attests ``error_kind``: it drives retry-abort and
+    capability-evidence exclusion, so an unsigned field would let a tampered but
+    still-verifying result flip that control flow.
     """
     version = result.signature_version if version is None else version
     payload = {
@@ -53,12 +56,14 @@ def result_signing_bytes(result: WorkerResult, *, version: Optional[int] = None)
         "raw_text": result.raw_text,
         "error": result.error,
     }
-    if version == 2:
+    if version in (2, 3):
         payload.update({
-            "signature_version": 2,
+            "signature_version": version,
             "timed_out": result.timed_out,
             "workspace_root": result.workspace_root,
         })
+        if version == 3:
+            payload["error_kind"] = result.error_kind
     elif version != 1:
         raise ValueError(f"unsupported worker-result signature version {version}")
     return canonical_bytes(payload)
@@ -122,12 +127,20 @@ class BaseRunner(Runner):
             try:
                 result = await self._execute(task)
             except Exception as exc:  # a failed attempt is data, not a crash
+                # META-19 (F6): a live-context contract violation is deterministic
+                # (pure assembly, no infrastructure luck) — tag it so the executor
+                # aborts retries and excludes it from capability evidence. Imported
+                # lazily to avoid a harness->context import cycle at module load.
+                from metaharness.context.live import LiveContextViolation
+
+                error_kind = "context_contract" if isinstance(exc, LiveContextViolation) else None
                 result = WorkerResult(
                     task_id=task.id,
                     worker_id=self.worker_id,
                     tier=self.tier,
                     model=self.model,
                     error=f"{type(exc).__name__}: {exc}",
+                    error_kind=error_kind,
                     timed_out=isinstance(exc, WorkerTimeout),  # issue #2
                 )
             result.latency_s = time.monotonic() - started

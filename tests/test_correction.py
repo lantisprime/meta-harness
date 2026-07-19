@@ -228,11 +228,13 @@ async def test_learning_loop_wired_into_executor():
     pb = Playbook()
     pb.add("Pick exactly one of the provided labels.", task_type=TaskType.CLASSIFY)
     loop = LearningLoop(pb)
-    seen_boundaries: list[str] = []
+    seen_advice: list[str] = []
 
     class SpyWorker(MockLLMWorker):
         async def _execute(self, task):
-            seen_boundaries.extend(task.boundaries)
+            # META-19 (F2): hints/reflections now flow via task.advice, not
+            # task.boundaries (boundaries stay the caller-authored contract).
+            seen_advice.extend(task.advice)
             return await super()._execute(task)
 
     runner = SpyWorker("w", Tier.SMALL, seed=1, skills={TaskType.CLASSIFY: 1.0})
@@ -246,5 +248,5 @@ async def test_learning_loop_wired_into_executor():
     outcome = await executor.execute(task)
     loop.observe(outcome)
 
-    assert any("provided labels" in b for b in seen_boundaries)
+    assert any("provided labels" in b for b in seen_advice)
     assert pb.bullets()[0].helpful == 1  # bullet credited for the pass

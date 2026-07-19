@@ -70,8 +70,10 @@ def test_knowledge_hints_flow_into_executor_advice(store):
     advice = hints(task)
     executor = TaskExecutor.__new__(TaskExecutor)   # advice-merge unit only
     merged = executor._attempt_task(task, advice)
-    boundaries = " ".join(merged.boundaries)
-    assert "kn-fastapi-lifespan" in boundaries
+    # META-19 (F2): advice merges into task.advice, not task.boundaries (the
+    # latter stays the caller-authored instruction contract, no trust laundering).
+    merged_advice = " ".join(merged.advice)
+    assert "kn-fastapi-lifespan" in merged_advice
 
 
 def test_knowledge_archetypes_exist_for_acquisition_roles():

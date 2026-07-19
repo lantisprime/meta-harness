@@ -96,11 +96,18 @@ class TaskExecutor:
 
     def _attempt_task(self, task: Task, advice: list[str]) -> Task:
         """The task as sent for this attempt — original contract plus accumulated
-        reflections/playbook hints in the boundaries."""
+        reflections/playbook hints in `advice`.
+
+        META-19 (F2): advice lands in `task.advice`, NOT `task.boundaries`.
+        Reflexion/selflearn text quotes prior worker output and retrieved
+        content verbatim; folding it into boundaries laundered untrusted data
+        into a caller-authored instruction contract. The worker renders advice
+        as untrusted-derived feedback, never as an instruction slot.
+        """
         if not advice:
             return task
         variant = task.model_copy(deep=True)
-        variant.boundaries = list(task.boundaries) + advice
+        variant.advice = list(task.advice) + advice
         return variant
 
     async def execute(
@@ -383,9 +390,14 @@ class TaskExecutor:
                 # A timeout is likewise neutral: it says the attempt exhausted
                 # its wall-clock allowance, not that the model could not solve
                 # the task. A later PASS still earns normal positive evidence.
+                # META-19 (F6): a context-contract violation is a deterministic
+                # harness failure, not evidence about the model's skill — never
+                # bank it in the capability matrix / routing evidence.
+                context_contract_failure = result.error_kind == "context_contract"
                 if (verification.verdict in (Verdict.PASS, Verdict.FAIL)
                         and verification.scorer != "authenticity"
-                        and not timeout_failure):
+                        and not timeout_failure
+                        and not context_contract_failure):
                     self.router.matrix.record(
                         result.model, task.task_type, verification.verdict == Verdict.PASS
                     )
@@ -424,6 +436,14 @@ class TaskExecutor:
                     break
 
                 # ---- failed, decide how to continue ----
+                # META-19 (F6): a deterministic context-contract violation will
+                # recur identically on retry (pure assembly, same inputs) — abort
+                # the task's remaining attempts rather than waste them.
+                if context_contract_failure:
+                    self._record("task.context_contract", {
+                        "task_id": task.id, "n": n, "detail": (result.error or "")[:200],
+                    })
+                    break
                 plateau.record(verification.score)
                 sig = action_signature(result.output)
                 repeated = sig in seen_signatures

@@ -8,10 +8,40 @@ from pathlib import Path
 
 import pytest
 
+from metaharness.context import ContextManifest
 from metaharness.core.types import MASTMode, Task, TaskType, Tier
 from metaharness.evals.verifiers import verify_output
 from metaharness.harness import CLI_ADAPTERS, CodingAgentWorker, SubscriptionWorker, available_clis
 from metaharness.identity import KeyPair
+from metaharness.observability.run_events import bind_run_event_sink, reset_run_event_sink
+
+# response each CLI's parser accepts (JSON for claude, JSONL for pi, text otherwise)
+_STUB_RESPONSE = {
+    "claude": '{"result": "done", "total_cost_usd": 0.0}',
+    "pi": '{"message": {"role": "assistant", "content": "done"}}',
+    "codex": "done",
+    "opencode": "done",
+}
+
+
+def _capturing_stub(tmp_path: Path, cli: str) -> str:
+    """A stub CLI that records argv + stdin into the workspace, then emits a
+    parseable success response so the worker returns cleanly."""
+    return _stub(tmp_path, cli, (
+        'echo "$@" > "$PWD/argv.txt"\n'
+        'cat > "$PWD/stdin.txt" 2>/dev/null\n'
+        f"echo '{_STUB_RESPONSE[cli]}'"
+    ))
+
+
+async def _run_capturing(worker: CodingAgentWorker, task: Task):
+    events: list[tuple[str, dict]] = []
+    token = bind_run_event_sink(lambda kind, payload: events.append((kind, payload)))
+    try:
+        result = await worker.run(task)
+    finally:
+        reset_run_event_sink(token)
+    return result, events
 
 
 def _stub(tmp_path: Path, name: str, script: str) -> str:
@@ -163,14 +193,14 @@ def test_subscription_cli_adapters_enforce_read_only_tools(tmp_path):
     workspace = tmp_path / "workspace"
 
     claude = SubscriptionWorker("sub-claude", cli="claude")
-    claude_argv, _ = CLI_ADAPTERS["claude"].build(claude, "inspect", workspace)
+    claude_argv, _ = CLI_ADAPTERS["claude"].build(claude, "inspect", "", workspace)
     assert "--safe-mode" in claude_argv
     assert "--no-session-persistence" in claude_argv
     assert claude_argv[claude_argv.index("--permission-mode") + 1] == "plan"
     assert claude_argv[claude_argv.index("--tools") + 1] == "Read,Glob,Grep"
 
     codex = SubscriptionWorker("sub-codex", cli="codex")
-    codex_argv, _ = CLI_ADAPTERS["codex"].build(codex, "inspect", workspace)
+    codex_argv, _ = CLI_ADAPTERS["codex"].build(codex, "inspect", "", workspace)
     assert codex_argv[codex_argv.index("--sandbox") + 1] == "read-only"
     assert "--ephemeral" in codex_argv
 
@@ -323,12 +353,12 @@ def test_display_model_placeholder_never_reaches_argv(tmp_path):
     for cli, flag in (("codex", "-m"), ("claude", "--model"),
                       ("pi", "--model"), ("opencode", "-m")):
         bare = CodingAgentWorker(f"w-{cli}", cli=cli)
-        argv, _ = CLI_ADAPTERS[cli].build(bare, "prompt", ws)
+        argv, _ = CLI_ADAPTERS[cli].build(bare, "prompt", "", ws)
         assert flag not in argv, f"{cli}: placeholder model leaked into argv"
         assert bare.model == f"{cli}-cli"  # display/matrix name still set
 
         pinned = CodingAgentWorker(f"w2-{cli}", cli=cli, model="real-model-id")
-        argv2, _ = CLI_ADAPTERS[cli].build(pinned, "prompt", ws)
+        argv2, _ = CLI_ADAPTERS[cli].build(pinned, "prompt", "", ws)
         assert argv2[argv2.index(flag) + 1] == "real-model-id"
 
 
@@ -397,3 +427,115 @@ async def test_execute_estimates_tokens_for_budget(tmp_path):
     result = await worker.run(_task(objective="write a reasonably long objective for tokens"))
     assert result.error is None
     assert result.tokens_in > 0 and result.tokens_out > 0
+
+
+# -- META-19: live context assembler on the coding path -----------------------
+
+
+@pytest.mark.parametrize("cli,sends_system", [
+    ("pi", True), ("codex", False), ("opencode", False), ("claude", True),
+])
+async def test_coding_adapters_emit_live_manifest_and_attest_system_prompt(
+    tmp_path, cli, sends_system,
+):
+    """META-19 (F8): all four CLI adapters consume the live assembler. The flat
+    prompt carries objective/constraints/inputs; the manifest is emitted once per
+    attempt (round 0); a system_prompt surface is attested ONLY for adapters that
+    actually transport one (pi/claude), and its redacted value reaches argv."""
+    ws = tmp_path / "ws"
+    binary = _capturing_stub(tmp_path, cli)
+    worker = CodingAgentWorker(
+        f"w-{cli}", cli=cli, workspace=ws, binary=binary,
+        system_prompt="PERSONA-MARKER",
+    )
+    task = _task(objective="fix the bug", boundaries=["do not touch tests"],
+                 inputs={"file": "a.py", "_hidden": "nope"})
+    result, events = await _run_capturing(worker, task)
+
+    assert result.error is None
+    assert result.output == "done"
+    manifests = [p for k, p in events if k == "context.manifest"]
+    assert not any(k == "context.manifest.shadow" for k, _ in events)
+    assert len(manifests) == 1
+    assert manifests[0]["shadow"] is False and manifests[0]["round"] == 0
+    manifest = ContextManifest.model_validate(manifests[0]["manifest"])
+    surfaces = {entry.surface for entry in manifest.entries}
+    assert "flat_prompt" in surfaces
+    assert ("system_prompt" in surfaces) is sends_system
+
+    flat = next(json.loads(e.payload_json) for e in manifest.entries
+                if e.surface == "flat_prompt")
+    assert "fix the bug" in flat
+    assert "do not touch tests" in flat
+    assert "a.py" in flat and "nope" not in flat
+    assert "PERSONA-MARKER" not in flat  # system prompt is a distinct surface
+
+    argv = (ws / "argv.txt").read_text()
+    if sends_system:
+        assert "--append-system-prompt" in argv and "PERSONA-MARKER" in argv
+    else:
+        assert "PERSONA-MARKER" not in argv  # truthful: adapter transports none
+
+
+async def test_subscription_worker_flows_through_live_assembler(tmp_path):
+    """META-19 (F8): SubscriptionWorker inherits CodingAgentWorker, so the live
+    assembler + manifest emission flow into it (claude adapter transports the
+    system prompt, so its surface is attested)."""
+    ws = tmp_path / "ws"
+    binary = _capturing_stub(tmp_path, "claude")
+    worker = SubscriptionWorker(
+        "sub", cli="claude", workspace=ws, binary=binary, system_prompt="SUB-PERSONA",
+    )
+    result, events = await _run_capturing(worker, _task(objective="inspect the repo"))
+    assert result.error is None and result.output == "done"
+    manifests = [p for k, p in events if k == "context.manifest"]
+    assert len(manifests) == 1
+    manifest = ContextManifest.model_validate(manifests[0]["manifest"])
+    assert "system_prompt" in {entry.surface for entry in manifest.entries}
+    assert "SUB-PERSONA" in (ws / "argv.txt").read_text()
+
+
+async def test_coding_redacts_secret_from_flat_prompt_sent_to_cli(tmp_path):
+    """META-19 (test 2, coding): a secret in task inputs is [REDACTED] in the
+    flat prompt bytes ACTUALLY delivered to the stub CLI; manifest agrees."""
+    ws = tmp_path / "ws"
+    secret = "sk-coding-secret-value-01234567"
+    binary = _capturing_stub(tmp_path, "codex")
+    worker = CodingAgentWorker("cx", cli="codex", workspace=ws, binary=binary)
+    result, events = await _run_capturing(
+        worker, _task(objective="use the token", inputs={"token": secret}))
+
+    assert result.error is None
+    delivered = (ws / "stdin.txt").read_text()
+    assert secret not in delivered
+    assert "[REDACTED]" in delivered
+    manifest = ContextManifest.model_validate(
+        [p for k, p in events if k == "context.manifest"][0]["manifest"])
+    assert manifest.redaction_count >= 1
+
+
+async def test_coding_trust_violation_makes_no_cli_call(tmp_path, monkeypatch):
+    """META-19 (test 1, coding): a trust violation fails closed — the CLI binary
+    is never spawned — and surfaces as error_kind='context_contract'."""
+    from metaharness.context import (
+        ContextSectionType, ContextSourceKind, ContextTrust, SectionDraft, Sensitivity,
+    )
+    from metaharness.harness import coding as coding_mod
+
+    ws = tmp_path / "ws"
+    marker = ws / "spawned"
+    binary = _stub(tmp_path, "codex", f'touch "{marker}"; echo done')
+
+    def bad_drafts(task, *, system_prompt):
+        return [SectionDraft(
+            section_type=ContextSectionType.RESPONSE_CONTRACT,
+            source_kind=ContextSourceKind.LIVE_RUN_STATE,
+            stable_id="evil", trust=ContextTrust.UNTRUSTED_EVIDENCE,
+            sensitivity=Sensitivity.INTERNAL, content="untrusted", role="user",
+        )]
+
+    monkeypatch.setattr(coding_mod, "_build_drafts", bad_drafts)
+    worker = CodingAgentWorker("cx", cli="codex", workspace=ws, binary=binary)
+    result = await worker.run(_task(objective="x"))
+    assert result.error_kind == "context_contract"
+    assert not marker.exists()  # fail closed: CLI never spawned

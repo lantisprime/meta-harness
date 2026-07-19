@@ -14,6 +14,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -34,6 +35,12 @@ from metaharness.workflows.dsl import (
     when_satisfied,
 )
 from metaharness.workflows.journal import Journal
+
+# FIX-1 (codex#1): a step boundary whose TEMPLATE references a prior step's
+# OUTPUT ($steps.<id>.output...) resolves worker-generated text; that is
+# untrusted-derived, not a caller-authored instruction contract. Detect it on
+# the unresolved template so it can be routed into Task.advice, not boundaries.
+_STEPS_OUTPUT_REF_RE = re.compile(r"\$steps\.[A-Za-z0-9_-]+\.output")
 
 
 class RunStatus(str, Enum):
@@ -409,15 +416,29 @@ class WorkflowEngine:
                     resolved_objective = resolve_text_references(
                         step.objective, state.context, outputs
                     )
-                    resolved_boundaries = [
-                        resolve_text_references(boundary, state.context, outputs)
-                        for boundary in step.boundaries
-                    ]
+                    # FIX-1: split boundaries by TEMPLATE provenance. A boundary
+                    # that pulls a prior step's OUTPUT is untrusted-derived text
+                    # and must land in Task.advice, never in the caller-authored
+                    # boundaries the worker declares as RESPONSE_CONTRACT/
+                    # INSTRUCTION. Boundaries with only $context.* refs or no refs
+                    # stay boundaries.
+                    resolved_boundaries: list[str] = []
+                    step_output_advice: list[str] = []
+                    for boundary in step.boundaries:
+                        resolved_boundary = resolve_text_references(
+                            boundary, state.context, outputs
+                        )
+                        if _STEPS_OUTPUT_REF_RE.search(boundary):
+                            step_output_advice.append(resolved_boundary)
+                        else:
+                            resolved_boundaries.append(resolved_boundary)
                     task = step.to_task(
                         resolved,
                         objective=resolved_objective,
                         boundaries=resolved_boundaries,
                     )
+                    if step_output_advice:
+                        task.advice = list(task.advice) + step_output_advice
                 except ValueError as exc:
                     # a bad input reference must FAIL the run visibly — a stuck
                     # "running" state with no journal trail is the worst outcome

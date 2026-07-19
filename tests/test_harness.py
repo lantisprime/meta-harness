@@ -98,7 +98,7 @@ async def test_worker_result_carries_cost_tokens_and_signature():
     assert result.tokens_in > 0 and result.tokens_out > 0 and result.cost_usd > 0
     assert result.latency_s >= 0
     assert result.signature_b64
-    assert result.signature_version == 2
+    assert result.signature_version == 3  # FIX-7: v3 attests error_kind
 
     registry = WorkerRegistry()
     challenge = registry.begin_registration("w1")
@@ -465,3 +465,32 @@ async def test_tool_offload_parses_programs_from_prose():
     # nothing arithmetic anywhere -> loud failure, not a silent pass
     result = await ToolOffload(Prose("I cannot help with that")).run(task)
     assert result.error and "tool_offload" in result.error
+
+
+def test_fix7_error_kind_is_v3_signature_attested():
+    """FIX-7 (codex#8): error_kind drives retry-abort and capability-evidence
+    exclusion, so v3 signatures attest it — tampering it on a signed result
+    breaks verification, while legacy v1/v2 signatures stay verifiable."""
+    from metaharness.core.types import WorkerResult
+    from metaharness.harness import result_signing_bytes, sign_result
+
+    kp = KeyPair.generate()
+    registry = WorkerRegistry()
+    challenge = registry.begin_registration("w")
+    payload = registration_payload("w", kp.public_b64(), challenge.nonce)
+    registry.complete_registration("w", kp.public_b64(), kp.sign(payload))
+
+    result = WorkerResult(task_id="t", worker_id="w", tier=Tier.SMALL, model="m",
+                          error="boom", error_kind="context_contract")
+    sign_result(result, kp)  # signs at the current version (v3)
+    assert result.signature_version == 3
+    assert verify_result(result, registry)
+
+    result.error_kind = "not_a_contract_violation"  # tamper the attested field
+    assert not verify_result(result, registry)
+
+    # a v2 signature (which predates error_kind attestation) still verifies
+    result.error_kind = "context_contract"
+    result.signature_version = 2
+    result.signature_b64 = kp.sign(result_signing_bytes(result, version=2))
+    assert verify_result(result, registry)

@@ -143,7 +143,11 @@ async def test_engine_resolves_inline_context_and_step_refs_before_execution(tmp
     assert len(seen) == 2
     assert seen[0].objective == "Gather source material for explain MCP setup."
     assert seen[1].objective == "Analyze explain MCP setup using gathered context."
-    assert seen[1].boundaries == ["Do not ignore prior output: gathered context."]
+    # FIX-1 (codex#1): a boundary whose TEMPLATE pulls prior step OUTPUT is
+    # untrusted-derived — it resolves into advice, not the caller-authored
+    # boundaries the worker declares as RESPONSE_CONTRACT/INSTRUCTION.
+    assert seen[1].boundaries == []
+    assert seen[1].advice == ["Do not ignore prior output: gathered context."]
     assert seen[1].inputs["prior"] == {"facts": "gathered context"}
     assert "$context" not in seen[1].objective
     assert "$steps" not in seen[1].objective
@@ -812,3 +816,48 @@ async def test_start_rejects_mismatched_blueprint_provenance(tmp_path):
             blueprint_ref={"id": "right-bp", "version": 2},
             blueprint_snapshot=bp_snapshot,
         )
+
+
+async def test_fix1_step_output_boundaries_route_to_advice(tmp_path):
+    """FIX-1 (codex#1): a boundary whose TEMPLATE references a prior step's OUTPUT
+    is untrusted-derived and must resolve into Task.advice; boundaries that carry
+    only $context refs or no refs stay in the caller-authored boundaries the
+    worker declares as RESPONSE_CONTRACT/INSTRUCTION."""
+    seen: list[Task] = []
+
+    def handler(task: Task):
+        seen.append(task)
+        if task.objective.startswith("Gather"):
+            return {"facts": "gathered secret context"}
+        return "done"
+
+    spec = WorkflowSpec.model_validate({
+        "name": "boundary-split",
+        "steps": [
+            {"id": "gather", "task_type": "general", "objective": "Gather data."},
+            {
+                "id": "analyze",
+                "task_type": "reasoning",
+                "objective": "Analyze.",
+                "boundaries": [
+                    "Never delete files.",                                  # plain
+                    "Respect the $context.policy policy.",                  # $context
+                    "Build on prior output: $steps.gather.output.facts.",   # $steps
+                ],
+                "depends_on": ["gather"],
+            },
+        ],
+    })
+    executor = TaskExecutor(Router({Tier.SMALL: ScriptedWorker("w", handler)}))
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    state = engine.start(spec, context={"policy": "least-privilege"})
+    state = await engine.advance(state.run_id)
+
+    assert state.status == RunStatus.COMPLETED
+    analyze = seen[1]
+    # plain + $context boundaries stay boundaries; the $steps-output one moves out
+    assert analyze.boundaries == [
+        "Never delete files.",
+        "Respect the least-privilege policy.",
+    ]
+    assert analyze.advice == ["Build on prior output: gathered secret context."]
