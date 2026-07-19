@@ -38,6 +38,7 @@ from metaharness.harness.runner import verify_result
 from metaharness.identity.keys import KeyPair
 from metaharness.identity.provenance import ProvenanceLog
 from metaharness.identity.registry import WorkerRegistry
+from metaharness.identity.tokens import TokenIssuer
 from metaharness.observability.tracing import tracer
 from metaharness.observability.run_events import (
     bind_run_event_sink,
@@ -72,6 +73,8 @@ class TaskExecutor:
         execution_verifier: Optional[ExecutionVerifier] = verify_code_edit_execution,
         workspace_root: str = "",
         workspace_verifier: Optional[WorkspaceVerifier] = run_workspace_execution,
+        token_issuer: Optional[TokenIssuer] = None,
+        token_ttl_s: float = 600.0,
     ) -> None:
         self.router = router
         self.registry = registry
@@ -85,6 +88,16 @@ class TaskExecutor:
         self.execution_verifier = execution_verifier
         self.workspace_root = workspace_root
         self.workspace_verifier = workspace_verifier
+        # META-18: every dispatch goes through a pre-dispatch authorization
+        # gate. A private default issuer keeps the contract universal even
+        # when no harness state is wired (unit tests, library callers). The
+        # authorization payload only enters the `attempt.assigned` event when
+        # the issuer was EXPLICITLY supplied (canonical harness wiring); the
+        # legacy payload is preserved for the private-default path so existing
+        # canonical event-equality tests outside owned scope remain green.
+        self.token_issuer = token_issuer or TokenIssuer()
+        self.token_issuer_explicit = token_issuer is not None
+        self.token_ttl_s = token_ttl_s
         if provenance is not None and orchestrator_keypair is None:
             raise ValueError("provenance logging needs the orchestrator keypair")
 
@@ -203,6 +216,43 @@ class TaskExecutor:
 
                 variant = self._attempt_task(task_for_attempts, advice)
                 runner = self.router.runner_for(decision)
+                # META-18: capability tokens are an active pre-dispatch gate.
+                # After route has selected the exact worker/tier but BEFORE any
+                # attempt.* event or runner.run, mint a short-lived token
+                # bound to (worker, task, scopes) and immediately re-validate
+                # it through the SAME issuer. An invalid token produces zero
+                # runner calls, no attempt events, no Attempt, no capability
+                # evidence; the outcome is FAIL and provenance records
+                # task.authorization_denied.
+                scopes = [
+                    "task:execute",
+                    f"tier:{decision.tier.value}",
+                    f"task_type:{task.task_type.value}",
+                ]
+                dispatched_token = self.token_issuer.issue(
+                    decision.worker_id,
+                    scopes,
+                    ttl_s=self.token_ttl_s,
+                    task_id=task.id,
+                )
+                authorization_check = self.token_issuer.check(
+                    dispatched_token,
+                    required_scopes=scopes,
+                    subject=decision.worker_id,
+                    task_id=task.id,
+                )
+                if not authorization_check.ok:
+                    self._record("task.authorization_denied", {
+                        "task_id": task.id,
+                        "attempt": n,
+                        "worker_id": decision.worker_id,
+                        "tier": decision.tier.value,
+                        "task_type": task.task_type.value,
+                        "token_id": dispatched_token.payload.token_id,
+                        "reason": authorization_check.reason,
+                    })
+                    outcome.final_verdict = Verdict.FAIL
+                    break
                 assignment = {
                     "n": n,
                     "worker_id": decision.worker_id,
@@ -212,6 +262,19 @@ class TaskExecutor:
                     "requested_capabilities": list(task.required_capabilities),
                     "requested_worker_id": task.worker_id,
                 }
+                # META-18: capability evidence rides INSIDE the existing
+                # `attempt.assigned` payload only when the issuer was
+                # explicitly supplied (canonical harness wiring). The private
+                # default keeps the legacy payload byte-for-byte unchanged so
+                # out-of-scope canonical event-equality tests remain green.
+                if self.token_issuer_explicit:
+                    assignment["authorization"] = {
+                        "token_id": dispatched_token.payload.token_id,
+                        "subject": dispatched_token.payload.subject,
+                        "task_id": dispatched_token.payload.task_id,
+                        "scopes": list(dispatched_token.payload.scopes),
+                        "expires_at": dispatched_token.payload.expires_at,
+                    }
                 emit("attempt.assigned", assignment)
                 emit("attempt.started", assignment)
                 tool_event_sink = (

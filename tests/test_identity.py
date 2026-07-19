@@ -186,6 +186,41 @@ def test_token_revocation():
     assert not check.ok and "revoked" in check.reason
 
 
+def test_issuer_check_applies_its_private_revocation_set():
+    issuer = TokenIssuer()
+    token = issuer.issue("w1", ["task:execute"], task_id="task_A")
+    assert issuer.check(
+        token,
+        required_scopes=["task:execute"],
+        subject="w1",
+        task_id="task_A",
+    ).ok
+    issuer.revoke(token.payload.token_id)
+    check = issuer.check(token, required_scopes=["task:execute"])
+    assert not check.ok and check.reason == "token revoked"
+
+
+def test_issuer_check_requires_exact_task_binding():
+    """META-18: an unbound token (task_id=None) MUST fail when the dispatch
+    gate demands a specific task. The looser `validate_token` semantics
+    (legacy) are not appropriate here — the executor gate needs exactness."""
+    issuer = TokenIssuer()
+    unbound = issuer.issue("w1", ["task:execute"])  # task_id=None
+    check = issuer.check(
+        unbound, required_scopes=["task:execute"], task_id="task_X",
+    )
+    assert not check.ok and "task" in check.reason
+    # exact match is accepted
+    bound = issuer.issue("w1", ["task:execute"], task_id="task_X")
+    assert issuer.check(
+        bound, required_scopes=["task:execute"], task_id="task_X",
+    ).ok
+    # different task_id rejected
+    assert not issuer.check(
+        bound, required_scopes=["task:execute"], task_id="task_Y",
+    ).ok
+
+
 def test_scope_wildcards():
     assert scope_covers("task:*", "task:execute")
     assert scope_covers("task:execute", "task:execute")

@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
 import stat
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +16,11 @@ from metaharness.context import ContextManifest
 from metaharness.core.types import MASTMode, Task, TaskType, Tier
 from metaharness.evals.verifiers import verify_output
 from metaharness.harness import CLI_ADAPTERS, CodingAgentWorker, SubscriptionWorker, available_clis
+from metaharness.harness.isolation import (
+    WorkspaceClaimError,
+    claim_workspace,
+    execution_boundary_for,
+)
 from metaharness.identity import KeyPair
 from metaharness.observability.run_events import bind_run_event_sink, reset_run_event_sink
 
@@ -203,6 +212,186 @@ def test_subscription_cli_adapters_enforce_read_only_tools(tmp_path):
     codex_argv, _ = CLI_ADAPTERS["codex"].build(codex, "inspect", "", workspace)
     assert codex_argv[codex_argv.index("--sandbox") + 1] == "read-only"
     assert "--ephemeral" in codex_argv
+
+
+@pytest.mark.parametrize(
+    "cli,sandbox,kind,write_scope",
+    [
+        ("codex", "workspace-write", "cli_native", "workspace"),
+        ("codex", "read-only", "cli_native", "none"),
+        ("claude", "read-only", "cli_native", "none"),
+        ("claude", None, "operator_trusted", "unbounded_by_harness"),
+        ("pi", None, "operator_trusted", "unbounded_by_harness"),
+        ("opencode", None, "operator_trusted", "unbounded_by_harness"),
+    ],
+)
+def test_execution_boundary_is_honest_per_adapter(cli, sandbox, kind, write_scope):
+    boundary = execution_boundary_for(cli, sandbox=sandbox)
+    assert boundary.kind == kind
+    assert boundary.write_scope == write_scope
+    assert boundary.network_access is True
+    assert boundary.harness_os_sandbox is False
+
+
+async def test_shared_workspace_allows_one_active_coding_worker(tmp_path):
+    ws = tmp_path / "shared"
+    started = ws / "started"
+    binary = _stub(
+        tmp_path,
+        "slow-codex",
+        f'touch "{started}"; cat > /dev/null; sleep 0.5; echo done',
+    )
+    first = CodingAgentWorker("first", cli="codex", workspace=ws, binary=binary)
+    second = CodingAgentWorker("second", cli="codex", workspace=ws, binary=binary)
+
+    running = asyncio.create_task(first.run(_task(id="first")))
+    for _ in range(100):
+        if started.exists():
+            break
+        await asyncio.sleep(0.01)
+    denied = await second.run(_task(id="second"))
+    accepted = await running
+
+    assert accepted.error is None
+    assert denied.error is not None
+    assert "WorkspaceClaimError" in denied.error
+    assert "already has an active coding worker" in denied.error
+
+
+def test_workspace_claim_is_cross_process(tmp_path):
+    import select
+
+    ws = tmp_path / "cross-process"
+    ws.mkdir()
+    # Shorter child hold (5s instead of 30s) is enough: the parent assertion
+    # only needs the child to be holding the lease, not to survive the
+    # whole test runtime.
+    code = (
+        "import time\n"
+        "from pathlib import Path\n"
+        "from metaharness.harness.isolation import claim_workspace\n"
+        f"with claim_workspace(Path({str(ws)!r}), worker_id='child', task_id='t'):\n"
+        " print('ready', flush=True)\n"
+        " time.sleep(5)\n"
+    )
+    src_root = str((Path(__file__).resolve().parent.parent / "src"))
+    env = {**os.environ, "PYTHONPATH": src_root + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    child = subprocess.Popen(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        assert child.stdout is not None
+        # True bounded wait: select.select with a deadline, no readline loop.
+        # The child prints "ready\n" once it has the flock; we read exactly
+        # one line as soon as stdout is readable.
+        ready_line = ""
+        ready_fd = child.stdout.fileno()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            readable, _, _ = select.select([ready_fd], [], [], remaining)
+            if not readable:
+                break
+            chunk = os.read(ready_fd, 4096)
+            if not chunk:
+                break
+            ready_line += chunk.decode("utf-8", "replace")
+            if "ready" in ready_line:
+                break
+        assert "ready" in ready_line, (
+            "child did not become ready within 5s"
+        )
+        with pytest.raises(WorkspaceClaimError, match="active coding worker"):
+            with claim_workspace(ws, worker_id="parent", task_id="t2"):
+                pass
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+
+def test_workspace_claim_symlink_alias_collides_with_real_path(tmp_path):
+    """A symlink that resolves to the same target as the real path produces the
+    same lease key — bypassing the lease via a path alias is not possible."""
+    from metaharness.harness.isolation import WorkspaceClaimError, claim_workspace
+
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(real)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks not supported here: {exc}")
+
+    with claim_workspace(real, worker_id="first", task_id="t1"):
+        with pytest.raises(WorkspaceClaimError, match="active coding worker"):
+            with claim_workspace(alias, worker_id="second", task_id="t2"):
+                pass
+
+
+def test_distinct_resolved_workspaces_acquire_independently(tmp_path):
+    """Different resolved paths (incl. different explicit worktrees supplied
+    by the caller) hold independent leases and run concurrently."""
+    from metaharness.harness.isolation import claim_workspace
+
+    ws_a = tmp_path / "a"
+    ws_b = tmp_path / "b"
+    ws_a.mkdir()
+    ws_b.mkdir()
+    with claim_workspace(ws_a, worker_id="alpha", task_id="t1"):
+        with claim_workspace(ws_b, worker_id="beta", task_id="t2"):
+            # both leases held simultaneously, neither blocks the other
+            pass
+
+
+def test_workspace_claim_releases_after_exception(tmp_path):
+    """The lease must be released on every exit path — an exception inside the
+    `with` body must NOT leak the claim so the same workspace can be claimed
+    again by a subsequent worker."""
+    from metaharness.harness.isolation import WorkspaceClaimError, claim_workspace
+
+    ws = tmp_path / "exception-exit"
+    ws.mkdir()
+    with pytest.raises(RuntimeError, match="boom"):
+        with claim_workspace(ws, worker_id="first", task_id="t1"):
+            raise RuntimeError("boom")
+    # same workspace, second acquisition succeeds without WorkspaceClaimError
+    with claim_workspace(ws, worker_id="second", task_id="t2"):
+        pass
+
+
+def test_workspace_claim_releases_local_reservation_when_open_fails(tmp_path):
+    """The OUTERMOST `finally` of `claim_workspace` must release the local
+    reservation by object identity regardless of which step raised. When
+    `os.open` fails (e.g. lockfile directory not writable), the local slot
+    would otherwise leak and block the same workspace forever in this process.
+    """
+    from metaharness.harness import isolation
+    from metaharness.harness.isolation import claim_workspace
+
+    ws = tmp_path / "open-fails"
+    ws.mkdir()
+    original_open = isolation.os.open
+
+    def failing_open(*args, **kwargs):
+        raise OSError("injected open failure for test")
+
+    try:
+        isolation.os.open = failing_open
+        with pytest.raises(WorkspaceClaimError, match="could not open lease lockfile"):
+            with claim_workspace(ws, worker_id="first", task_id="t1"):
+                pass
+    finally:
+        isolation.os.open = original_open
+
+    # After restoring `os.open`, the same workspace can be claimed again —
+    # proves the local reservation did not leak on the failure path.
+    with claim_workspace(ws, worker_id="second", task_id="t2"):
+        pass
 
 
 async def test_subscription_phases_share_active_workspace_read_only(tmp_path):
@@ -539,3 +728,71 @@ async def test_coding_trust_violation_makes_no_cli_call(tmp_path, monkeypatch):
     result = await worker.run(_task(objective="x"))
     assert result.error_kind == "context_contract"
     assert not marker.exists()  # fail closed: CLI never spawned
+
+
+async def test_execution_boundary_lands_in_manifest_before_subprocess_spawn(
+    tmp_path,
+):
+    """META-18: the honest execution boundary is selected BEFORE argv/spawn and
+    its JSON representation rides in the context.manifest event payload. The
+    manifest event precedes the stub subprocess being started, and the
+    boundary's argv-derived guarantees match the codex sandbox that the
+    adapter actually passes."""
+    from metaharness.harness.isolation import ExecutionBoundary
+
+    ws = tmp_path / "ws"
+    started = ws / "started"
+    binary = _stub(
+        tmp_path,
+        "codex",
+        f'touch "{started}"; echo done',
+    )
+    events: list[tuple[str, dict]] = []
+    # Capture the subprocess-started side-effect state AT THE MOMENT the
+    # manifest event is emitted — proves the manifest precedes spawn (an
+    # after-the-fact existence check on `started` would not).
+    state_at_manifest: dict[str, object] = {}
+
+    def sink(kind: str, payload: dict) -> None:
+        events.append((kind, payload))
+        if kind == "context.manifest":
+            state_at_manifest["started_exists"] = started.exists()
+            state_at_manifest["boundary"] = payload.get("execution_boundary")
+
+    token = bind_run_event_sink(sink)
+    try:
+        worker = CodingAgentWorker(
+            "boundary-codex", cli="codex", workspace=ws, binary=binary,
+        )
+        result = await worker.run(_task(objective="verify boundary in manifest"))
+        assert result.error is None
+    finally:
+        reset_run_event_sink(token)
+
+    manifests = [(k, p) for k, p in events if k == "context.manifest"]
+    assert len(manifests) == 1
+    _, payload = manifests[0]
+    raw_boundary = payload.get("execution_boundary")
+    assert raw_boundary is not None, "context.manifest must carry execution_boundary"
+    boundary = ExecutionBoundary.model_validate(raw_boundary)
+    # classification matches codex workspace-write defaults
+    assert boundary.adapter == "codex"
+    assert boundary.kind == "cli_native"
+    assert boundary.write_scope == "workspace"
+    assert boundary.network_access is True
+    assert boundary.harness_os_sandbox is False
+    # ordering proof: at the moment the manifest event fired, the subprocess
+    # side-effect file did NOT yet exist. The subprocess created it AFTER the
+    # manifest was emitted.
+    assert state_at_manifest.get("started_exists") is False, (
+        "context.manifest must be emitted BEFORE the subprocess starts; "
+        f"started file existed at emit time: {state_at_manifest}"
+    )
+    # and the actual argv the codex adapter produced is consistent with the
+    # boundary: codex runs with --sandbox workspace-write (write_scope=workspace).
+    argv, _ = CLI_ADAPTERS["codex"].build(worker, "prompt", "", ws)
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert boundary.write_scope == "workspace"
+    # subprocess DID eventually run (positive control — if it never ran, the
+    # ordering proof above would be meaningless)
+    assert started.exists()

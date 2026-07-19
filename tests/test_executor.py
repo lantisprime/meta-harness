@@ -3,6 +3,9 @@ budget ceilings, plateau stop, capability matrix learning, provenance trail."""
 from __future__ import annotations
 
 import asyncio
+import time
+
+import pytest
 
 from metaharness.core import (
     Budget,
@@ -22,7 +25,13 @@ from metaharness.harness import (
     sign_result,
 )
 from metaharness.harness.runner import Runner, WorkerTimeout
-from metaharness.identity import KeyPair, ProvenanceLog, WorkerRegistry, registration_payload
+from metaharness.identity import (
+    KeyPair,
+    ProvenanceLog,
+    TokenIssuer,
+    WorkerRegistry,
+    registration_payload,
+)
 from metaharness.routing import CapabilityMatrix, Router
 
 
@@ -50,6 +59,175 @@ async def test_pass_on_first_attempt():
     assert outcome.final_verdict == Verdict.PASS
     assert len(outcome.attempts) == 1 and outcome.escalations == 0
     assert outcome.final_output == "positive"
+
+
+@pytest.mark.parametrize(
+    "defect,reason_substring",
+    [
+        ("expired", "expired"),
+        ("wrong_subject", "token subject is"),
+        ("wrong_task", "token bound to task"),
+        ("missing_scope", "no scope covers"),
+        ("wrong_scope", "no scope covers"),
+        ("revoked", "token revoked"),
+    ],
+)
+async def test_pre_dispatch_authorization_denial_paths(defect, reason_substring):
+    """META-18: every pre-dispatch denial path must fail closed — the runner
+    is never called, no `attempt.*` event is emitted, no `Attempt` is appended,
+    no capability-matrix sample is banked, the outcome is FAIL, and the
+    signed provenance records the reason. Each defect is produced by a token
+    that is validly signed by the configured issuer (the issuer mints tokens
+    that trip exactly one validation rule)."""
+    calls = 0
+    events: list[tuple[str, dict]] = []
+    matrix = CapabilityMatrix()
+    provenance = ProvenanceLog()
+
+    def handler(task: Task):
+        nonlocal calls
+        calls += 1
+        return "positive"
+
+    class DefectIssuer(TokenIssuer):
+        """Issuer that mints a validly-signed token, but with exactly one
+        defect of the requested kind so the executor's re-check returns a
+        different reasoned `TokenCheck` per parameter."""
+
+        def issue(self, subject, scopes, *, ttl_s=600.0, task_id=None, now=None):
+            from metaharness.identity.tokens import TokenPayload, CapabilityToken
+            at = now if now is not None else time.time()
+            if defect == "expired":
+                # Issue with TTL=0 in a past clock; the signature is valid
+                # for the bytes, but `at > expires_at` fails.
+                effective_now = at - 10.0
+                payload = TokenPayload(
+                    subject=subject, scopes=sorted(scopes), task_id=task_id,
+                    issued_at=effective_now, expires_at=effective_now,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_subject":
+                # Valid signature, but bound to a different subject.
+                payload = TokenPayload(
+                    subject="someone-else", scopes=sorted(scopes), task_id=task_id,
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_task":
+                payload = TokenPayload(
+                    subject=subject, scopes=sorted(scopes), task_id="some-other-task",
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "missing_scope":
+                # Valid signature, but no scopes at all — every required scope
+                # is missing.
+                payload = TokenPayload(
+                    subject=subject, scopes=[], task_id=task_id,
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_scope":
+                # Valid signature, but the only scope is unrelated to what the
+                # dispatch gate requires (so required_scopes are uncovered).
+                payload = TokenPayload(
+                    subject=subject, scopes=["totally:unrelated"],
+                    task_id=task_id, issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "revoked":
+                token = super().issue(subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now)
+                self.revoke(token.payload.token_id)
+                return token
+            return super().issue(subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now)
+
+    worker = ScriptedWorker(
+        "w", handler, tier=Tier.SMALL, model="small-model",
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: worker}, matrix=matrix),
+        token_issuer=DefectIssuer(),
+        provenance=provenance,
+        orchestrator_keypair=KeyPair.generate(),
+    ).execute(
+        classify_task(max_attempts=1),
+        event_sink=lambda k, p: events.append((k, p)),
+    )
+
+    assert calls == 0
+    assert outcome.final_verdict is Verdict.FAIL
+    assert outcome.attempts == []
+    assert events == []
+    assert matrix.samples("small-model", TaskType.CLASSIFY) == 0
+    actions = [e.action for e in provenance.entries()]
+    assert "task.authorization_denied" in actions
+    denied = [e for e in provenance.entries() if e.action == "task.authorization_denied"]
+    assert len(denied) == 1
+    detail = denied[0].detail
+    assert detail["task_id"] == outcome.task.id
+    assert detail["attempt"] == 1
+    assert detail["worker_id"] == "w"
+    assert detail["tier"] == Tier.SMALL.value
+    assert detail["task_type"] == TaskType.CLASSIFY.value
+    assert reason_substring in detail["reason"]
+    # no raw token bytes leak into the redacted provenance detail
+    assert "signature" not in detail
+    assert "signature_b64" not in detail
+
+
+async def test_valid_dispatch_token_is_bound_and_precedes_assignment():
+    """META-18: capability evidence rides INSIDE the existing
+    `attempt.assigned` payload — no new canonical event kind. The authorization
+    object is redacted (no signature/private material), exactly bound to the
+    chosen worker and task, and precedes any runner call. The issuer must be
+    explicitly supplied for the redacted payload to land on the event (the
+    private default preserves the legacy payload byte-for-byte for out-of-scope
+    canonical event-equality tests)."""
+    events: list[tuple[str, dict]] = []
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: MockLLMWorker(
+            "w", Tier.SMALL, seed=1, skills={TaskType.CLASSIFY: 1.0}
+        )}),
+        token_issuer=TokenIssuer(),
+    ).execute(classify_task(), event_sink=lambda k, p: events.append((k, p)))
+
+    assert outcome.final_verdict is Verdict.PASS
+    kinds = [kind for kind, _ in events]
+    assert "attempt.authorized" not in kinds  # no new canonical event kind
+    assert kinds.index("attempt.assigned") < kinds.index("attempt.started")
+    assigned = next(payload for kind, payload in events if kind == "attempt.assigned")
+    authorization = assigned["authorization"]
+    assert authorization["subject"] == "w"
+    assert authorization["task_id"] == outcome.task.id
+    assert authorization["scopes"] == [
+        "task:execute", "task_type:classify", "tier:small"
+    ]
+    assert "token_id" in authorization and authorization["token_id"]
+    assert authorization["expires_at"] > 0
+    # no signature/private material in the redacted object
+    assert "signature" not in authorization
+    assert "signature_b64" not in authorization
+    assert "issuer_private_b64" not in authorization
 
 
 async def test_required_execution_evidence_is_attached_without_worker_shell(tmp_path):

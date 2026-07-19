@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Optional
+from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -80,6 +80,50 @@ class TokenIssuer:
 
     def is_revoked(self, token_id: str) -> bool:
         return token_id in self._revoked
+
+    def check(
+        self,
+        token: CapabilityToken,
+        *,
+        required_scopes: Iterable[str],
+        subject: Optional[str] = None,
+        task_id: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> TokenCheck:
+        """Issuer-side validation: signature, expiry, this issuer's PRIVATE
+        revocation set, exact subject, exact task binding, and EVERY required
+        scope. Revocation is read from the issuer's own state, not from
+        caller-supplied data, so a token revoked between issue and re-check
+        cannot be used."""
+        at = now if now is not None else time.time()
+        if token.issuer_public_b64 != self.public_b64():
+            return TokenCheck(ok=False, reason="token names a different issuer")
+        if not verify(self._keypair.public_b64(), token.payload.signing_bytes(), token.signature_b64):
+            return TokenCheck(ok=False, reason="signature does not verify (tampered or wrong key)")
+        if at > token.payload.expires_at:
+            return TokenCheck(ok=False, reason="token expired")
+        if token.payload.token_id in self._revoked:
+            return TokenCheck(ok=False, reason="token revoked")
+        if subject is not None and token.payload.subject != subject:
+            return TokenCheck(
+                ok=False,
+                reason=f"token subject is {token.payload.subject!r}, not {subject!r}",
+            )
+        if task_id is not None and token.payload.task_id != task_id:
+            return TokenCheck(
+                ok=False,
+                reason=f"token bound to task {token.payload.task_id!r}, not {task_id!r}",
+            )
+        missing = [
+            required for required in required_scopes
+            if not any(scope_covers(granted, required) for granted in token.payload.scopes)
+        ]
+        if missing:
+            return TokenCheck(
+                ok=False,
+                reason=f"no scope covers {missing!r}",
+            )
+        return TokenCheck(ok=True, reason="valid")
 
 
 def scope_covers(granted: str, required: str) -> bool:

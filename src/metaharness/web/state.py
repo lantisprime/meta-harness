@@ -200,6 +200,9 @@ class HarnessState:
             observer=self.learning.observe,
             judge=judge_fn,
             workspace_root=self.tools.workspace_root,
+            # META-18: revocation is live on the canonical harness issuer, so
+            # a token revoked between issue and re-check fails the dispatch.
+            token_issuer=self.issuer,
         )
         self.refresh_knowledge_hints()
         self.engine = WorkflowEngine(

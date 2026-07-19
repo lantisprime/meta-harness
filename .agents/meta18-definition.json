@@ -1,0 +1,28 @@
+{
+  "sourceRevision": "git:e5347a62ae266090fa9d531f86172f3a5c2f4a5a;Linear:META-18@2026-07-19T05:12:47.145Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-scorecard-sha256:97e454a8d074827ec726232fdd01d06dd70d01759521e7f979967db358744198",
+  "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+  "worktreePath": "/private/tmp/meta-harness-meta-18",
+  "branch": "dev/meta-18-worker-execution-boundary",
+  "baseCommit": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+  "currentHead": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "One bounded Codex implementation card for Linear META-18. Establish an explicit, machine-readable execution-boundary contract for every coding CLI adapter without pretending the post-hoc verifier sandbox protects generation: Codex CODE_EDIT uses its enforced native workspace-write mode; subscription Codex remains native read-only; subscription Claude remains plan mode with Read/Glob/Grep; Pi, OpenCode, and edit-capable Claude are explicitly classified as operator-trusted CLI boundaries with no harness filesystem jail. Emit the selected boundary before spawn and document the per-adapter guarantees and limitations. Add a cross-process exclusive lease keyed by the resolved workspace path so concurrent workers cannot mutate or inspect one shared checkout while an attempt is active; separate explicitly supplied git worktrees remain supported, but the harness does not auto-create branches or worktrees. Activate scoped capability tokens at the TaskExecutor pre-dispatch boundary: mint and validate a short-lived token bound to worker, task, task:execute, tier, and task type before attempt assignment/start events and before runner.run; invalid, expired, revoked, wrong-subject, wrong-task, or wrong-scope authorization must fail closed with no worker call, no capability evidence, and reasoned provenance/event evidence. Preserve the existing post-hoc OS-sandboxed verifier, result authenticity checks, routing, budgets, context assembly, human approvals, and adapter behavior outside these explicit boundaries.",
+  "stopCondition": "Stop and fail closed on any evaluator, merge, promotion, deployment, credential, or runtime-authority grant; H/E/W drift; owned-path expansion; an authorization failure that still invokes a runner or emits attempt.started; a token not bound to the chosen worker and task; a shared-workspace collision that permits concurrent execution; a claim implementation that auto-creates, deletes, resets, or switches git worktrees; documentation that calls operator-trusted Pi/OpenCode/Claude execution sandboxed; credential removal or network denial that breaks authenticated CLI use; weakening the protected verifier sandbox or result-signature checks; failing acceptance commands; or unresolved independent-review P0/P1 findings.",
+  "evaluatorAuthority": "The implementing seat cannot self-approve. Authorization validity is deterministic signature, expiry, revocation, subject, task, and scope validation. Workspace exclusivity is tested with real overlapping attempts and a cross-process lock probe. Adapter-boundary claims are checked against exact argv and emitted evidence; operator-trusted adapters remain honestly labeled. Coordinator integration requires frozen focused/full test evidence plus a read-only Pi/NeuralWatt GLM-5.2 frozen-diff review with no unresolved P0/P1 findings. Human promotion and deployment authority remain unchanged.",
+  "acceptanceCommands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "nextCheckpoint": "Invalid-input tests prove an invalid scoped dispatch token produces zero runner calls and no attempt.started event; overlapping workers targeting one resolved workspace yield one winner and one reasoned workspace_claim denial while distinct worktrees remain independent; every adapter reports an honest execution-boundary classification matching its argv; focused tests pass.",
+  "allowedOwnerNamespaces": [
+    "codex"
+  ]
+}
