@@ -8,6 +8,12 @@ from metaharness.context.assembly import (
     fit_messages_with_receipt,
     messages_tokens,
 )
+from metaharness.context.live import (
+    LiveAssembly,
+    LiveContextViolation,
+    SectionDraft,
+    assemble_live,
+)
 from metaharness.context.models import (
     CompressionAction,
     CompressionReceipt,
@@ -39,7 +45,11 @@ __all__ = [
     "ContextSourceRef",
     "ContextTrust",
     "ContextVersionBindings",
+    "LiveAssembly",
+    "LiveContextViolation",
+    "SectionDraft",
     "Sensitivity",
+    "assemble_live",
     "budget_for",
     "allocate_section_budgets",
     "content_hash",

@@ -122,12 +122,20 @@ class BaseRunner(Runner):
             try:
                 result = await self._execute(task)
             except Exception as exc:  # a failed attempt is data, not a crash
+                # META-19 (F6): a live-context contract violation is deterministic
+                # (pure assembly, no infrastructure luck) — tag it so the executor
+                # aborts retries and excludes it from capability evidence. Imported
+                # lazily to avoid a harness->context import cycle at module load.
+                from metaharness.context.live import LiveContextViolation
+
+                error_kind = "context_contract" if isinstance(exc, LiveContextViolation) else None
                 result = WorkerResult(
                     task_id=task.id,
                     worker_id=self.worker_id,
                     tier=self.tier,
                     model=self.model,
                     error=f"{type(exc).__name__}: {exc}",
+                    error_kind=error_kind,
                     timed_out=isinstance(exc, WorkerTimeout),  # issue #2
                 )
             result.latency_s = time.monotonic() - started

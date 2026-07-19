@@ -27,6 +27,10 @@ CANONICAL_KINDS = frozenset({
     "approval.required", "approval.resolved",
     "step.completed", "step.failed", "step.skipped",
     "run.completed", "run.failed",
+    # META-19: the live context manifest journaled per attempt round — the
+    # authoritative "what did the model see" record. Attempt-scoped (the
+    # executor sink merges the attempt number `n`), no legacy projection.
+    "context.manifest",
 })
 
 

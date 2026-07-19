@@ -308,7 +308,10 @@ class CompressionReceipt(FrozenModel):
 
 class ContextManifestEntry(FrozenModel):
     stable_id: str = Field(min_length=1)
-    surface: Literal["message", "tool_schemas"]
+    # META-19 (additive, F5): "flat_prompt" and "system_prompt" are the CLI
+    # transport surfaces the live assembler renders alongside chat messages.
+    # Additive only — existing "message"/"tool_schemas" semantics unchanged.
+    surface: Literal["message", "tool_schemas", "flat_prompt", "system_prompt"]
     payload_json: str = Field(min_length=2)
     source_kind: ContextSourceKind
     trust: ContextTrust

@@ -243,6 +243,35 @@ async def test_matrix_learns_from_outcomes():
     assert matrix.samples("mock-mid", TaskType.CLASSIFY) >= 1
 
 
+async def test_context_contract_violation_aborts_retries_and_is_no_capability_evidence():
+    """META-19 (F6): a deterministic LiveContextViolation surfaces as
+    error_kind="context_contract". Retries are pure waste (same inputs would
+    reproduce it), so the task aborts after one attempt, and the failure never
+    banks capability/routing evidence (it is not a model-skill signal)."""
+    from metaharness.context.live import LiveContextViolation
+    from metaharness.harness.runner import BaseRunner
+
+    class ViolatingWorker(BaseRunner):
+        def __init__(self):
+            super().__init__(worker_id="w", tier=Tier.SMALL, model="model-a")
+            self.calls = 0
+
+        async def _execute(self, task: Task) -> WorkerResult:
+            self.calls += 1
+            raise LiveContextViolation("untrusted content in instruction slot")
+
+    matrix = CapabilityMatrix()
+    worker = ViolatingWorker()
+    executor = TaskExecutor(Router({Tier.SMALL: worker}, matrix=matrix))
+    outcome = await executor.execute(classify_task(max_attempts=3))
+
+    assert worker.calls == 1  # aborted, not retried three times
+    assert len(outcome.attempts) == 1
+    assert outcome.attempts[0].result.error_kind == "context_contract"
+    assert outcome.final_verdict == Verdict.FAIL
+    assert matrix.samples("model-a", TaskType.CLASSIFY) == 0  # excluded from evidence
+
+
 async def test_pool_member_runs_and_matrix_records_under_its_model():
     """With two members on a tier, the executor runs the member decide() picked
     and the capability matrix learns under THAT member's model, not the pool's."""
@@ -641,9 +670,14 @@ async def test_unverified_stops_iteration():
 
 
 async def test_reflection_feeds_next_attempt():
+    # META-19 (F2): reflections now accumulate in task.advice, not boundaries.
+    # Advice quotes prior worker output verbatim; keeping it out of the
+    # caller-authored boundaries contract prevents untrusted-data laundering.
+    seen_advice: list[list[str]] = []
     seen_boundaries: list[list[str]] = []
 
     def handler(task: Task):
+        seen_advice.append(list(task.advice))
         seen_boundaries.append(list(task.boundaries))
         return "negative"  # always wrong
 
@@ -653,10 +687,12 @@ async def test_reflection_feeds_next_attempt():
         reflector=lambda task, attempt: f"attempt {attempt.n} returned {attempt.result.output!r}; that is wrong",
     )
     await executor.execute(classify_task(max_attempts=3))
-    assert seen_boundaries[0] == []
-    assert any("wrong" in b for b in seen_boundaries[1])
+    assert seen_advice[0] == []
+    assert any("wrong" in b for b in seen_advice[1])
     # repetition notice also appears once the same wrong answer recurs
-    assert any("different approach" in b.lower() for b in seen_boundaries[2])
+    assert any("different approach" in b.lower() for b in seen_advice[2])
+    # boundaries stay the pure caller-authored contract across every attempt
+    assert all(b == seen_boundaries[0] for b in seen_boundaries)
 
 
 async def test_provenance_trail_written_and_verifiable():

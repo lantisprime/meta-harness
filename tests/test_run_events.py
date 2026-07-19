@@ -191,6 +191,95 @@ async def test_cross_process_inspect_and_approval_refresh_stale_state(tmp_path):
     assert final.status is RunStatus.COMPLETED
 
 
+def test_context_manifest_is_a_canonical_attempt_scoped_kind(tmp_path):
+    """META-19 (F1): context.manifest is journaled as a canonical kind with an
+    attempt id; a durable Journal.load() round-trips it, and it has no legacy
+    projection (entries() must skip it, never crash)."""
+    from metaharness.workflows.journal import CANONICAL_KINDS
+
+    assert "context.manifest" in CANONICAL_KINDS
+    path = tmp_path / "manifest_run.jsonl"
+    journal = Journal(path=path, canonical=True)
+    journal.initialize("run_m", {"context": {}}, snapshot_digest="a" * 64)
+    journal.append_event("step.started", "run_m", step_id="work", payload={"task_id": "t1"})
+    event = journal.append_event(
+        "context.manifest", "run_m", step_id="work",
+        payload={"schema_version": 1, "shadow": False, "task_id": "t1", "round": 0, "n": 1},
+        attempt_id="work-attempt-1",
+    )
+    assert event.kind == "context.manifest"
+    assert event.attempt_id == "work-attempt-1"
+
+    reloaded = Journal.load(path)
+    manifests = [e for e in reloaded.events() if e.kind == "context.manifest"]
+    assert len(manifests) == 1
+    assert manifests[0].payload["shadow"] is False
+    # no legacy projection — the historical entries() view skips it silently
+    assert all(entry.kind != "context.manifest" for entry in reloaded.entries())
+
+
+async def test_context_manifest_journaled_per_round_end_to_end(tmp_path):
+    """META-19 (test 4): a real run — engine -> executor -> worker ->
+    Journal.load() — journals one NON-shadow context.manifest per tool round,
+    each pinning the exact bytes that round sent, under the attempt id. No
+    context.manifest.shadow event exists anymore."""
+    import httpx
+
+    from metaharness.context import content_hash
+    from metaharness.harness import OpenAICompatWorker
+
+    sent: list[list[dict]] = []
+
+    class Client:
+        async def post(self, url, json=None, headers=None):
+            sent.append(json["messages"])
+            if len(sent) == 1:
+                message = {"content": None, "tool_calls": [
+                    {"id": "c1", "function": {"name": "probe", "arguments": "{}"}}]}
+            else:
+                message = {"content": "ok"}
+            return httpx.Response(
+                200, json={"choices": [{"message": message}]},
+                request=httpx.Request("POST", url),
+            )
+
+    class Registry:
+        workspace_root = ""
+
+        def openai_schemas(self, names):
+            return [{"type": "function", "function": {"name": "probe", "parameters": {}}}]
+
+        async def call(self, name, arguments, focus=""):
+            return "tool observation"
+
+    worker = OpenAICompatWorker(
+        "worker-a", base_url="http://fake/v1", model="m",
+        client=Client(), tool_registry=Registry(),
+    )
+    executor = TaskExecutor(Router({Tier.SMALL: worker}))
+    spec = WorkflowSpec.model_validate({
+        "name": "tool-run",
+        "steps": [{"id": "work", "objective": "use probe", "tools": ["probe"],
+                   "success_check": {"equals": "ok"}}],
+    })
+    engine = WorkflowEngine(executor, journal_dir=tmp_path)
+    run = engine.start(spec)
+    run = await engine.advance(run.run_id)
+    assert run.status is RunStatus.COMPLETED
+
+    journal = Journal.load(tmp_path / f"{run.run_id}.jsonl")
+    manifests = [e for e in journal.events() if e.kind == "context.manifest"]
+    assert len(manifests) == 2
+    assert [e.payload["round"] for e in manifests] == [0, 1]
+    assert all(e.payload["shadow"] is False for e in manifests)
+    assert all(e.attempt_id == "work-attempt-1" for e in manifests)
+    for event, messages in zip(manifests, sent):
+        assert event.payload["live_messages_hash"] == content_hash(messages)
+    assert not any(e.kind == "context.manifest.shadow" for e in journal.events())
+    # the new kind has no legacy projection and never crashes entries()
+    assert all(entry.kind != "context.manifest" for entry in journal.entries())
+
+
 async def test_legacy_journal_resumes_and_continues_without_mixing_formats(tmp_path):
     path = tmp_path / "run_legacy.jsonl"
     spec = _spec()

@@ -90,6 +90,11 @@ class Task(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     output_schema: Optional[dict[str, Any]] = None
     boundaries: list[str] = Field(default_factory=list)
+    # META-19 (F2): accumulated reflections/knowledge hints, carried SEPARATELY
+    # from `boundaries`. Advice quotes prior worker output and retrieved content
+    # verbatim, so it is untrusted-derived and must never render into an
+    # instruction slot the way caller-authored boundaries do.
+    advice: list[str] = Field(default_factory=list)
     # a checkable success signal, if one exists. Interpreted by the verifier.
     success_check: Optional[dict[str, Any]] = None
     tier_hint: Optional[Tier] = None
@@ -134,6 +139,11 @@ class WorkerResult(BaseModel):
     cost_usd: float = 0.0
     latency_s: float = 0.0
     error: Optional[str] = None
+    # META-19 (F6): coarse classification of `error` for control flow. A
+    # deterministic context-contract violation ("context_contract") is not a
+    # model-capability signal — the executor aborts retries and excludes it from
+    # routing evidence. Other failures keep None (behavior unchanged).
+    error_kind: Optional[str] = None
     # Legacy v1 signatures covered only the worker's textual result. New v2
     # signatures also attest the execution-relevant metadata below. Keeping an
     # explicit version lets old journal signatures remain verifiable without
