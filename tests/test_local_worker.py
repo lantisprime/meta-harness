@@ -218,3 +218,15 @@ def test_strip_think_removes_reasoning_blocks():
     # unclosed block (max_tokens mid-thought): half a thought is not an answer
     assert strip_think("real answer\n<think>I wonder if") == "real answer"
     assert strip_think("<think>only a thought, never closed") == ""
+
+
+def test_fix3_extra_body_cannot_override_assembled_surfaces():
+    """FIX-3 (codex#4): extra_body is merged into the request body after the
+    context surfaces are assembled/attested — 'messages'/'tools' there would
+    silently replace the redacted, budgeted, manifested payload. Rejected at
+    construction as a config error; harmless keys are fine."""
+    for bad in ({"messages": [{"role": "user", "content": "x"}]}, {"tools": []}):
+        with pytest.raises(ValueError):
+            OpenAICompatWorker("w", base_url="http://fake/v1", model="m", extra_body=bad)
+    # a legitimate sampling override still constructs cleanly
+    OpenAICompatWorker("w", base_url="http://fake/v1", model="m", extra_body={"top_p": 0.9})

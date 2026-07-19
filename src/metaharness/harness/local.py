@@ -204,7 +204,18 @@ class OpenAICompatWorker(BaseRunner):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.thinking = thinking
-        self.extra_body = extra_body or {}
+        # FIX-3 (codex#4): extra_body is merged into the request body AFTER the
+        # attested surfaces are assembled — allowing "messages"/"tools" here would
+        # let raw config silently replace the redacted, budgeted, manifested
+        # payload. Reject at construction (config error, not a per-call violation).
+        extra_body = extra_body or {}
+        reserved = {"messages", "tools"} & set(extra_body)
+        if reserved:
+            raise ValueError(
+                f"extra_body may not override assembled surfaces {sorted(reserved)} "
+                "(they are attested by the context manifest)"
+            )
+        self.extra_body = extra_body
         self.cost_per_1k_tokens = cost_per_1k_tokens
         self.timeout_s = timeout_s
         self._client = client
@@ -280,6 +291,7 @@ class OpenAICompatWorker(BaseRunner):
                 # a '-breaking-' harness_version here (see assemble_live docstring).
                 assembly = assemble_live(
                     drafts,
+                    transport="chat",  # FIX-6: this worker sends chat messages
                     budget_tokens=prompt_budget,
                     model_id=self.model,
                     harness_version="metaharness:0.1.0",

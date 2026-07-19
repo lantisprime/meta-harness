@@ -70,7 +70,10 @@ class RunEvent(BaseModel):
                 raise ValueError("run events cannot carry step/attempt IDs")
         elif not self.step_id:
             raise ValueError(f"{self.kind} requires a step ID")
-        if self.kind.startswith(("attempt.", "tool.", "verification.")):
+        # FIX-8 (codex#9): context.manifest is attempt-scoped ("what did THIS
+        # attempt's model see"); require its attempt id like attempt.*/tool.*.
+        if (self.kind.startswith(("attempt.", "tool.", "verification."))
+                or self.kind == "context.manifest"):
             if not self.attempt_id:
                 raise ValueError(f"{self.kind} requires an attempt ID")
         return self

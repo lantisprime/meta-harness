@@ -295,3 +295,19 @@ async def test_legacy_journal_resumes_and_continues_without_mixing_formats(tmp_p
     assert all("schema_version" not in record for record in raw)
     assert [record["seq"] for record in raw] == list(range(len(raw)))
     assert any(record["kind"] == "step.completed" for record in raw)
+
+
+def test_fix8_context_manifest_requires_attempt_id():
+    """FIX-8 (codex#9): context.manifest is attempt-scoped, so a RunEvent of that
+    kind without an attempt_id must be rejected (same rule as attempt.*/tool.*)."""
+    from pydantic import ValidationError
+
+    from metaharness.workflows.journal import RunEvent
+
+    common = dict(seq=1, at=0.0, kind="context.manifest", run_id="r",
+                  snapshot_digest="a" * 64, step_id="work")
+    with pytest.raises(ValidationError):
+        RunEvent(**common)  # no attempt_id
+    # with the attempt id it validates
+    event = RunEvent(**common, attempt_id="work-attempt-1")
+    assert event.attempt_id == "work-attempt-1"

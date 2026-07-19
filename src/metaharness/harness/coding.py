@@ -442,6 +442,7 @@ class CodingAgentWorker(BaseRunner):
         drafts = _build_drafts(task, system_prompt=declared_system_prompt)
         assembly = assemble_live(
             drafts,
+            transport="cli",  # FIX-6: this worker sends a flat CLI prompt
             budget_tokens=budget_for(self.tier),
             model_id=self.model,
             harness_version="metaharness:0.1.0",

@@ -15,7 +15,7 @@ shadow and live share one redaction/fitting source of truth.
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -102,7 +102,10 @@ class SectionDraft(FrozenModel):
     trust: ContextTrust
     sensitivity: Sensitivity
     content: str = ""
-    role: Optional[str] = None  # system/user/assistant/tool; None renders as user
+    # FIX-2 (codex#2): role is a closed enum, not an open string — an arbitrary
+    # value (or an untrusted draft claiming role="system") must not be able to
+    # smuggle content into the system message. None renders as user.
+    role: Optional[Literal["system", "user", "assistant", "tool"]] = None
     tool_call_id: Optional[str] = None
     tool_calls: Optional[list[dict[str, Any]]] = None
 
@@ -161,6 +164,7 @@ def _render_group(group: dict[str, Any], key: str) -> dict[str, Any]:
 def assemble_live(
     drafts: list[SectionDraft],
     *,
+    transport: Literal["chat", "cli"],
     budget_tokens: int,
     model_id: str,
     harness_version: str,
@@ -179,6 +183,12 @@ def assemble_live(
 ) -> LiveAssembly:
     """Assemble one live context, fail-closed. Raises `LiveContextViolation`
     (pre model call) on any trust or budget contract breach.
+
+    FIX-6 (codex#7 + opus P3-1/P3-2): `transport` names the surface the caller
+    actually transmits — "chat" (message + tool_schemas) or "cli" (flat_prompt +
+    system_prompt). The manifest attests ONLY the transmitted surfaces (never a
+    view the adapter did not send), and `budget_used_tokens` reports that
+    surface's total. The ContextEnvelope sections are identical across transports.
 
     F9 documented non-goal: never pass a '-breaking-' `harness_version` here —
     `ContextVersionBindings` demands `evidence_snapshot_version=None` for a
@@ -215,6 +225,23 @@ def assemble_live(
                 f"evaluator_receipt sources may never carry INSTRUCTION trust "
                 f"(section {draft.stable_id!r})"
             )
+        # FIX-2 (codex#2): only INSTRUCTION-trust content in an instruction slot
+        # may render into the SYSTEM message. This closes the escalation where an
+        # UNTRUSTED/GENERATED (or non-instruction) draft claims role="system" and
+        # the model reads it as a system instruction. (Deviation from the batch's
+        # literal "SYSTEM_INSTRUCTIONS only": RESPONSE_CONTRACT boundaries/output-
+        # schema legitimately render into the system message for legacy parity, so
+        # the gate admits any INSTRUCTION-trust instruction slot — the security
+        # invariant "no untrusted bytes in the system message" is fully preserved.)
+        if draft.role == "system" and not (
+            draft.trust is ContextTrust.INSTRUCTION
+            and draft.section_type in _INSTRUCTION_SLOTS
+        ):
+            raise LiveContextViolation(
+                f"role='system' requires INSTRUCTION trust in an instruction slot; "
+                f"section {draft.stable_id!r} is {draft.trust.value!r}/"
+                f"{draft.section_type.value!r}"
+            )
 
     redaction_tuple = tuple(sorted(
         {value for value in redaction_values if value},
@@ -234,6 +261,12 @@ def assemble_live(
         if draft.tool_calls is not None:
             redacted_tool_calls, tcount = _redact(draft.tool_calls, redaction_tuple)
             ccount += tcount
+        # FIX-4 (codex#5): tool_call_id is a model-generated string — redact it
+        # like content/tool_calls before it reaches the wire or the manifest.
+        redacted_tool_call_id: Optional[str] = None
+        if draft.tool_call_id is not None:
+            redacted_tool_call_id, idcount = _redact_string(draft.tool_call_id, redaction_tuple)
+            ccount += idcount
         redaction_count += ccount
 
         budget = section_budgets[index]
@@ -305,7 +338,8 @@ def assemble_live(
             "final": final_content,
             "source_content": draft.content,
             "tool_calls": redacted_tool_calls,
-            "tool_call_id": draft.tool_call_id,
+            "tool_call_id": redacted_tool_call_id,
+            "action": action,  # FIX-9: honest per-section fitting/omission fact
             "redacted": ccount > 0,
         })
 
@@ -343,56 +377,43 @@ def assemble_live(
         redaction_count += scount
         tool_schema_tokens = estimate_tokens(canonical_json(redacted_schemas))
 
-    # -- e. hard budget postcondition (F7) ------------------------------------
-    messages_total = messages_tokens(messages) + tool_schema_tokens
+    # -- e. hard budget postcondition (F7, FIX-5, FIX-6) ----------------------
+    # FIX-5 (codex#6): structured turns (tool_calls, tool_call_id) are real bytes
+    # on the wire but invisible to messages_tokens — count them so oversized tool
+    # arguments cannot slip past the budget. Overflow fails closed (no truncation
+    # of structured turns).
+    structured_tokens = 0
+    for message in messages:
+        if "tool_calls" in message:
+            structured_tokens += estimate_tokens(canonical_json(message["tool_calls"]))
+        if "tool_call_id" in message:
+            structured_tokens += estimate_tokens(str(message["tool_call_id"]))
+    chat_total = messages_tokens(messages) + structured_tokens + tool_schema_tokens
     cli_total = estimate_tokens(prompt) + estimate_tokens(system_prompt)
-    if max(messages_total, cli_total) > budget_tokens:
+    # FIX-6: enforce the budget against the surface actually transmitted.
+    transmitted_total = chat_total if transport == "chat" else cli_total
+    if transmitted_total > budget_tokens:
         raise LiveContextViolation(
-            f"assembled context exceeds hard budget: max surface "
-            f"{max(messages_total, cli_total)} > {budget_tokens} tokens "
+            f"assembled {transport} context exceeds hard budget: "
+            f"{transmitted_total} > {budget_tokens} tokens "
             "(protected sections cannot be omitted to fit)"
         )
 
     # -- manifest entries + 1:1 compression receipts --------------------------
+    # FIX-6: attest ONLY the transmitted surface — chat callers send messages
+    # (+tool_schemas); cli callers send the flat prompt (+system prompt). The
+    # envelope sections stay identical either way.
     entries: list[ContextManifestEntry] = []
     receipts: list[CompressionReceipt] = []
-    # message surfaces: one entry per rendered message. A merged message spans
-    # drafts of possibly differing trust — report the weakest (untrusted wins).
-    for group, message, message_pre in zip(groups, messages, messages_pre, strict=True):
-        members: list[dict[str, Any]] = group["items"]
-        weakest = min(members, key=lambda item: _TRUST_WEAKNESS[item["draft"].trust])
-        sensitivity = max(
-            (item["draft"].sensitivity for item in members),
-            key=lambda value: _SENSITIVITY_RANK[value],
-        )
-        stable_id = f"message-{len(entries):04d}-{message['role']}"
-        payload = {key: value for key, value in message.items()}
-        payload_pre = {key: value for key, value in message_pre.items()}
-        before_hash = content_hash(payload_pre)
-        after_hash = content_hash(payload)
-        action = CompressionAction.NONE if before_hash == after_hash else CompressionAction.HEAD_TAIL
-        source_hash = content_hash("".join(item["source_content"] for item in members))
-        entries.append(ContextManifestEntry(
-            stable_id=stable_id,
-            surface="message",
-            payload_json=canonical_json(payload),
-            source_kind=weakest["draft"].source_kind,
-            trust=weakest["draft"].trust,
-            sensitivity=sensitivity,
-            source_hash=source_hash,
-            selected_hash=content_hash(payload),
-            redacted=any(item["redacted"] for item in members),
-        ))
-        receipts.append(CompressionReceipt(
-            stable_id=stable_id,
-            action=action,
-            before_hash=before_hash,
-            after_hash=after_hash,
-            original_tokens=estimate_tokens(str(message_pre.get("content") or "")),
-            final_tokens=estimate_tokens(str(message.get("content") or "")),
-            reason="within allocated budget" if action is CompressionAction.NONE
-            else "deterministic head/tail budget fitting",
-        ))
+
+    def _receipt_reason(members: list[dict[str, Any]], action: CompressionAction) -> str:
+        # FIX-9 (opus P3-3): a change driven by a zero-budget OMITTED member is
+        # NOT head/tail digest fitting — report the honest cause.
+        if action is CompressionAction.NONE:
+            return "within allocated budget"
+        if any(item["action"] is CompressionAction.OMITTED for item in members):
+            return "section omitted at zero budget"
+        return "deterministic head/tail budget fitting"
 
     def _string_surface_entry(surface: str, stable_id: str, pre: str, final: str,
                               members: list[dict[str, Any]]) -> None:
@@ -422,46 +443,81 @@ def assemble_live(
             after_hash=after_hash,
             original_tokens=estimate_tokens(pre),
             final_tokens=estimate_tokens(final),
-            reason="within allocated budget" if action is CompressionAction.NONE
-            else "deterministic head/tail budget fitting",
+            reason=_receipt_reason(members, action),
         ))
 
-    if tool_schemas:
-        schema_json = canonical_json(redacted_schemas)
-        before = content_hash([dict(schema) for schema in tool_schemas])
-        after = content_hash(redacted_schemas)
-        action = CompressionAction.NONE if before == after else CompressionAction.HEAD_TAIL
-        # tool schemas are transported verbatim (never fitted); redaction may
-        # differ them but that is not compression — record NONE with equal
-        # hashes on the redacted payload to keep the receipt honest.
-        entries.append(ContextManifestEntry(
-            stable_id="tool-schemas",
-            surface="tool_schemas",
-            payload_json=schema_json,
-            source_kind=ContextSourceKind.TOOL_POLICY_SCHEMA,
-            trust=ContextTrust.INSTRUCTION,
-            sensitivity=Sensitivity.INTERNAL,
-            source_hash=after,
-            selected_hash=content_hash(redacted_schemas),
-            redacted=before != after,
-        ))
-        receipts.append(CompressionReceipt(
-            stable_id="tool-schemas",
-            action=CompressionAction.NONE,
-            before_hash=after,
-            after_hash=after,
-            original_tokens=tool_schema_tokens,
-            final_tokens=tool_schema_tokens,
-            reason="tool schemas transported within allocated budget",
-        ))
+    if transport == "chat":
+        # message surfaces: one entry per rendered message. A merged message spans
+        # drafts of possibly differing trust — report the weakest (untrusted wins).
+        for group, message, message_pre in zip(groups, messages, messages_pre, strict=True):
+            members = group["items"]
+            weakest = min(members, key=lambda item: _TRUST_WEAKNESS[item["draft"].trust])
+            sensitivity = max(
+                (item["draft"].sensitivity for item in members),
+                key=lambda value: _SENSITIVITY_RANK[value],
+            )
+            stable_id = f"message-{len(entries):04d}-{message['role']}"
+            payload = {key: value for key, value in message.items()}
+            payload_pre = {key: value for key, value in message_pre.items()}
+            before_hash = content_hash(payload_pre)
+            after_hash = content_hash(payload)
+            action = (CompressionAction.NONE if before_hash == after_hash
+                      else CompressionAction.HEAD_TAIL)
+            source_hash = content_hash("".join(item["source_content"] for item in members))
+            entries.append(ContextManifestEntry(
+                stable_id=stable_id,
+                surface="message",
+                payload_json=canonical_json(payload),
+                source_kind=weakest["draft"].source_kind,
+                trust=weakest["draft"].trust,
+                sensitivity=sensitivity,
+                source_hash=source_hash,
+                selected_hash=content_hash(payload),
+                redacted=any(item["redacted"] for item in members),
+            ))
+            receipts.append(CompressionReceipt(
+                stable_id=stable_id,
+                action=action,
+                before_hash=before_hash,
+                after_hash=after_hash,
+                original_tokens=estimate_tokens(str(message_pre.get("content") or "")),
+                final_tokens=estimate_tokens(str(message.get("content") or "")),
+                reason=_receipt_reason(members, action),
+            ))
 
-    # flat prompt is always a derivable CLI surface; system prompt only when at
-    # least one system-role draft was declared (else claiming it would be false).
-    _string_surface_entry("flat_prompt", "flat-prompt", prompt_pre, prompt,
-                          non_system or rendered)
-    if system_items:
-        _string_surface_entry("system_prompt", "system-prompt", system_prompt_pre,
-                              system_prompt, system_items)
+        if tool_schemas:
+            schema_json = canonical_json(redacted_schemas)
+            before = content_hash([dict(schema) for schema in tool_schemas])
+            after = content_hash(redacted_schemas)
+            # tool schemas are transported verbatim (never fitted); redaction may
+            # differ them but that is not compression — record NONE with equal
+            # hashes on the redacted payload to keep the receipt honest.
+            entries.append(ContextManifestEntry(
+                stable_id="tool-schemas",
+                surface="tool_schemas",
+                payload_json=schema_json,
+                source_kind=ContextSourceKind.TOOL_POLICY_SCHEMA,
+                trust=ContextTrust.INSTRUCTION,
+                sensitivity=Sensitivity.INTERNAL,
+                source_hash=after,
+                selected_hash=content_hash(redacted_schemas),
+                redacted=before != after,
+            ))
+            receipts.append(CompressionReceipt(
+                stable_id="tool-schemas",
+                action=CompressionAction.NONE,
+                before_hash=after,
+                after_hash=after,
+                original_tokens=tool_schema_tokens,
+                final_tokens=tool_schema_tokens,
+                reason="tool schemas transported within allocated budget",
+            ))
+    else:  # transport == "cli": flat prompt (+system prompt when declared)
+        _string_surface_entry("flat_prompt", "flat-prompt", prompt_pre, prompt,
+                              non_system or rendered)
+        if system_items:
+            _string_surface_entry("system_prompt", "system-prompt", system_prompt_pre,
+                                  system_prompt, system_items)
 
     # -- manifest -------------------------------------------------------------
     # sections are already redacted, so the envelope IS the redacted envelope.
@@ -484,7 +540,9 @@ def assemble_live(
             if section.compression_action is CompressionAction.OMITTED
         ),
         "artifact_refs": (),
-        "budget_used_tokens": messages_total,
+        # FIX-6 (opus P3-2): report the transmitted surface's total, not the chat
+        # total for every transport.
+        "budget_used_tokens": transmitted_total,
         "budget_limit_tokens": budget_tokens,
         "redaction_count": redaction_count,
     }
