@@ -60,11 +60,15 @@ def test_corpus_is_well_formed_and_covers_every_required_category():
     requirement_ids = [case["requirement_id"] for case in corpus["cases"] if case["requirement_id"]]
     for req_id in requirement_ids:
         assert req_id.startswith("META5-MEM-"), req_id
-    # requirement ids may be shared by more than one case (e.g. traversal
-    # covers both source_id and artifact_ref), but every absent case must
-    # name one, and there must be at least as many distinct requirements as
-    # absent categories that have no enforced counterpart in this corpus.
-    assert len(set(requirement_ids)) >= 15
+    # Every requirement id in the corpus must be a member of the documented
+    # META5-MEM card set (META5-MEM-001 .. META5-MEM-015). The cardinality
+    # of the *currently* absent set is asserted by
+    # test_all_absent_cases_have_a_stable_requirement_id_and_a_test_below
+    # in tests/adversarial/test_memory_skill_boundaries.py and shrinks as
+    # stages flip cards to enforced; this corpus-shape check is the global
+    # "no stray requirement ids" guard.
+    documented_metakernel_cards = {f"META5-MEM-{number:03d}" for number in range(1, 16)}
+    assert set(requirement_ids).issubset(documented_metakernel_cards)
 
     for case in corpus["cases"]:
         if case["status"] == "enforced":
