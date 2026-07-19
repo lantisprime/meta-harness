@@ -40,6 +40,15 @@ from selflearn.acquisition import (
 )
 from selflearn.distillation import DistillationError, Distiller, injection_screen
 from selflearn.learning import (
+    DomainReadinessReport,
+    EvaluationCriterion,
+    EvaluationItemResult,
+    EvaluationSplits,
+    ExpertExample,
+    FailureCluster,
+    ImprovementDecision,
+    ImprovementPolicy,
+    ImprovementTrial,
     Learner,
     LearningConfig,
     MarkReport,
@@ -48,6 +57,8 @@ from selflearn.learning import (
     check_regression,
     label_topic,
     snapshot_baseline,
+    assess_domain_readiness,
+    evaluate_improvement_trial,
 )
 from selflearn.pipeline import AcquisitionReport, approve_entry, run_acquisition
 from selflearn.verification import (
@@ -81,6 +92,11 @@ __all__ = [
     "SpecialistSpec", "load_spec", "save_spec",
     "MarkReport", "apply_outcome", "Learner", "LearningConfig", "label_topic",
     "RegressionReport", "check_regression", "snapshot_baseline",
+    "DomainReadinessReport", "EvaluationCriterion", "EvaluationItemResult",
+    "EvaluationSplits",
+    "ExpertExample", "FailureCluster", "ImprovementDecision",
+    "ImprovementPolicy", "ImprovementTrial", "assess_domain_readiness",
+    "evaluate_improvement_trial",
     "AcquireContext", "AcquisitionError", "PluginRegistry",
     "ReputabilityPolicy", "builtin_plugins",
     "DistillationError", "Distiller", "injection_screen",

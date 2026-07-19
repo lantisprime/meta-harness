@@ -13,6 +13,11 @@ from pathlib import Path
 import yaml
 
 from selflearn.contracts import ContractError
+from selflearn.learning.improvement import (
+    DomainReadinessReport,
+    ImprovementPolicy,
+    assess_domain_readiness,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,7 @@ class SpecialistSpec:
     min_tier: str = ""                    # routing constraint, host vocabulary
     retrieval_k: int = 5
     retrieval_budget_tokens: int = 1200
+    improvement_policy: ImprovementPolicy | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -39,13 +45,20 @@ class SpecialistSpec:
     def serves(self, task_type: str) -> bool:
         return not self.task_types or task_type in self.task_types
 
+    def assess_improvement(self, store) -> DomainReadinessReport:
+        """Check, without mutation, whether bounded improvement may start."""
+        return assess_domain_readiness(self, store)
+
     def to_dict(self) -> dict:
-        return {"name": self.name, "packs": list(self.packs),
+        data = {"name": self.name, "packs": list(self.packs),
                 "archetype_prompt": self.archetype_prompt,
                 "description": self.description,
                 "task_types": list(self.task_types), "min_tier": self.min_tier,
                 "retrieval_k": self.retrieval_k,
                 "retrieval_budget_tokens": self.retrieval_budget_tokens}
+        if self.improvement_policy is not None:
+            data["improvement_policy"] = self.improvement_policy.to_dict()
+        return data
 
 
 def save_spec(spec: SpecialistSpec, path: Path) -> None:
@@ -74,4 +87,7 @@ def load_spec(path: Path) -> SpecialistSpec:
         min_tier=data.get("min_tier", ""),
         retrieval_k=int(data.get("retrieval_k", 5)),
         retrieval_budget_tokens=int(data.get("retrieval_budget_tokens", 1200)),
+        improvement_policy=(
+            ImprovementPolicy.from_dict(data["improvement_policy"])
+            if data.get("improvement_policy") is not None else None),
     )

@@ -1,6 +1,20 @@
 """Learning module: fast-loop marks (M2) + slow-loop gap detection,
 staleness, advisory suggestions, and suite regression (M6)."""
 from selflearn.learning.gaps import Learner, LearningConfig, label_topic
+from selflearn.learning.improvement import (
+    DomainReadinessReport,
+    EvaluationCriterion,
+    EvaluationItemResult,
+    EvaluationSplits,
+    ExpertExample,
+    FailureCluster,
+    ImprovementDecision,
+    ImprovementPolicy,
+    ImprovementTrial,
+    assess_domain_readiness,
+    cluster_failures,
+    evaluate_improvement_trial,
+)
 from selflearn.learning.marks import (
     MARK_HALF_LIFE_DAYS,
     MarkReport,
@@ -14,7 +28,14 @@ from selflearn.learning.regression import (
     snapshot_baseline,
 )
 
-__all__ = ["MarkReport", "apply_outcome", "Learner", "LearningConfig",
-           "label_topic", "RegressionReport", "check_regression",
-           "snapshot_baseline", "MARK_HALF_LIFE_DAYS", "decay_factor",
-           "effective_counts"]
+__all__ = [
+    "MarkReport", "apply_outcome", "Learner", "LearningConfig",
+    "label_topic", "RegressionReport", "check_regression",
+    "snapshot_baseline", "MARK_HALF_LIFE_DAYS", "decay_factor",
+    "effective_counts", "DomainReadinessReport", "EvaluationCriterion",
+    "EvaluationItemResult",
+    "EvaluationSplits", "ExpertExample", "FailureCluster",
+    "ImprovementDecision", "ImprovementPolicy", "ImprovementTrial",
+    "assess_domain_readiness", "cluster_failures",
+    "evaluate_improvement_trial",
+]

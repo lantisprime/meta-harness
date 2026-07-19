@@ -27,6 +27,7 @@ from selflearn.evidence import decay_factor
 from selflearn.learning.gaps import expected_free_energy_value
 from selflearn.learning.marks import DEPRECATE_THRESHOLD
 from selflearn.store.packstore import PackStore
+from selflearn.specialist import SpecialistSpec
 
 # A published entry is flagged as harmful on an unbroken losing streak
 # (same threshold the learning loop auto-deprecates at), or on a low
@@ -50,6 +51,31 @@ class Suggestion:
     command: str = ""      # copy-pasteable CLI command, when one exists
     efe: float = 0.0       # acquisition value (negative expected free energy);
     #                        higher floats up WITHIN a priority tier (§3.1)
+
+
+def suggest_specialist_improvement(spec: SpecialistSpec,
+                                   store: PackStore) -> Suggestion:
+    """Describe the next safe improvement step without changing the store."""
+    report = spec.assess_improvement(store)
+    if not report.ready:
+        return Suggestion(
+            2,
+            f"specialist {spec.name!r} is not ready for self-improvement",
+            "; ".join(report.reasons),
+        )
+    policy = spec.improvement_policy
+    assert policy is not None  # report.ready establishes the typed invariant
+    return Suggestion(
+        7,
+        f"run a bounded improvement campaign for specialist {spec.name!r}",
+        f"target the largest verified failure cluster; fit on "
+        f"{report.fit_items} item(s), mark eligible only on "
+        f"{report.validation_items} unseen validation item(s), and keep the "
+        f"{report.test_items}-item sealed test for the final comparison; "
+        f"stop at score {policy.target_validation_score:.2f}, after "
+        f"{policy.max_iterations} iterations, or after "
+        f"{policy.plateau_rounds} stagnant rounds",
+    )
 
 
 def suggest_actions(store: PackStore,

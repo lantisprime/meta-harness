@@ -33,6 +33,7 @@ from typing import Optional
 from selflearn.contracts import ContractError, GapSignal, TaskOutcome
 from selflearn.evidence import MARK_HALF_LIFE_DAYS, laplace_score, parse_iso
 from selflearn.learning.marks import MarkReport, apply_outcome, effective_counts
+from selflearn.learning.improvement import FailureCluster, cluster_failures
 from selflearn.store.packstore import PackStore
 
 ACTIONS = {
@@ -211,6 +212,18 @@ class Learner:
 
     # -- slow loop ------------------------------------------------------
 
+    def failure_clusters(self, pack: str) -> tuple[FailureCluster, ...]:
+        """Return pack-scoped verified failures, largest pattern first.
+
+        This is a read-only view: unlike ``gap_signals`` it neither consumes
+        failures nor advances backoff counters.
+        """
+        coverage = self.store.coverage(pack)
+        return cluster_failures(
+            failure for failure in self._failures
+            if failure.topic in coverage
+        )
+
     def gap_signals(self, pack: str) -> list[GapSignal]:
         coverage = self.store.coverage(pack)
         by_topic: dict[str, list[TaskOutcome]] = {}
@@ -333,5 +346,4 @@ class Learner:
         # highest expected free energy reduction first (design note §3.1)
         out.sort(key=lambda d: d["efe_value"], reverse=True)
         return out
-
 

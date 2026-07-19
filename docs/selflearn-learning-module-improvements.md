@@ -14,6 +14,49 @@ ranking in `retrieval/retriever.py`.
 | `active-inference` | Ghasimi & Movarraei, *Knowledge Generation Using Active Inference* ([arXiv:2501.15105](https://arxiv.org/abs/2501.15105)) | Agents minimize **expected free energy** = pragmatic (goal) + **epistemic (information gain)**; perception updates beliefs, action changes the world; knowledge grows on **surprise**. |
 | `human-learning` | Allen, Redish & Kizilcec, *Fundamental Mechanisms of Human Learning* ([arXiv:2509.17202](https://arxiv.org/abs/2509.17202)) | Distinct systems learn distinct **information types**; memory does not transfer between them; don't collapse types into one signal. |
 
+**Applied-practice source.** Annabell Schäfer, *Stop Burning Tokens: Why
+self-improvement needs domain expertise first* ([AI Engineer,
+2026-07-18](https://youtu.be/eAXxdtNlK04)), supplied the operational gate
+implemented in `learning/improvement.py`: expert examples and anchored
+criteria precede optimization; fit, validation, and final test stay separate;
+one dominant error cluster is targeted at a time; and campaigns have explicit
+target, iteration, and plateau stops. This source is recorded as design
+evidence rather than mislabeled as a research paper.
+
+### 3.0 Domain expertise before self-improvement `[SHIPPED, HIGH]`
+
+**Lack.** Knowledge packs had validated probes and regression baselines, but a
+specialist had no typed proof that its evaluation policy represented domain
+expertise, no sealed split contract, and no bounded decision rule for proposed
+improvements.
+
+**Mechanism.** `SpecialistSpec.improvement_policy` binds expert-approved,
+anchored criteria to validated probes already stored with the specialist's
+published packs. `assess_domain_readiness` refuses improvement when published
+knowledge, a valid frozen baseline, expert examples, high-signal criteria, or
+disjoint fit/validation/test identifiers are missing. `Learner.failure_clusters`
+exposes the dominant externally verified error pattern without consuming
+evidence. `evaluate_improvement_trial` marks a candidate eligible for human
+review only when it targets that pattern, its full per-item evidence comes
+from the frozen evaluator, and it
+improves unseen validation without regressing a previously passing item. It
+stops on target, iteration cap, or plateau. Its candidate type deliberately has
+no final-test results field.
+
+**Authority boundary.** These APIs assess and advise; they do not run
+optimization, open the sealed final test during iteration, mark a candidate as
+anything stronger than eligible for human review,
+deploy it, or let the evaluator approve itself. Human promotion and rollback
+remain host responsibilities.
+
+**Files.** `learning/improvement.py`, `learning/gaps.py`, `specialist.py`,
+`advisor.py`; contract tests in `tests/test_domain_readiness.py`.
+
+**Charter trace.** Advances managed rehearsal/evaluation, H-plane learning,
+and reusable knowledge while preserving evidence-before-learning,
+full-fidelity comparison, evaluator non-self-approval, bounded authority, and
+honest stopping.
+
 ---
 
 ## 1. Purpose
