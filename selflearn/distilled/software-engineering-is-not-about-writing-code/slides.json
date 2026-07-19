@@ -1,0 +1,703 @@
+{
+  "schema_version": "1.0",
+  "source": {
+    "input": "https://youtu.be/1P1hJ36rxM0",
+    "id": "1P1hJ36rxM0",
+    "url": "https://www.youtube.com/watch?v=1P1hJ36rxM0",
+    "title": "\"Software engineering is not about writing code\" — Benoit Schillings, Google DeepMind VP of Research",
+    "channel": "AI Engineer",
+    "duration_seconds": 1226,
+    "upload_date": "20260717",
+    "description": "A keynote exploring generative AI for code, deep-thinking algorithms, and the future of pre-training and transformer models for Gemini.\n\nSpeaker:\n\nBenoit Schillings leads the Thinking, Reasoning, and Coding teams at Google DeepMind, directing foundational research toward AGI. His work focuses on advancing next-generation model reasoning and integrating software development best practices into AI code generation. Previously, as CTO at X, Benoit guided early-stage teams prototyping Alphabet's moonshot technologies across computing, biochemistry, and clean energy.\n\nLinkedIn: https://www.linkedin.com/in/benoit-schillings-2942a5\n\nTimestamps:\n\n0:00 Introduction and speaker background\n2:35 The origin story of the Pitchfork project\n4:43 Historical eras of software development\n7:08 The current state of AI code generation\n9:36 The role of self-play in training models\n11:13 Changing economics of software engineering\n12:41 Implementing guardrails and security\n13:48 Inductive architecture and model planning\n14:36 Evolution of evaluation benchmarks\n15:45 Moving beyond simple chain-of-thought tokens\n17:51 Future applications in chemistry and biology\n\n\n\nKey Takeaways from the talk:\n\nBenoit Schillings, VP of Technology at Google DeepMind, discusses the transformative impact of generative AI on software engineering and the future of model reasoning (0:49 - 2:35).\nThe Era of Syntax Generation is Over: (4:43) Coding has shifted from a machine-constrained task to an AI frontier where syntax is effectively solved, moving the bottleneck to architecture and validation.\nThe Power of Self-Play: (9:36) As human-generated training data reaches saturation, DeepMind is utilizing self-play, where models generate and verify their own challenges to reach superhuman performance.\nShift in Engineering Economics: (11:13) With writing code becoming nearly free, the focus must transition to active guardrails, security, and managing the explosion of generated code.\nInductive Architecture: (13:48) The next step for AI is moving beyond simple token prediction toward models that can plan, decompose complex problems, and transfer knowledge across domains.\nScientific Breakthroughs: (17:51) AI's ability to experiment rapidly will transform fields like chemistry and biology, allowing models to uncover patterns and relationships that remain invisible to human perception."
+  },
+  "detector": {
+    "sample_seconds": 3.0,
+    "max_frames": 40,
+    "min_gap_seconds": 8.0,
+    "video_height": 1080,
+    "crop_slides": true,
+    "method": "visual-change + slide-likeness + post-change stability + scene-midpoint snapping + motion-based webcam exclusion + OpenCV panel crop with cross-frame consensus"
+  },
+  "frames": [
+    {
+      "timestamp": 25.761,
+      "filename": "frames/frame-001-000025s.jpg",
+      "score": 0.8482,
+      "slide_score": 0.994,
+      "change_before": 0.2198,
+      "stability_after": 0.175,
+      "transcript": "Please welcome to the stage the vice president of research [music] at Google DeepMind, Benois Schillings. [music] >> [music]",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 34.536,
+      "filename": "frames/frame-002-000034s.jpg",
+      "score": 0.7902,
+      "slide_score": 0.795,
+      "change_before": 0.1915,
+      "stability_after": 0.4497,
+      "transcript": "president of research [music] at Google DeepMind, Benois Schillings. [music] >> [music]",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 60.0,
+      "filename": "frames/frame-003-000060s.jpg",
+      "score": 0.6493,
+      "slide_score": 0.8068,
+      "change_before": 0.0734,
+      "stability_after": 0.473,
+      "transcript": ">> All right, good morning. Uh this is really quite exciting to be here and have a chance to to speak with all of you. Uh my name is Benois Shellings. I'm actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 72.0,
+      "filename": "frames/frame-004-000072s.jpg",
+      "score": 0.6702,
+      "slide_score": 0.7995,
+      "change_before": 0.0796,
+      "stability_after": 0.5507,
+      "transcript": "you. Uh my name is Benois Shellings. I'm actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience…",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 81.0,
+      "filename": "frames/frame-005-000081s.jpg",
+      "score": 0.6864,
+      "slide_score": 0.8183,
+      "change_before": 0.0762,
+      "stability_after": 0.6177,
+      "transcript": "a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is…",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 91.156,
+      "filename": "frames/frame-006-000091s.jpg",
+      "score": 0.7942,
+      "slide_score": 0.6706,
+      "change_before": 0.1537,
+      "stability_after": 0.9061,
+      "transcript": "things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is basically to develop whatever technology will be needed to make Gemini incredible between one months and one year from now. So one",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 180.0,
+      "filename": "frames/frame-007-000180s.jpg",
+      "score": 0.6003,
+      "slide_score": 0.7714,
+      "change_before": 0.0046,
+      "stability_after": 0.9759,
+      "transcript": "Pitchfork uh in 2018 which was aimed at looking at how ML could really improve the way code is being written. And this was very interesting because in 2018 when we presented that at Google honestly nobody would give us the time of day. uh there was that point like why would you ever need ML to to write code. Um at the same time I think that we totally",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 210.0,
+      "filename": "frames/frame-008-000210s.jpg",
+      "score": 0.608,
+      "slide_score": 0.7841,
+      "change_before": 0.0073,
+      "stability_after": 0.9542,
+      "transcript": "When we did that project originally the idea was to look at how we could speed up the evolution of a piece of code. How could we make many of those small changes which slows down code speed development? you know the small edit which requires a review that takes three days and how we could compress that cycle. Some people were talking about vibe coding writing code in English and at the time honestly I totally…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 240.0,
+      "filename": "frames/frame-009-000240s.jpg",
+      "score": 0.6024,
+      "slide_score": 0.7796,
+      "change_before": 0.0046,
+      "stability_after": 0.9635,
+      "transcript": "programming language. Well I I guess I was pretty wrong on that front. But the resistance we felt at the time reminded me of how my own career was pretty resistive to to change. Um I've been writing code for 45 years. Uh I started by writing video game for Apple 2 and Commodore 64. So uh my formation was to write assembly language. And when you spend a long time",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 270.0,
+      "filename": "frames/frame-010-000270s.jpg",
+      "score": 0.5965,
+      "slide_score": 0.7716,
+      "change_before": 0.0035,
+      "stability_after": 0.9651,
+      "transcript": "writing assembly language, you look at compilers with a lot of suspicion, right? are those things really working correctly? And then when you switch to C++ and use compiler, you lose you look at garbage collected languages as this h that's not real programming. You need to manage your memory. Well, today I use Python and V coding. So even old dogs can learn new tricks. So uh but I I I do understand what happened…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 390.0,
+      "filename": "frames/frame-011-000390s.jpg",
+      "score": 0.5945,
+      "slide_score": 0.7696,
+      "change_before": 0.003,
+      "stability_after": 0.9647,
+      "transcript": "determined a lot of how software was being written. This is over and we're switching now to that AI frontier where really writing the code is not the challenge anymore. Uh I'll speak some more about it. But the bottlenecks are really how do you ensure that that code is what you really wanted because writing the code is easy but getting what is needed for a specific problem can be much harder to to specify. So…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 420.0,
+      "filename": "frames/frame-012-000420s.jpg",
+      "score": 0.5968,
+      "slide_score": 0.7669,
+      "change_before": 0.0046,
+      "stability_after": 0.9706,
+      "transcript": "thinking of what are really the implication of that piece of code. I'm getting the ML to to design. Inductive thinking is another category where I think humans still have a very clear edge which is to look at a system in a much wider context and to be able to detect patterns and from those pattern take some decision. So where are we today? Um, superhuman",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 450.0,
+      "filename": "frames/frame-013-000450s.jpg",
+      "score": 0.6246,
+      "slide_score": 0.8174,
+      "change_before": 0.0059,
+      "stability_after": 0.961,
+      "transcript": "When is the last time I got Gemini to write a function for me? And I looked at the function and I was like, I can do that better. It's over. Uh, I think that the minutia of code writing, I mean, you can fight, you can argue, you can find counter example, but that time is is gone. Where we still have a lot of work to do is multi-step code base. Uh software engineering is not about writing code.",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 480.0,
+      "filename": "frames/frame-014-000480s.jpg",
+      "score": 0.6202,
+      "slide_score": 0.8027,
+      "change_before": 0.0061,
+      "stability_after": 0.9782,
+      "transcript": "you join a company and you realize that there are 35 million lines of PHP in the codebase and that you need to make some changes. That that's the day you understand what software engineering is and that's a place where our models today or frontier models are progressing. But this ability to manage that extreme complexity and break it down into man manageable pieces is a place where the frontier is still moving.…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 510.0,
+      "filename": "frames/frame-015-000510s.jpg",
+      "score": 0.6195,
+      "slide_score": 0.8037,
+      "change_before": 0.0065,
+      "stability_after": 0.9674,
+      "transcript": "You look at I don't know the Google architecture. Thanks God we have Jeff Dean which was you know the the key architect there. But that's the level of thinking which has many implication which can go from how do you do hardware optimization? How do you manage security? How do you build a system so that 10 years later you're not full of regrets? And I think this is really the the range of progress we are working…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 540.0,
+      "filename": "frames/frame-016-000540s.jpg",
+      "score": 0.7049,
+      "slide_score": 0.9739,
+      "change_before": 0.004,
+      "stability_after": 0.9558,
+      "transcript": "there's plenty to do. There's plenty of progress to be made. Now code is a very unique problem and in some way that's the reason we we did pitchfork on this. Um, first of all, code is a lot of data. There are other domains where you can find a lot of data to train your model, but code was so incredible. You could go and go on GitHub and start to to scrape GitHub. So, this was one of those problem where the amount…",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 570.0,
+      "filename": "frames/frame-017-000570s.jpg",
+      "score": 0.7061,
+      "slide_score": 0.9736,
+      "change_before": 0.003,
+      "stability_after": 0.973,
+      "transcript": "data was a very unique situation. It is also a domain where doing verification is reasonable. You can run a piece of code, you can compile it, you can have unit test. So the ability to figure out is the model generating something correct was something that was pretty reasonable to do. That brought us where we are today. But today what happened is that we run out of training data. I think that 80% of the new code…",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 600.0,
+      "filename": "frames/frame-018-000600s.jpg",
+      "score": 0.7107,
+      "slide_score": 0.9736,
+      "change_before": 0.0055,
+      "stability_after": 0.9736,
+      "transcript": "generated. So the notion of human bringing some knowledge that can be used for mining and to train model is reaching an end. But the good news is that we can do selfplay and selfplay is something we always liked a lot at deep mind. I suppose all know Alpha Zero. Alpha Zero became a superhuman go and chess player without any human knowledge just by playing against itself. We are",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 630.0,
+      "filename": "frames/frame-019-000630s.jpg",
+      "score": 0.7115,
+      "slide_score": 0.9733,
+      "change_before": 0.0063,
+      "stability_after": 0.9721,
+      "transcript": "now at that stage where Frontier model for code are able to do the same where they can create their own challenge. They can judge the validity of the answer. they can even to some extent judge the architecture. So that ability to do those hundreds of millions of hours of selfplay writing code is the thing that will bring us to the to the next layer. You know, it's interesting. Um do the experiment. Take a a…",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 660.0,
+      "filename": "frames/frame-020-000660s.jpg",
+      "score": 0.7028,
+      "slide_score": 0.9731,
+      "change_before": 0.0034,
+      "stability_after": 0.9518,
+      "transcript": "lock him or her in a room for two years and feed pizza and give the mission you need to become a better software engineer. What do you do as a person? you you give yourself some challenges, challenges that you can verify and you keep working and coding on those challenges. We can do the same here. So this is an issue of how much compute, how much selfplay time we can have. But that will bring the horizon of how…",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 690.0,
+      "filename": "frames/frame-021-000690s.jpg",
+      "score": 0.7239,
+      "slide_score": 0.9984,
+      "change_before": 0.0054,
+      "stability_after": 0.9741,
+      "transcript": "So the economics of code are changing dramatically. You know, as I say, we developed a whole software engineering culture and infrastructure and set of companies based on the assumption that writing code was the hard part. That this was the expensive part. We're now in a world where writing code is free or nearly free. That's why I've got the tilda there. That means that the amount of code that we're going to see…",
+      "width": 1886,
+      "height": 1055,
+      "crop": {
+        "x": 0,
+        "y": 25,
+        "width": 1886,
+        "height": 1055
+      }
+    },
+    {
+      "timestamp": 720.0,
+      "filename": "frames/frame-022-000720s.jpg",
+      "score": 0.7183,
+      "slide_score": 0.9984,
+      "change_before": 0.0051,
+      "stability_after": 0.9458,
+      "transcript": "implications to that. First is the question of design and adequacy. How in front of that mountain of code which will be written or written dynamically, how do we keep systems which works and are reliable at the microscopic level? Great role for human. It is also the issue that you know we're writing code and we're not reading it very much anymore. I mean I know we still have code review but I would",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 750.0,
+      "filename": "frames/frame-023-000750s.jpg",
+      "score": 0.7274,
+      "slide_score": 0.9981,
+      "change_before": 0.0075,
+      "stability_after": 0.9739,
+      "transcript": "Gemini or other model generate the code and nobody will actually look at it. You know it's similar to compilers who still check the assembly output of their compiler and maybe someone there but that's probably the end of it. So the same thing is going to happen to code and that brings some question of what are the new process that we need to put in place to keep that manageable and that's where I've got a [clears…",
+      "width": 1887,
+      "height": 1052,
+      "crop": {
+        "x": 0,
+        "y": 28,
+        "width": 1887,
+        "height": 1052
+      }
+    },
+    {
+      "timestamp": 780.0,
+      "filename": "frames/frame-024-000780s.jpg",
+      "score": 0.6092,
+      "slide_score": 0.7789,
+      "change_before": 0.0083,
+      "stability_after": 0.9672,
+      "transcript": "guard rails. I mean you've all seen the news of mythos looking at a piece of code and detecting a unreasonable number of vulnerability in that code. there is a rush to go and patch those vulnerability but I think that's going to be a neverending process you know we're going to get a certain layer of vulnerability discovered by models we're going to fix those models will get",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 810.0,
+      "filename": "frames/frame-025-000810s.jpg",
+      "score": 0.5974,
+      "slide_score": 0.7757,
+      "change_before": 0.0041,
+      "stability_after": 0.9526,
+      "transcript": "find even more subtle vulnerability so I think that the first aspect is that we need to think at least as much about code security and the implication of a piece of code than on the code writing itself and the grail and you know something my team is working actively on is instead of detecting the vulnerability and then suggesting some fix how about teaching model to write correct things from the start",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 840.0,
+      "filename": "frames/frame-026-000840s.jpg",
+      "score": 0.6005,
+      "slide_score": 0.7779,
+      "change_before": 0.0024,
+      "stability_after": 0.9787,
+      "transcript": "and that is very very hard to do because it is very context dependent the other aspect is that you know that's what I call inductive architecture uh I think that models today are still not very good at transferring knowledge of taking knowledge from one domain and applying it to another one or taking two concepts and finding the intersection of those context to be those context to be able to do deductive…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 870.0,
+      "filename": "frames/frame-027-000870s.jpg",
+      "score": 0.6008,
+      "slide_score": 0.7815,
+      "change_before": 0.0048,
+      "stability_after": 0.9472,
+      "transcript": "software system using ML that is a skill that we need to teach and you know one aspect of that is to really teach models how to do correct planning in front of a problem. How do you look at a very complex problem and decide what is the right decomposition of that problem that will bring the best clarity or correctness to the to the problem. We also need to change the way we do evaluation. I mean u threebench is",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 900.0,
+      "filename": "frames/frame-028-000900s.jpg",
+      "score": 0.6086,
+      "slide_score": 0.79,
+      "change_before": 0.0041,
+      "stability_after": 0.9714,
+      "transcript": "threebench verifies if a piece of code runs and produce the right output. That's only a small part of as I mentioned earlier of code engineering. So for instance, I think that we need some problems much more in those benchmarks that we use which are open-ended problem. I I'll give an example. Uh I love the question of text compression. How many bits per character do you need and how far can",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 930.0,
+      "filename": "frames/frame-029-000930s.jpg",
+      "score": 0.6065,
+      "slide_score": 0.7927,
+      "change_before": 0.0037,
+      "stability_after": 0.9558,
+      "transcript": "to write. You just take a piece of 10 megabyte of code and you tell the model write the best compressor you can that is lossless and the loss function in that case will be you know the size of the compressed file plus the size of the source code that's never ending I mean those problems are I think what's going to force those model to do novel things like creating totally new algorithmic for instance and I I…",
+      "width": 1551,
+      "height": 1080,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1551,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 942.808,
+      "filename": "frames/frame-030-000942s.jpg",
+      "score": 0.9817,
+      "slide_score": 0.9791,
+      "change_before": 0.1625,
+      "stability_after": 0.9609,
+      "transcript": "the compressed file plus the size of the source code that's never ending I mean those problems are I think what's going to force those model to do novel things like creating totally new algorithmic for instance and I I think we're now getting to that stage Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 960.0,
+      "filename": "frames/frame-031-000960s.jpg",
+      "score": 0.7176,
+      "slide_score": 0.979,
+      "change_before": 0.0083,
+      "stability_after": 0.9691,
+      "transcript": "Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very successful and improve models a lot. But humans of course are much more complex in the way they think about problems. I always think that code writing is a very visual activity and that can be I don't know the block diagram of what you're doing or the flow of…",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 990.0,
+      "filename": "frames/frame-032-000990s.jpg",
+      "score": 0.7118,
+      "slide_score": 0.9792,
+      "change_before": 0.0055,
+      "stability_after": 0.9631,
+      "transcript": "code. uh but saying that code will be just a set of token that you emit that are going to be the code I think goes only up to a certain point that's a very interesting aspect to what we do at Google Gemini we made that choice from the onset that this would be a multimodal model that you know text was only one of the modality that Gemini would be able to apply and we're starting to see you know how can a model…",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 1020.0,
+      "filename": "frames/frame-033-001020s.jpg",
+      "score": 0.7102,
+      "slide_score": 0.9788,
+      "change_before": 0.0063,
+      "stability_after": 0.9475,
+      "transcript": "dynamic representation to to solve problem and I think that's going to become a must have another interesting question is is this time to create a new language for models Python you name it have been invented for humans and those language are not very good to write safe or reliable code I mean they're great to write code but they're certainly not the the best thing",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 1050.0,
+      "filename": "frames/frame-034-001050s.jpg",
+      "score": 0.7068,
+      "slide_score": 0.9782,
+      "change_before": 0.0044,
+      "stability_after": 0.949,
+      "transcript": "since the pain of writing the code does not exist anymore. How about we make writing the code much harder by having you know very strongly typed languages or you know some inspiration from lean on how to write code that by design it's not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don't know if we have some…",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 1067.469,
+      "filename": "frames/frame-035-001067s.jpg",
+      "score": 0.9222,
+      "slide_score": 0.8685,
+      "change_before": 0.1781,
+      "stability_after": 0.9625,
+      "transcript": "not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don't know if we have some language designers here, but I I I think there's something really to be done there and it doesn't need to be human readable. I I don't think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I…",
+      "width": 1887,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1887,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 1080.0,
+      "filename": "frames/frame-036-001080s.jpg",
+      "score": 0.6566,
+      "slide_score": 0.8753,
+      "change_before": 0.0061,
+      "stability_after": 0.9629,
+      "transcript": "need to be human readable. I I don't think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I think that what we're starting to see is this ability to experiment very quickly in code is impacting other domain very quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and",
+      "width": 1441,
+      "height": 837,
+      "crop": {
+        "x": 446,
+        "y": 0,
+        "width": 1441,
+        "height": 837
+      }
+    },
+    {
+      "timestamp": 1100.969,
+      "filename": "frames/frame-037-001100s.jpg",
+      "score": 0.9183,
+      "slide_score": 0.9771,
+      "change_before": 0.1239,
+      "stability_after": 0.9653,
+      "transcript": "quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of",
+      "width": 1518,
+      "height": 844,
+      "crop": {
+        "x": 369,
+        "y": 0,
+        "width": 1518,
+        "height": 844
+      }
+    },
+    {
+      "timestamp": 1110.0,
+      "filename": "frames/frame-038-001110s.jpg",
+      "score": 0.7127,
+      "slide_score": 0.976,
+      "change_before": 0.0086,
+      "stability_after": 0.9482,
+      "transcript": "atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of chemistry. Once you have more than 20 atoms in your molecule it's like wow we don't know what that thing is going to do. I think we're going to see",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "timestamp": 1140.0,
+      "filename": "frames/frame-039-001140s.jpg",
+      "score": 0.708,
+      "slide_score": 0.9761,
+      "change_before": 0.003,
+      "stability_after": 0.9757,
+      "transcript": "incredible things emerging out of that. I mean once you are able to put 10,000 atom together that starts to look like life. So what are all the other things you can do with 10,000 atoms? Biology. You probably heard plenty about it, but you know, biology is the case of nature did an incredible engineering job and terrible job at documentation. Um, but we can crack through that now. Models are able to find those…",
+      "width": 1427,
+      "height": 803,
+      "crop": {
+        "x": 392,
+        "y": 138,
+        "width": 1427,
+        "height": 803
+      }
+    },
+    {
+      "timestamp": 1201.77,
+      "filename": "frames/frame-040-001201s.jpg",
+      "score": 0.8412,
+      "slide_score": 0.9607,
+      "change_before": 0.1309,
+      "stability_after": 0.5187,
+      "transcript": "give some examples. I think that's one of the thing where ML is such a different viewpoint on many of those problems that we're going to get the oh my god this was in front of us the whole time and we could not see it. So exciting times ahead. Thank you very much. [applause]",
+      "width": 1920,
+      "height": 1080,
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      }
+    }
+  ]
+}

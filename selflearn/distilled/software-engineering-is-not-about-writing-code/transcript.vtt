@@ -1,0 +1,1381 @@
+WEBVTT
+
+00:00:01.309 --> 00:00:03.329
+[music]
+
+00:00:13.519 --> 00:00:18.960
+Please welcome to the stage the vice
+
+00:00:16.720 --> 00:00:22.925
+president of research [music] at Google
+
+00:00:18.960 --> 00:00:24.945
+DeepMind, Benois Schillings.
+
+00:00:22.925 --> 00:00:24.945
+[music]
+
+00:00:30.785 --> 00:00:32.805
+>> [music]
+
+00:00:49.039 --> 00:00:52.960
+>> All right, good morning. Uh this is
+
+00:00:51.200 --> 00:00:54.719
+really quite exciting to be here and
+
+00:00:52.960 --> 00:00:57.920
+have a chance to to speak with all of
+
+00:00:54.719 --> 00:01:00.480
+you. Uh my name is Benois Shellings. I'm
+
+00:00:57.920 --> 00:01:03.600
+actually a bit of a noob when it comes
+
+00:01:00.480 --> 00:01:06.960
+to to machine learning. Till a year and
+
+00:01:03.600 --> 00:01:09.119
+a half ago, I was working for Google X
+
+00:01:06.960 --> 00:01:11.280
+which some of you may know. We've done
+
+00:01:09.119 --> 00:01:14.320
+things like Whimo, which seems to be at
+
+00:01:11.280 --> 00:01:16.159
+every street corner now. Uh we also do
+
+00:01:14.320 --> 00:01:19.920
+things like Glass. So, you know, we we
+
+00:01:16.159 --> 00:01:21.840
+had a mix of hit and success. But in
+
+00:01:19.920 --> 00:01:24.880
+many ways this was for me an interesting
+
+00:01:21.840 --> 00:01:27.759
+formative experience on how to run a
+
+00:01:24.880 --> 00:01:32.240
+research team in a place like deep mind.
+
+00:01:27.759 --> 00:01:34.880
+I do have an incredible team. Uh my team
+
+00:01:32.240 --> 00:01:37.360
+goal in deep mind is basically to
+
+00:01:34.880 --> 00:01:40.240
+develop whatever technology will be
+
+00:01:37.360 --> 00:01:43.280
+needed to make Gemini incredible between
+
+00:01:40.240 --> 00:01:45.840
+one months and one year from now. So one
+
+00:01:43.280 --> 00:01:48.000
+month because if you start to work on
+
+00:01:45.840 --> 00:01:50.560
+what is needed in one week that's a very
+
+00:01:48.000 --> 00:01:52.799
+different type of job and one year
+
+00:01:50.560 --> 00:01:55.200
+because I don't think anybody can really
+
+00:01:52.799 --> 00:01:57.200
+predict anything that far. So that's
+
+00:01:55.200 --> 00:01:59.600
+already pretty ambitious in my opinion
+
+00:01:57.200 --> 00:02:02.000
+to think about things that would happen
+
+00:01:59.600 --> 00:02:06.560
+one year in the future.
+
+00:02:02.000 --> 00:02:08.640
+We do many things under that role. Uh a
+
+00:02:06.560 --> 00:02:11.440
+lot of it is related to code which will
+
+00:02:08.640 --> 00:02:13.760
+be the main subject of my talk today. uh
+
+00:02:11.440 --> 00:02:15.920
+but we also do a lot of research on what
+
+00:02:13.760 --> 00:02:19.120
+is the evolution of reasoning for models
+
+00:02:15.920 --> 00:02:22.000
+for instance or we do topology research
+
+00:02:19.120 --> 00:02:24.800
+what are new type of network that might
+
+00:02:22.000 --> 00:02:26.720
+bring better performance uh we do
+
+00:02:24.800 --> 00:02:29.040
+fundamental work in the science of
+
+00:02:26.720 --> 00:02:31.680
+reinforcement learning which is so
+
+00:02:29.040 --> 00:02:35.040
+fundamental to what we're doing today
+
+00:02:31.680 --> 00:02:39.959
+with ML
+
+00:02:35.040 --> 00:02:39.959
+let's do a bit of an origin story Um,
+
+00:02:40.959 --> 00:02:47.040
+we started the project at X named
+
+00:02:43.360 --> 00:02:50.000
+Pitchfork uh in 2018
+
+00:02:47.040 --> 00:02:52.640
+which was aimed at looking at how ML
+
+00:02:50.000 --> 00:02:55.200
+could really improve the way code is
+
+00:02:52.640 --> 00:02:57.599
+being written. And this was very
+
+00:02:55.200 --> 00:03:01.200
+interesting because in 2018 when we
+
+00:02:57.599 --> 00:03:03.599
+presented that at Google honestly nobody
+
+00:03:01.200 --> 00:03:06.239
+would give us the time of day. uh there
+
+00:03:03.599 --> 00:03:10.480
+was that point like why would you ever
+
+00:03:06.239 --> 00:03:12.080
+need ML to to write code. Um at the same
+
+00:03:10.480 --> 00:03:14.319
+time I think that we totally
+
+00:03:12.080 --> 00:03:16.959
+underestimated how fast this could go.
+
+00:03:14.319 --> 00:03:20.239
+When we did that project originally the
+
+00:03:16.959 --> 00:03:22.800
+idea was to look at how we could speed
+
+00:03:20.239 --> 00:03:24.720
+up the evolution of a piece of code. How
+
+00:03:22.800 --> 00:03:27.280
+could we make many of those small
+
+00:03:24.720 --> 00:03:29.599
+changes which slows down code speed
+
+00:03:27.280 --> 00:03:31.599
+development? you know the small edit
+
+00:03:29.599 --> 00:03:33.440
+which requires a review that takes three
+
+00:03:31.599 --> 00:03:35.040
+days and how we could compress that
+
+00:03:33.440 --> 00:03:36.879
+cycle.
+
+00:03:35.040 --> 00:03:39.360
+Some people were talking about vibe
+
+00:03:36.879 --> 00:03:41.280
+coding writing code in English and at
+
+00:03:39.360 --> 00:03:42.879
+the time honestly I totally dismissed
+
+00:03:41.280 --> 00:03:44.959
+that. I was that's why we have
+
+00:03:42.879 --> 00:03:47.840
+programming language. English is not a
+
+00:03:44.959 --> 00:03:51.040
+programming language. Well I I guess I
+
+00:03:47.840 --> 00:03:53.360
+was pretty wrong on that front. But the
+
+00:03:51.040 --> 00:03:56.239
+resistance we felt at the time reminded
+
+00:03:53.360 --> 00:03:59.360
+me of how my own career was pretty
+
+00:03:56.239 --> 00:04:01.840
+resistive to to change. Um I've been
+
+00:03:59.360 --> 00:04:05.360
+writing code for
+
+00:04:01.840 --> 00:04:08.799
+45 years. Uh I started by writing video
+
+00:04:05.360 --> 00:04:10.959
+game for Apple 2 and Commodore 64. So uh
+
+00:04:08.799 --> 00:04:14.239
+my formation was to write assembly
+
+00:04:10.959 --> 00:04:16.160
+language. And when you spend a long time
+
+00:04:14.239 --> 00:04:18.400
+writing assembly language, you look at
+
+00:04:16.160 --> 00:04:20.160
+compilers with a lot of suspicion,
+
+00:04:18.400 --> 00:04:22.320
+right? are those things really working
+
+00:04:20.160 --> 00:04:24.800
+correctly? And then when you switch to
+
+00:04:22.320 --> 00:04:28.160
+C++ and use compiler, you lose you look
+
+00:04:24.800 --> 00:04:30.000
+at garbage collected languages as this h
+
+00:04:28.160 --> 00:04:32.880
+that's not real programming. You need to
+
+00:04:30.000 --> 00:04:35.840
+manage your memory. Well, today I use
+
+00:04:32.880 --> 00:04:39.520
+Python and V coding. So even old dogs
+
+00:04:35.840 --> 00:04:43.040
+can learn new tricks. So uh but I I I do
+
+00:04:39.520 --> 00:04:45.919
+understand what happened there.
+
+00:04:43.040 --> 00:04:48.160
+I think that we have a number of eras in
+
+00:04:45.919 --> 00:04:50.560
+what happened with software and and the
+
+00:04:48.160 --> 00:04:52.800
+first one was you know the one where I
+
+00:04:50.560 --> 00:04:55.919
+started writing code where the
+
+00:04:52.800 --> 00:04:58.479
+fundamental limit was really the machine
+
+00:04:55.919 --> 00:05:01.759
+and there was a lot of work to go and
+
+00:04:58.479 --> 00:05:05.680
+extract the last ounce of power out of
+
+00:05:01.759 --> 00:05:08.000
+those machine and that was the days of
+
+00:05:05.680 --> 00:05:09.759
+assembly language where you really
+
+00:05:08.000 --> 00:05:12.560
+needed to be incredibly accurate in the
+
+00:05:09.759 --> 00:05:14.639
+way you were writing code computing
+
+00:05:12.560 --> 00:05:18.000
+became much cheaper and we switched to
+
+00:05:14.639 --> 00:05:19.600
+the modern cloud era where getting the
+
+00:05:18.000 --> 00:05:22.240
+best performance is not the most
+
+00:05:19.600 --> 00:05:25.759
+critical aspect. You can actually brute
+
+00:05:22.240 --> 00:05:28.479
+force many problems but really what
+
+00:05:25.759 --> 00:05:31.520
+became the limiting factor was the
+
+00:05:28.479 --> 00:05:33.759
+ability for us to design in a modular
+
+00:05:31.520 --> 00:05:36.960
+way. You know this was the era where
+
+00:05:33.759 --> 00:05:38.639
+software was write it only once and this
+
+00:05:36.960 --> 00:05:41.440
+was this whole idea of how are you going
+
+00:05:38.639 --> 00:05:43.520
+to build libraries? How are you going to
+
+00:05:41.440 --> 00:05:45.199
+write functions? How are you going to
+
+00:05:43.520 --> 00:05:47.759
+break down that problem into something
+
+00:05:45.199 --> 00:05:50.320
+that is long-term manageable?
+
+00:05:47.759 --> 00:05:52.320
+The limitation there and that determine
+
+00:05:50.320 --> 00:05:55.280
+a lot of how our software process are
+
+00:05:52.320 --> 00:05:58.560
+working where actually the human brain.
+
+00:05:55.280 --> 00:06:01.600
+Uh a traditional human typical human is
+
+00:05:58.560 --> 00:06:04.479
+able to get the context between seven
+
+00:06:01.600 --> 00:06:06.639
+and nine tokens. I mean we have very
+
+00:06:04.479 --> 00:06:09.199
+rich tokens but you compare that to
+
+00:06:06.639 --> 00:06:12.400
+modern ML where the context is basically
+
+00:06:09.199 --> 00:06:14.319
+going to be infinite pretty soon. uh
+
+00:06:12.400 --> 00:06:16.560
+that fundamental limitation of human
+
+00:06:14.319 --> 00:06:19.840
+determined a lot of how software was
+
+00:06:16.560 --> 00:06:23.360
+being written. This is over and we're
+
+00:06:19.840 --> 00:06:25.120
+switching now to that AI frontier where
+
+00:06:23.360 --> 00:06:27.440
+really writing the code is not the
+
+00:06:25.120 --> 00:06:29.199
+challenge anymore. Uh I'll speak some
+
+00:06:27.440 --> 00:06:32.000
+more about it. But the bottlenecks are
+
+00:06:29.199 --> 00:06:33.919
+really how do you ensure that that code
+
+00:06:32.000 --> 00:06:35.840
+is what you really wanted because
+
+00:06:33.919 --> 00:06:38.160
+writing the code is easy but getting
+
+00:06:35.840 --> 00:06:41.440
+what is needed for a specific problem
+
+00:06:38.160 --> 00:06:43.919
+can be much harder to to specify.
+
+00:06:41.440 --> 00:06:46.560
+So humans at least in the near future
+
+00:06:43.919 --> 00:06:47.919
+will be that role of architecture or
+
+00:06:46.560 --> 00:06:50.240
+thinking of what are really the
+
+00:06:47.919 --> 00:06:53.759
+implication of that piece of code. I'm
+
+00:06:50.240 --> 00:06:55.759
+getting the ML to to design. Inductive
+
+00:06:53.759 --> 00:06:58.240
+thinking is another category where I
+
+00:06:55.759 --> 00:07:01.520
+think humans still have a very clear
+
+00:06:58.240 --> 00:07:03.520
+edge which is to look at a system in a
+
+00:07:01.520 --> 00:07:05.680
+much wider context and to be able to
+
+00:07:03.520 --> 00:07:08.880
+detect patterns and from those pattern
+
+00:07:05.680 --> 00:07:12.400
+take some decision.
+
+00:07:08.880 --> 00:07:15.039
+So where are we today? Um, superhuman
+
+00:07:12.400 --> 00:07:17.680
+syntax generation.
+
+00:07:15.039 --> 00:07:19.919
+When is the last time I got Gemini to
+
+00:07:17.680 --> 00:07:21.840
+write a function for me? And I looked at
+
+00:07:19.919 --> 00:07:23.680
+the function and I was like, I can do
+
+00:07:21.840 --> 00:07:26.479
+that better.
+
+00:07:23.680 --> 00:07:28.319
+It's over. Uh, I think that the minutia
+
+00:07:26.479 --> 00:07:29.919
+of code writing, I mean, you can fight,
+
+00:07:28.319 --> 00:07:34.160
+you can argue, you can find counter
+
+00:07:29.919 --> 00:07:36.319
+example, but that time is is gone. Where
+
+00:07:34.160 --> 00:07:39.599
+we still have a lot of work to do is
+
+00:07:36.319 --> 00:07:42.479
+multi-step code base. Uh software
+
+00:07:39.599 --> 00:07:44.960
+engineering is not about writing code.
+
+00:07:42.479 --> 00:07:47.360
+Software engineering is the first time
+
+00:07:44.960 --> 00:07:50.479
+you join a company and you realize that
+
+00:07:47.360 --> 00:07:52.319
+there are 35 million lines of PHP in the
+
+00:07:50.479 --> 00:07:54.319
+codebase and that you need to make some
+
+00:07:52.319 --> 00:07:56.160
+changes. That that's the day you
+
+00:07:54.319 --> 00:07:58.720
+understand what software engineering is
+
+00:07:56.160 --> 00:08:00.160
+and that's a place where our models
+
+00:07:58.720 --> 00:08:02.720
+today or frontier models are
+
+00:08:00.160 --> 00:08:05.280
+progressing. But this ability to manage
+
+00:08:02.720 --> 00:08:07.919
+that extreme complexity and break it
+
+00:08:05.280 --> 00:08:09.440
+down into man manageable pieces is a
+
+00:08:07.919 --> 00:08:11.280
+place where the frontier is still
+
+00:08:09.440 --> 00:08:15.440
+moving.
+
+00:08:11.280 --> 00:08:17.759
+Um it goes all the way to architecture.
+
+00:08:15.440 --> 00:08:19.280
+You look at I don't know the Google
+
+00:08:17.759 --> 00:08:21.440
+architecture.
+
+00:08:19.280 --> 00:08:23.919
+Thanks God we have Jeff Dean which was
+
+00:08:21.440 --> 00:08:25.840
+you know the the key architect there.
+
+00:08:23.919 --> 00:08:28.240
+But that's the level of thinking which
+
+00:08:25.840 --> 00:08:30.400
+has many implication which can go from
+
+00:08:28.240 --> 00:08:32.800
+how do you do hardware optimization? How
+
+00:08:30.400 --> 00:08:35.120
+do you manage security? How do you build
+
+00:08:32.800 --> 00:08:37.680
+a system so that 10 years later you're
+
+00:08:35.120 --> 00:08:40.479
+not full of regrets? And I think this is
+
+00:08:37.680 --> 00:08:43.360
+really the the range of progress we are
+
+00:08:40.479 --> 00:08:45.279
+working on today. So code is over but
+
+00:08:43.360 --> 00:08:48.080
+there's plenty to do. There's plenty of
+
+00:08:45.279 --> 00:08:51.440
+progress to be made.
+
+00:08:48.080 --> 00:08:53.279
+Now code is a very unique problem and in
+
+00:08:51.440 --> 00:08:57.440
+some way that's the reason we we did
+
+00:08:53.279 --> 00:09:00.399
+pitchfork on this. Um,
+
+00:08:57.440 --> 00:09:01.920
+first of all, code is a lot of data.
+
+00:09:00.399 --> 00:09:03.920
+There are other domains where you can
+
+00:09:01.920 --> 00:09:06.160
+find a lot of data to train your model,
+
+00:09:03.920 --> 00:09:09.040
+but code was so incredible. You could go
+
+00:09:06.160 --> 00:09:11.279
+and go on GitHub and start to to scrape
+
+00:09:09.040 --> 00:09:12.959
+GitHub. So, this was one of those
+
+00:09:11.279 --> 00:09:16.480
+problem where the amount of training
+
+00:09:12.959 --> 00:09:18.240
+data was a very unique situation.
+
+00:09:16.480 --> 00:09:21.519
+It is also a domain where doing
+
+00:09:18.240 --> 00:09:23.440
+verification is reasonable. You can run
+
+00:09:21.519 --> 00:09:26.240
+a piece of code, you can compile it, you
+
+00:09:23.440 --> 00:09:28.240
+can have unit test. So the ability to
+
+00:09:26.240 --> 00:09:30.720
+figure out is the model generating
+
+00:09:28.240 --> 00:09:33.920
+something correct was something that was
+
+00:09:30.720 --> 00:09:36.399
+pretty reasonable to do. That brought us
+
+00:09:33.920 --> 00:09:38.320
+where we are today. But today what
+
+00:09:36.399 --> 00:09:42.000
+happened is that we run out of training
+
+00:09:38.320 --> 00:09:44.399
+data. I think that 80% of the new code
+
+00:09:42.000 --> 00:09:47.440
+added to GitHub today is machine
+
+00:09:44.399 --> 00:09:49.920
+generated. So the notion of human
+
+00:09:47.440 --> 00:09:52.320
+bringing some knowledge that can be used
+
+00:09:49.920 --> 00:09:55.040
+for mining and to train model is
+
+00:09:52.320 --> 00:09:58.320
+reaching an end. But the good news is
+
+00:09:55.040 --> 00:10:00.320
+that we can do selfplay and selfplay is
+
+00:09:58.320 --> 00:10:03.440
+something we always liked a lot at deep
+
+00:10:00.320 --> 00:10:06.399
+mind. I suppose all know Alpha Zero.
+
+00:10:03.440 --> 00:10:09.600
+Alpha Zero became a superhuman go and
+
+00:10:06.399 --> 00:10:12.959
+chess player without any human knowledge
+
+00:10:09.600 --> 00:10:15.760
+just by playing against itself. We are
+
+00:10:12.959 --> 00:10:18.240
+now at that stage where Frontier model
+
+00:10:15.760 --> 00:10:20.240
+for code are able to do the same where
+
+00:10:18.240 --> 00:10:22.240
+they can create their own challenge.
+
+00:10:20.240 --> 00:10:24.720
+They can judge the validity of the
+
+00:10:22.240 --> 00:10:27.760
+answer. they can even to some extent
+
+00:10:24.720 --> 00:10:30.480
+judge the architecture. So that ability
+
+00:10:27.760 --> 00:10:33.279
+to do those hundreds of millions of
+
+00:10:30.480 --> 00:10:35.040
+hours of selfplay writing code is the
+
+00:10:33.279 --> 00:10:37.040
+thing that will bring us to the to the
+
+00:10:35.040 --> 00:10:38.640
+next layer. You know, it's interesting.
+
+00:10:37.040 --> 00:10:40.560
+Um
+
+00:10:38.640 --> 00:10:42.959
+do the experiment. Take a a brilliant
+
+00:10:40.560 --> 00:10:45.279
+software engineer, lock him in a room,
+
+00:10:42.959 --> 00:10:48.480
+lock him or her in a room for two years
+
+00:10:45.279 --> 00:10:49.760
+and feed pizza and give the mission you
+
+00:10:48.480 --> 00:10:52.320
+need to become a better software
+
+00:10:49.760 --> 00:10:54.240
+engineer. What do you do as a person?
+
+00:10:52.320 --> 00:10:56.560
+you you give yourself some challenges,
+
+00:10:54.240 --> 00:10:58.240
+challenges that you can verify and you
+
+00:10:56.560 --> 00:11:01.040
+keep working and coding on those
+
+00:10:58.240 --> 00:11:03.519
+challenges. We can do the same here. So
+
+00:11:01.040 --> 00:11:06.480
+this is an issue of how much compute,
+
+00:11:03.519 --> 00:11:08.800
+how much selfplay time we can have. But
+
+00:11:06.480 --> 00:11:13.160
+that will bring the horizon of how far
+
+00:11:08.800 --> 00:11:13.160
+we go in superhuman coding.
+
+00:11:13.519 --> 00:11:18.160
+So the economics of code are changing
+
+00:11:15.760 --> 00:11:20.079
+dramatically. You know, as I say, we
+
+00:11:18.160 --> 00:11:22.640
+developed a whole software engineering
+
+00:11:20.079 --> 00:11:25.120
+culture and infrastructure and set of
+
+00:11:22.640 --> 00:11:27.040
+companies based on the assumption that
+
+00:11:25.120 --> 00:11:29.680
+writing code was the hard part. That
+
+00:11:27.040 --> 00:11:32.880
+this was the expensive part. We're now
+
+00:11:29.680 --> 00:11:34.800
+in a world where writing code is free or
+
+00:11:32.880 --> 00:11:37.600
+nearly free. That's why I've got the
+
+00:11:34.800 --> 00:11:39.920
+tilda there.
+
+00:11:37.600 --> 00:11:42.160
+That means that the amount of code that
+
+00:11:39.920 --> 00:11:44.240
+we're going to see produced is going to
+
+00:11:42.160 --> 00:11:46.800
+explode. And there are some hard
+
+00:11:44.240 --> 00:11:49.920
+implications to that. First is the
+
+00:11:46.800 --> 00:11:51.839
+question of design and adequacy. How in
+
+00:11:49.920 --> 00:11:54.320
+front of that mountain of code which
+
+00:11:51.839 --> 00:11:56.640
+will be written or written dynamically,
+
+00:11:54.320 --> 00:11:59.279
+how do we keep systems which works and
+
+00:11:56.640 --> 00:12:01.760
+are reliable at the microscopic level?
+
+00:11:59.279 --> 00:12:05.360
+Great role for human.
+
+00:12:01.760 --> 00:12:07.600
+It is also the issue that you know we're
+
+00:12:05.360 --> 00:12:09.920
+writing code and we're not reading it
+
+00:12:07.600 --> 00:12:12.399
+very much anymore. I mean I know we
+
+00:12:09.920 --> 00:12:14.800
+still have code review but I would
+
+00:12:12.399 --> 00:12:17.040
+predict that in one year we'll let
+
+00:12:14.800 --> 00:12:20.160
+Gemini or other model generate the code
+
+00:12:17.040 --> 00:12:22.480
+and nobody will actually look at it. You
+
+00:12:20.160 --> 00:12:24.480
+know it's similar to compilers who still
+
+00:12:22.480 --> 00:12:29.440
+check the assembly output of their
+
+00:12:24.480 --> 00:12:31.360
+compiler and maybe someone there but
+
+00:12:29.440 --> 00:12:33.279
+that's probably the end of it. So the
+
+00:12:31.360 --> 00:12:35.040
+same thing is going to happen to code
+
+00:12:33.279 --> 00:12:37.120
+and that brings some question of what
+
+00:12:35.040 --> 00:12:40.000
+are the new process that we need to put
+
+00:12:37.120 --> 00:12:41.773
+in place to keep that manageable
+
+00:12:40.000 --> 00:12:44.639
+and that's where I've got a
+
+00:12:41.773 --> 00:12:47.360
+[clears throat] a bit of a list active
+
+00:12:44.639 --> 00:12:50.160
+guard rails. I mean you've all seen the
+
+00:12:47.360 --> 00:12:53.519
+news of mythos looking at a piece of
+
+00:12:50.160 --> 00:12:57.120
+code and detecting a unreasonable number
+
+00:12:53.519 --> 00:12:59.440
+of vulnerability in that code.
+
+00:12:57.120 --> 00:13:02.000
+there is a rush to go and patch those
+
+00:12:59.440 --> 00:13:04.639
+vulnerability but I think that's going
+
+00:13:02.000 --> 00:13:06.560
+to be a neverending process you know
+
+00:13:04.639 --> 00:13:10.000
+we're going to get a certain layer of
+
+00:13:06.560 --> 00:13:12.079
+vulnerability discovered by models we're
+
+00:13:10.000 --> 00:13:14.320
+going to fix those models will get
+
+00:13:12.079 --> 00:13:17.360
+smarter they will go a bit deeper and
+
+00:13:14.320 --> 00:13:19.040
+find even more subtle vulnerability so I
+
+00:13:17.360 --> 00:13:21.839
+think that the first aspect is that we
+
+00:13:19.040 --> 00:13:24.639
+need to think at least as much about
+
+00:13:21.839 --> 00:13:26.880
+code security and the implication of a
+
+00:13:24.639 --> 00:13:29.360
+piece of code than on the code writing
+
+00:13:26.880 --> 00:13:31.839
+itself and the grail and you know
+
+00:13:29.360 --> 00:13:34.959
+something my team is working actively on
+
+00:13:31.839 --> 00:13:37.440
+is instead of detecting the
+
+00:13:34.959 --> 00:13:40.240
+vulnerability and then suggesting some
+
+00:13:37.440 --> 00:13:43.360
+fix how about teaching model to write
+
+00:13:40.240 --> 00:13:45.600
+correct things from the start
+
+00:13:43.360 --> 00:13:48.560
+and that is very very hard to do because
+
+00:13:45.600 --> 00:13:50.560
+it is very context dependent
+
+00:13:48.560 --> 00:13:53.360
+the other aspect is that you know that's
+
+00:13:50.560 --> 00:13:56.240
+what I call inductive architecture
+
+00:13:53.360 --> 00:13:58.800
+uh I think that models today are still
+
+00:13:56.240 --> 00:14:01.920
+not very good at transferring knowledge
+
+00:13:58.800 --> 00:14:04.800
+of taking knowledge from one domain and
+
+00:14:01.920 --> 00:14:07.279
+applying it to another one or taking two
+
+00:14:04.800 --> 00:14:10.079
+concepts and finding the intersection of
+
+00:14:07.279 --> 00:14:12.880
+those context to be those context to be
+
+00:14:10.079 --> 00:14:14.720
+able to do deductive thinking. If we
+
+00:14:12.880 --> 00:14:17.519
+really want to write those very complex
+
+00:14:14.720 --> 00:14:19.519
+software system using ML that is a skill
+
+00:14:17.519 --> 00:14:22.240
+that we need to teach and you know one
+
+00:14:19.519 --> 00:14:24.399
+aspect of that is to really teach models
+
+00:14:22.240 --> 00:14:26.160
+how to do correct planning in front of a
+
+00:14:24.399 --> 00:14:28.639
+problem. How do you look at a very
+
+00:14:26.160 --> 00:14:30.959
+complex problem and decide what is the
+
+00:14:28.639 --> 00:14:33.120
+right decomposition of that problem that
+
+00:14:30.959 --> 00:14:36.399
+will bring the best clarity or
+
+00:14:33.120 --> 00:14:38.560
+correctness to the to the problem.
+
+00:14:36.399 --> 00:14:42.320
+We also need to change the way we do
+
+00:14:38.560 --> 00:14:44.800
+evaluation. I mean u threebench is
+
+00:14:42.320 --> 00:14:46.320
+infamous in in my book because
+
+00:14:44.800 --> 00:14:49.199
+threebench
+
+00:14:46.320 --> 00:14:51.920
+verifies if a piece of code runs and
+
+00:14:49.199 --> 00:14:55.040
+produce the right output. That's only a
+
+00:14:51.920 --> 00:14:57.120
+small part of as I mentioned earlier of
+
+00:14:55.040 --> 00:14:59.360
+code engineering. So for instance, I
+
+00:14:57.120 --> 00:15:02.240
+think that we need some problems much
+
+00:14:59.360 --> 00:15:04.800
+more in those benchmarks that we use
+
+00:15:02.240 --> 00:15:07.519
+which are open-ended problem. I I'll
+
+00:15:04.800 --> 00:15:10.480
+give an example. Uh I love the question
+
+00:15:07.519 --> 00:15:12.160
+of text compression. How many bits per
+
+00:15:10.480 --> 00:15:15.040
+character do you need and how far can
+
+00:15:12.160 --> 00:15:17.199
+you go? So that's a very simple eval to
+
+00:15:15.040 --> 00:15:19.680
+to write. You just take a piece of 10
+
+00:15:17.199 --> 00:15:21.839
+megabyte of code and you tell the model
+
+00:15:19.680 --> 00:15:24.160
+write the best compressor you can that
+
+00:15:21.839 --> 00:15:26.240
+is lossless and the loss function in
+
+00:15:24.160 --> 00:15:28.000
+that case will be you know the size of
+
+00:15:26.240 --> 00:15:30.959
+the compressed file plus the size of the
+
+00:15:28.000 --> 00:15:33.040
+source code that's never ending I mean
+
+00:15:30.959 --> 00:15:36.000
+those problems are I think what's going
+
+00:15:33.040 --> 00:15:38.160
+to force those model to do novel things
+
+00:15:36.000 --> 00:15:40.320
+like creating totally new algorithmic
+
+00:15:38.160 --> 00:15:43.959
+for instance and I I think we're now
+
+00:15:40.320 --> 00:15:43.959
+getting to that stage
+
+00:15:45.199 --> 00:15:49.920
+Writing code or doing software
+
+00:15:47.680 --> 00:15:51.920
+engineering is not thinking as a chain
+
+00:15:49.920 --> 00:15:54.399
+of tokens.
+
+00:15:51.920 --> 00:15:56.320
+Thinking and reasoning today is chain of
+
+00:15:54.399 --> 00:15:59.120
+code which has been you know very
+
+00:15:56.320 --> 00:16:01.199
+successful and improve models a lot. But
+
+00:15:59.120 --> 00:16:04.079
+humans of course are much more complex
+
+00:16:01.199 --> 00:16:06.639
+in the way they think about problems. I
+
+00:16:04.079 --> 00:16:09.199
+always think that code writing is a very
+
+00:16:06.639 --> 00:16:10.880
+visual activity and that can be I don't
+
+00:16:09.199 --> 00:16:13.360
+know the block diagram of what you're
+
+00:16:10.880 --> 00:16:16.560
+doing or the flow of data through your
+
+00:16:13.360 --> 00:16:19.440
+code. uh but saying that code will be
+
+00:16:16.560 --> 00:16:21.680
+just a set of token that you emit that
+
+00:16:19.440 --> 00:16:24.800
+are going to be the code I think goes
+
+00:16:21.680 --> 00:16:26.720
+only up to a certain point that's a very
+
+00:16:24.800 --> 00:16:29.920
+interesting aspect to what we do at
+
+00:16:26.720 --> 00:16:31.279
+Google Gemini we made that choice from
+
+00:16:29.920 --> 00:16:34.480
+the onset that this would be a
+
+00:16:31.279 --> 00:16:36.639
+multimodal model that you know text was
+
+00:16:34.480 --> 00:16:38.800
+only one of the modality that Gemini
+
+00:16:36.639 --> 00:16:41.680
+would be able to apply and we're
+
+00:16:38.800 --> 00:16:44.160
+starting to see you know how can a model
+
+00:16:41.680 --> 00:16:46.560
+start to think in term of spatial or
+
+00:16:44.160 --> 00:16:48.800
+dynamic representation to to solve
+
+00:16:46.560 --> 00:16:52.079
+problem and I think that's going to
+
+00:16:48.800 --> 00:16:54.880
+become a must have
+
+00:16:52.079 --> 00:16:58.880
+another interesting question is is this
+
+00:16:54.880 --> 00:17:01.519
+time to create a new language for models
+
+00:16:58.880 --> 00:17:05.360
+Python you name it have been invented
+
+00:17:01.519 --> 00:17:07.760
+for humans and those language are not
+
+00:17:05.360 --> 00:17:10.319
+very good to write safe or reliable code
+
+00:17:07.760 --> 00:17:12.959
+I mean they're great to write code but
+
+00:17:10.319 --> 00:17:14.959
+they're certainly not the the best thing
+
+00:17:12.959 --> 00:17:17.439
+I think We're getting to the point where
+
+00:17:14.959 --> 00:17:20.559
+since the pain of writing the code does
+
+00:17:17.439 --> 00:17:23.439
+not exist anymore. How about we make
+
+00:17:20.559 --> 00:17:25.760
+writing the code much harder by having
+
+00:17:23.439 --> 00:17:28.319
+you know very strongly typed languages
+
+00:17:25.760 --> 00:17:31.200
+or you know some inspiration from lean
+
+00:17:28.319 --> 00:17:33.200
+on how to write code that by design it's
+
+00:17:31.200 --> 00:17:35.520
+not going to be perfect. I mean program
+
+00:17:33.200 --> 00:17:37.440
+proof is something which has some limits
+
+00:17:35.520 --> 00:17:40.240
+but at least putting the burden of
+
+00:17:37.440 --> 00:17:41.919
+correctness on the model. So I don't
+
+00:17:40.240 --> 00:17:43.679
+know if we have some language designers
+
+00:17:41.919 --> 00:17:45.760
+here, but I I I think there's something
+
+00:17:43.679 --> 00:17:47.679
+really to be done there and it doesn't
+
+00:17:45.760 --> 00:17:51.280
+need to be human readable. I I don't
+
+00:17:47.679 --> 00:17:55.360
+think that that will matter anymore.
+
+00:17:51.280 --> 00:17:58.400
+So beyond code, um code is a universal
+
+00:17:55.360 --> 00:18:00.320
+language to solve problems. I think that
+
+00:17:58.400 --> 00:18:02.640
+what we're starting to see is this
+
+00:18:00.320 --> 00:18:05.840
+ability to experiment very quickly in
+
+00:18:02.640 --> 00:18:08.640
+code is impacting other domain very
+
+00:18:05.840 --> 00:18:11.679
+quickly because doing experiment becomes
+
+00:18:08.640 --> 00:18:14.880
+basically free. So I think that looking
+
+00:18:11.679 --> 00:18:17.840
+at that intersection of code writing and
+
+00:18:14.880 --> 00:18:20.160
+atoms or science is another big front
+
+00:18:17.840 --> 00:18:24.880
+that we are opening that is the place
+
+00:18:20.160 --> 00:18:27.200
+where true novelty is going to appear.
+
+00:18:24.880 --> 00:18:31.039
+two which are especially exciting for me
+
+00:18:27.200 --> 00:18:32.720
+is chemistry. Um you know as humans we
+
+00:18:31.039 --> 00:18:35.600
+do not understand chemistry or we
+
+00:18:32.720 --> 00:18:37.440
+understand a very very small sliver of
+
+00:18:35.600 --> 00:18:40.320
+chemistry. Once you have more than 20
+
+00:18:37.440 --> 00:18:41.520
+atoms in your molecule it's like wow we
+
+00:18:40.320 --> 00:18:43.679
+don't know what that thing is going to
+
+00:18:41.520 --> 00:18:45.760
+do. I think we're going to see
+
+00:18:43.679 --> 00:18:48.160
+incredible things emerging out of that.
+
+00:18:45.760 --> 00:18:50.240
+I mean once you are able to put 10,000
+
+00:18:48.160 --> 00:18:52.080
+atom together that starts to look like
+
+00:18:50.240 --> 00:18:54.799
+life. So what are all the other things
+
+00:18:52.080 --> 00:18:57.120
+you can do with 10,000 atoms?
+
+00:18:54.799 --> 00:19:00.880
+Biology. You probably heard plenty about
+
+00:18:57.120 --> 00:19:03.200
+it, but you know, biology is the case of
+
+00:19:00.880 --> 00:19:06.240
+nature did an incredible engineering job
+
+00:19:03.200 --> 00:19:08.880
+and terrible job at documentation.
+
+00:19:06.240 --> 00:19:10.480
+Um, but we can crack through that now.
+
+00:19:08.880 --> 00:19:12.480
+Models are able to find those
+
+00:19:10.480 --> 00:19:14.720
+relationship that might be elusive for
+
+00:19:12.480 --> 00:19:18.000
+us. So I think that that is something
+
+00:19:14.720 --> 00:19:20.240
+that will open incredible door. And then
+
+00:19:18.000 --> 00:19:23.600
+there is what I call the gold we cannot
+
+00:19:20.240 --> 00:19:26.160
+see. Humans are incredibly biased in
+
+00:19:23.600 --> 00:19:27.919
+what we feel is the correct solution. I
+
+00:19:26.160 --> 00:19:29.679
+mean, we're the result of an
+
+00:19:27.919 --> 00:19:32.400
+evolutionary training that help us
+
+00:19:29.679 --> 00:19:35.120
+survive in the jungle, right? Not doing
+
+00:19:32.400 --> 00:19:36.559
+quantum computing. So, I think that even
+
+00:19:35.120 --> 00:19:38.960
+though we can be brilliant and
+
+00:19:36.559 --> 00:19:41.760
+innovative, there are whole bunch of
+
+00:19:38.960 --> 00:19:44.240
+progress and breakthrough that can be
+
+00:19:41.760 --> 00:19:46.480
+done which we just cannot see or
+
+00:19:44.240 --> 00:19:48.559
+perceive. If I had more time, I would
+
+00:19:46.480 --> 00:19:50.799
+give some examples. I think that's one
+
+00:19:48.559 --> 00:19:52.640
+of the thing where ML is such a
+
+00:19:50.799 --> 00:19:55.840
+different viewpoint on many of those
+
+00:19:52.640 --> 00:19:57.679
+problems that we're going to get the oh
+
+00:19:55.840 --> 00:19:59.919
+my god this was in front of us the whole
+
+00:19:57.679 --> 00:20:02.080
+time and we could not see it. So
+
+00:19:59.919 --> 00:20:05.268
+exciting times ahead. Thank you very
+
+00:20:02.080 --> 00:20:05.268
+much. [applause]
+
+00:20:23.554 --> 00:20:25.574
+>> [music]

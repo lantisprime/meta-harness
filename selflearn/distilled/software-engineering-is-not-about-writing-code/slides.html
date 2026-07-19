@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Slides · &quot;Software engineering is not about writing code&quot; — Benoit Schillings, Google DeepMind VP of Research</title>
+<style>
+:root{--ink:#151515;--muted:#686868;--paper:#f4f0e8;--card:#fffdf8;--accent:#f05a28;--line:#d7d0c5}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif}
+header{padding:clamp(2rem,6vw,5rem) clamp(1rem,5vw,5rem) 2rem;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#fff8eb,#eee7db)}
+.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:.75rem;color:var(--accent);font-weight:800}h1{max-width:980px;font:700 clamp(2rem,5vw,4.6rem)/1.02 ui-serif,Georgia,serif;margin:.5rem 0 1rem}
+.lede{max-width:760px;color:var(--muted);font-size:1.08rem}.toolbar{position:sticky;top:0;z-index:5;display:flex;gap:.75rem;align-items:center;padding:.9rem clamp(1rem,5vw,5rem);background:rgba(244,240,232,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+input{width:min(620px,100%);padding:.8rem 1rem;border:1px solid var(--line);border-radius:999px;background:white;font:inherit}.count{white-space:nowrap;color:var(--muted)}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:1.2rem;padding:2rem clamp(1rem,5vw,5rem) 5rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(40,32,20,.05);transition:.2s transform,.2s box-shadow}.card:hover,.card:focus-within{transform:translateY(-3px);box-shadow:0 16px 36px rgba(40,32,20,.11)}
+.image-button{position:relative;display:block;width:100%;padding:0;border:0;background:#111;cursor:zoom-in}img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}.time{position:absolute;right:.6rem;bottom:.6rem;background:#111;color:white;padding:.2rem .45rem;border-radius:5px;font:700 .75rem/1 ui-monospace,monospace}
+.card-body{padding:1rem 1rem 1.2rem}.meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em}.card p{min-height:6em}a{color:#b43d18;font-weight:700;text-underline-offset:3px}
+.empty{grid-column:1/-1;text-align:center;padding:5rem;color:var(--muted)}dialog{width:min(1120px,94vw);border:0;border-radius:18px;padding:0;background:#111;color:white;box-shadow:0 30px 90px #0008}dialog::backdrop{background:#17130fda}dialog img{width:100%;height:auto;max-height:75vh;object-fit:contain}.dialog-info{display:flex;gap:1rem;align-items:start;padding:1rem 1.2rem}.dialog-info p{margin:0;flex:1;color:#ddd}.close{border:1px solid #777;background:transparent;color:white;border-radius:999px;padding:.5rem .8rem;cursor:pointer}
+@media(max-width:600px){.toolbar{align-items:stretch;flex-direction:column}.count{padding-left:.5rem}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">Transcript-linked visual index</div><h1>&quot;Software engineering is not about writing code&quot; — Benoit Schillings, Google DeepMind VP of Research</h1><p class="lede">40 visually distinct, slide-like frames selected from the video. Search the nearby transcript, open an image, or jump to its exact YouTube moment.</p></header>
+<div class="toolbar"><input id="search" type="search" placeholder="Search transcript around frames…" aria-label="Search frames"><span class="count" id="count">40 frames</span></div>
+<main id="gallery"><article class="card" data-index="0" data-search="00:00:25 Please welcome to the stage the vice president of research [music] at Google DeepMind, Benois Schillings. [music] &gt;&gt; [music]" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:00:25">
+    <img src="frames/frame-001-000025s.jpg" alt="Detected slide-like frame at 00:00:25" loading="lazy">
+    <span class="time">00:00:25</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 1</span><span>85% · 1920×1080</span></div>
+    <p>Please welcome to the stage the vice president of research [music] at Google DeepMind, Benois Schillings. [music] &gt;&gt; [music]</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=25s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="1" data-search="00:00:34 president of research [music] at Google DeepMind, Benois Schillings. [music] &gt;&gt; [music]" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:00:34">
+    <img src="frames/frame-002-000034s.jpg" alt="Detected slide-like frame at 00:00:34" loading="lazy">
+    <span class="time">00:00:34</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 2</span><span>79% · 1920×1080</span></div>
+    <p>president of research [music] at Google DeepMind, Benois Schillings. [music] &gt;&gt; [music]</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=34s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="2" data-search="00:01:00 &gt;&gt; All right, good morning. Uh this is really quite exciting to be here and have a chance to to speak with all of you. Uh my name is Benois Shellings. I&#x27;m actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:01:00">
+    <img src="frames/frame-003-000060s.jpg" alt="Detected slide-like frame at 00:01:00" loading="lazy">
+    <span class="time">00:01:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 3</span><span>65% · 1920×1080</span></div>
+    <p>&gt;&gt; All right, good morning. Uh this is really quite exciting to be here and have a chance to to speak with all of you. Uh my name is Benois Shellings. I&#x27;m actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=60s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="3" data-search="00:01:12 you. Uh my name is Benois Shellings. I&#x27;m actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:01:12">
+    <img src="frames/frame-004-000072s.jpg" alt="Detected slide-like frame at 00:01:12" loading="lazy">
+    <span class="time">00:01:12</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 4</span><span>67% · 1920×1080</span></div>
+    <p>you. Uh my name is Benois Shellings. I&#x27;m actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=72s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="4" data-search="00:01:21 a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:01:21">
+    <img src="frames/frame-005-000081s.jpg" alt="Detected slide-like frame at 00:01:21" loading="lazy">
+    <span class="time">00:01:21</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 5</span><span>69% · 1920×1080</span></div>
+    <p>a half ago, I was working for Google X which some of you may know. We&#x27;ve done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=81s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="5" data-search="00:01:31 things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is basically to develop whatever technology will be needed to make Gemini incredible between one months and one year from now. So one" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:01:31">
+    <img src="frames/frame-006-000091s.jpg" alt="Detected slide-like frame at 00:01:31" loading="lazy">
+    <span class="time">00:01:31</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 6</span><span>79% · 1920×1080</span></div>
+    <p>things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is basically to develop whatever technology will be needed to make Gemini incredible between one months and one year from now. So one</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=91s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="6" data-search="00:03:00 Pitchfork uh in 2018 which was aimed at looking at how ML could really improve the way code is being written. And this was very interesting because in 2018 when we presented that at Google honestly nobody would give us the time of day. uh there was that point like why would you ever need ML to to write code. Um at the same time I think that we totally" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:03:00">
+    <img src="frames/frame-007-000180s.jpg" alt="Detected slide-like frame at 00:03:00" loading="lazy">
+    <span class="time">00:03:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 7</span><span>60% · 1551×1080</span></div>
+    <p>Pitchfork uh in 2018 which was aimed at looking at how ML could really improve the way code is being written. And this was very interesting because in 2018 when we presented that at Google honestly nobody would give us the time of day. uh there was that point like why would you ever need ML to to write code. Um at the same time I think that we totally</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=180s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="7" data-search="00:03:30 When we did that project originally the idea was to look at how we could speed up the evolution of a piece of code. How could we make many of those small changes which slows down code speed development? you know the small edit which requires a review that takes three days and how we could compress that cycle. Some people were talking about vibe coding writing code in English and at the time honestly I totally…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:03:30">
+    <img src="frames/frame-008-000210s.jpg" alt="Detected slide-like frame at 00:03:30" loading="lazy">
+    <span class="time">00:03:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 8</span><span>61% · 1551×1080</span></div>
+    <p>When we did that project originally the idea was to look at how we could speed up the evolution of a piece of code. How could we make many of those small changes which slows down code speed development? you know the small edit which requires a review that takes three days and how we could compress that cycle. Some people were talking about vibe coding writing code in English and at the time honestly I totally…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=210s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="8" data-search="00:04:00 programming language. Well I I guess I was pretty wrong on that front. But the resistance we felt at the time reminded me of how my own career was pretty resistive to to change. Um I&#x27;ve been writing code for 45 years. Uh I started by writing video game for Apple 2 and Commodore 64. So uh my formation was to write assembly language. And when you spend a long time" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:04:00">
+    <img src="frames/frame-009-000240s.jpg" alt="Detected slide-like frame at 00:04:00" loading="lazy">
+    <span class="time">00:04:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 9</span><span>60% · 1551×1080</span></div>
+    <p>programming language. Well I I guess I was pretty wrong on that front. But the resistance we felt at the time reminded me of how my own career was pretty resistive to to change. Um I&#x27;ve been writing code for 45 years. Uh I started by writing video game for Apple 2 and Commodore 64. So uh my formation was to write assembly language. And when you spend a long time</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=240s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="9" data-search="00:04:30 writing assembly language, you look at compilers with a lot of suspicion, right? are those things really working correctly? And then when you switch to C++ and use compiler, you lose you look at garbage collected languages as this h that&#x27;s not real programming. You need to manage your memory. Well, today I use Python and V coding. So even old dogs can learn new tricks. So uh but I I I do understand what happened…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:04:30">
+    <img src="frames/frame-010-000270s.jpg" alt="Detected slide-like frame at 00:04:30" loading="lazy">
+    <span class="time">00:04:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 10</span><span>60% · 1551×1080</span></div>
+    <p>writing assembly language, you look at compilers with a lot of suspicion, right? are those things really working correctly? And then when you switch to C++ and use compiler, you lose you look at garbage collected languages as this h that&#x27;s not real programming. You need to manage your memory. Well, today I use Python and V coding. So even old dogs can learn new tricks. So uh but I I I do understand what happened…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=270s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="10" data-search="00:06:30 determined a lot of how software was being written. This is over and we&#x27;re switching now to that AI frontier where really writing the code is not the challenge anymore. Uh I&#x27;ll speak some more about it. But the bottlenecks are really how do you ensure that that code is what you really wanted because writing the code is easy but getting what is needed for a specific problem can be much harder to to specify. So…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:06:30">
+    <img src="frames/frame-011-000390s.jpg" alt="Detected slide-like frame at 00:06:30" loading="lazy">
+    <span class="time">00:06:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 11</span><span>59% · 1551×1080</span></div>
+    <p>determined a lot of how software was being written. This is over and we&#x27;re switching now to that AI frontier where really writing the code is not the challenge anymore. Uh I&#x27;ll speak some more about it. But the bottlenecks are really how do you ensure that that code is what you really wanted because writing the code is easy but getting what is needed for a specific problem can be much harder to to specify. So…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=390s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="11" data-search="00:07:00 thinking of what are really the implication of that piece of code. I&#x27;m getting the ML to to design. Inductive thinking is another category where I think humans still have a very clear edge which is to look at a system in a much wider context and to be able to detect patterns and from those pattern take some decision. So where are we today? Um, superhuman" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:07:00">
+    <img src="frames/frame-012-000420s.jpg" alt="Detected slide-like frame at 00:07:00" loading="lazy">
+    <span class="time">00:07:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 12</span><span>60% · 1551×1080</span></div>
+    <p>thinking of what are really the implication of that piece of code. I&#x27;m getting the ML to to design. Inductive thinking is another category where I think humans still have a very clear edge which is to look at a system in a much wider context and to be able to detect patterns and from those pattern take some decision. So where are we today? Um, superhuman</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=420s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="12" data-search="00:07:30 When is the last time I got Gemini to write a function for me? And I looked at the function and I was like, I can do that better. It&#x27;s over. Uh, I think that the minutia of code writing, I mean, you can fight, you can argue, you can find counter example, but that time is is gone. Where we still have a lot of work to do is multi-step code base. Uh software engineering is not about writing code." tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:07:30">
+    <img src="frames/frame-013-000450s.jpg" alt="Detected slide-like frame at 00:07:30" loading="lazy">
+    <span class="time">00:07:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 13</span><span>62% · 1551×1080</span></div>
+    <p>When is the last time I got Gemini to write a function for me? And I looked at the function and I was like, I can do that better. It&#x27;s over. Uh, I think that the minutia of code writing, I mean, you can fight, you can argue, you can find counter example, but that time is is gone. Where we still have a lot of work to do is multi-step code base. Uh software engineering is not about writing code.</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=450s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="13" data-search="00:08:00 you join a company and you realize that there are 35 million lines of PHP in the codebase and that you need to make some changes. That that&#x27;s the day you understand what software engineering is and that&#x27;s a place where our models today or frontier models are progressing. But this ability to manage that extreme complexity and break it down into man manageable pieces is a place where the frontier is still moving.…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:08:00">
+    <img src="frames/frame-014-000480s.jpg" alt="Detected slide-like frame at 00:08:00" loading="lazy">
+    <span class="time">00:08:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 14</span><span>62% · 1551×1080</span></div>
+    <p>you join a company and you realize that there are 35 million lines of PHP in the codebase and that you need to make some changes. That that&#x27;s the day you understand what software engineering is and that&#x27;s a place where our models today or frontier models are progressing. But this ability to manage that extreme complexity and break it down into man manageable pieces is a place where the frontier is still moving.…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=480s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="14" data-search="00:08:30 You look at I don&#x27;t know the Google architecture. Thanks God we have Jeff Dean which was you know the the key architect there. But that&#x27;s the level of thinking which has many implication which can go from how do you do hardware optimization? How do you manage security? How do you build a system so that 10 years later you&#x27;re not full of regrets? And I think this is really the the range of progress we are working…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:08:30">
+    <img src="frames/frame-015-000510s.jpg" alt="Detected slide-like frame at 00:08:30" loading="lazy">
+    <span class="time">00:08:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 15</span><span>62% · 1551×1080</span></div>
+    <p>You look at I don&#x27;t know the Google architecture. Thanks God we have Jeff Dean which was you know the the key architect there. But that&#x27;s the level of thinking which has many implication which can go from how do you do hardware optimization? How do you manage security? How do you build a system so that 10 years later you&#x27;re not full of regrets? And I think this is really the the range of progress we are working…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=510s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="15" data-search="00:09:00 there&#x27;s plenty to do. There&#x27;s plenty of progress to be made. Now code is a very unique problem and in some way that&#x27;s the reason we we did pitchfork on this. Um, first of all, code is a lot of data. There are other domains where you can find a lot of data to train your model, but code was so incredible. You could go and go on GitHub and start to to scrape GitHub. So, this was one of those problem where the amount…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:09:00">
+    <img src="frames/frame-016-000540s.jpg" alt="Detected slide-like frame at 00:09:00" loading="lazy">
+    <span class="time">00:09:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 16</span><span>70% · 1427×803</span></div>
+    <p>there&#x27;s plenty to do. There&#x27;s plenty of progress to be made. Now code is a very unique problem and in some way that&#x27;s the reason we we did pitchfork on this. Um, first of all, code is a lot of data. There are other domains where you can find a lot of data to train your model, but code was so incredible. You could go and go on GitHub and start to to scrape GitHub. So, this was one of those problem where the amount…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=540s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="16" data-search="00:09:30 data was a very unique situation. It is also a domain where doing verification is reasonable. You can run a piece of code, you can compile it, you can have unit test. So the ability to figure out is the model generating something correct was something that was pretty reasonable to do. That brought us where we are today. But today what happened is that we run out of training data. I think that 80% of the new code…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:09:30">
+    <img src="frames/frame-017-000570s.jpg" alt="Detected slide-like frame at 00:09:30" loading="lazy">
+    <span class="time">00:09:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 17</span><span>71% · 1427×803</span></div>
+    <p>data was a very unique situation. It is also a domain where doing verification is reasonable. You can run a piece of code, you can compile it, you can have unit test. So the ability to figure out is the model generating something correct was something that was pretty reasonable to do. That brought us where we are today. But today what happened is that we run out of training data. I think that 80% of the new code…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=570s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="17" data-search="00:10:00 generated. So the notion of human bringing some knowledge that can be used for mining and to train model is reaching an end. But the good news is that we can do selfplay and selfplay is something we always liked a lot at deep mind. I suppose all know Alpha Zero. Alpha Zero became a superhuman go and chess player without any human knowledge just by playing against itself. We are" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:10:00">
+    <img src="frames/frame-018-000600s.jpg" alt="Detected slide-like frame at 00:10:00" loading="lazy">
+    <span class="time">00:10:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 18</span><span>71% · 1427×803</span></div>
+    <p>generated. So the notion of human bringing some knowledge that can be used for mining and to train model is reaching an end. But the good news is that we can do selfplay and selfplay is something we always liked a lot at deep mind. I suppose all know Alpha Zero. Alpha Zero became a superhuman go and chess player without any human knowledge just by playing against itself. We are</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=600s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="18" data-search="00:10:30 now at that stage where Frontier model for code are able to do the same where they can create their own challenge. They can judge the validity of the answer. they can even to some extent judge the architecture. So that ability to do those hundreds of millions of hours of selfplay writing code is the thing that will bring us to the to the next layer. You know, it&#x27;s interesting. Um do the experiment. Take a a…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:10:30">
+    <img src="frames/frame-019-000630s.jpg" alt="Detected slide-like frame at 00:10:30" loading="lazy">
+    <span class="time">00:10:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 19</span><span>71% · 1427×803</span></div>
+    <p>now at that stage where Frontier model for code are able to do the same where they can create their own challenge. They can judge the validity of the answer. they can even to some extent judge the architecture. So that ability to do those hundreds of millions of hours of selfplay writing code is the thing that will bring us to the to the next layer. You know, it&#x27;s interesting. Um do the experiment. Take a a…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=630s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="19" data-search="00:11:00 lock him or her in a room for two years and feed pizza and give the mission you need to become a better software engineer. What do you do as a person? you you give yourself some challenges, challenges that you can verify and you keep working and coding on those challenges. We can do the same here. So this is an issue of how much compute, how much selfplay time we can have. But that will bring the horizon of how…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:11:00">
+    <img src="frames/frame-020-000660s.jpg" alt="Detected slide-like frame at 00:11:00" loading="lazy">
+    <span class="time">00:11:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 20</span><span>70% · 1427×803</span></div>
+    <p>lock him or her in a room for two years and feed pizza and give the mission you need to become a better software engineer. What do you do as a person? you you give yourself some challenges, challenges that you can verify and you keep working and coding on those challenges. We can do the same here. So this is an issue of how much compute, how much selfplay time we can have. But that will bring the horizon of how…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=660s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="20" data-search="00:11:30 So the economics of code are changing dramatically. You know, as I say, we developed a whole software engineering culture and infrastructure and set of companies based on the assumption that writing code was the hard part. That this was the expensive part. We&#x27;re now in a world where writing code is free or nearly free. That&#x27;s why I&#x27;ve got the tilda there. That means that the amount of code that we&#x27;re going to see…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:11:30">
+    <img src="frames/frame-021-000690s.jpg" alt="Detected slide-like frame at 00:11:30" loading="lazy">
+    <span class="time">00:11:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 21</span><span>72% · 1886×1055</span></div>
+    <p>So the economics of code are changing dramatically. You know, as I say, we developed a whole software engineering culture and infrastructure and set of companies based on the assumption that writing code was the hard part. That this was the expensive part. We&#x27;re now in a world where writing code is free or nearly free. That&#x27;s why I&#x27;ve got the tilda there. That means that the amount of code that we&#x27;re going to see…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=690s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="21" data-search="00:12:00 implications to that. First is the question of design and adequacy. How in front of that mountain of code which will be written or written dynamically, how do we keep systems which works and are reliable at the microscopic level? Great role for human. It is also the issue that you know we&#x27;re writing code and we&#x27;re not reading it very much anymore. I mean I know we still have code review but I would" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:12:00">
+    <img src="frames/frame-022-000720s.jpg" alt="Detected slide-like frame at 00:12:00" loading="lazy">
+    <span class="time">00:12:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 22</span><span>72% · 1920×1080</span></div>
+    <p>implications to that. First is the question of design and adequacy. How in front of that mountain of code which will be written or written dynamically, how do we keep systems which works and are reliable at the microscopic level? Great role for human. It is also the issue that you know we&#x27;re writing code and we&#x27;re not reading it very much anymore. I mean I know we still have code review but I would</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=720s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="22" data-search="00:12:30 Gemini or other model generate the code and nobody will actually look at it. You know it&#x27;s similar to compilers who still check the assembly output of their compiler and maybe someone there but that&#x27;s probably the end of it. So the same thing is going to happen to code and that brings some question of what are the new process that we need to put in place to keep that manageable and that&#x27;s where I&#x27;ve got a [clears…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:12:30">
+    <img src="frames/frame-023-000750s.jpg" alt="Detected slide-like frame at 00:12:30" loading="lazy">
+    <span class="time">00:12:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 23</span><span>73% · 1887×1052</span></div>
+    <p>Gemini or other model generate the code and nobody will actually look at it. You know it&#x27;s similar to compilers who still check the assembly output of their compiler and maybe someone there but that&#x27;s probably the end of it. So the same thing is going to happen to code and that brings some question of what are the new process that we need to put in place to keep that manageable and that&#x27;s where I&#x27;ve got a [clears…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=750s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="23" data-search="00:13:00 guard rails. I mean you&#x27;ve all seen the news of mythos looking at a piece of code and detecting a unreasonable number of vulnerability in that code. there is a rush to go and patch those vulnerability but I think that&#x27;s going to be a neverending process you know we&#x27;re going to get a certain layer of vulnerability discovered by models we&#x27;re going to fix those models will get" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:13:00">
+    <img src="frames/frame-024-000780s.jpg" alt="Detected slide-like frame at 00:13:00" loading="lazy">
+    <span class="time">00:13:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 24</span><span>61% · 1551×1080</span></div>
+    <p>guard rails. I mean you&#x27;ve all seen the news of mythos looking at a piece of code and detecting a unreasonable number of vulnerability in that code. there is a rush to go and patch those vulnerability but I think that&#x27;s going to be a neverending process you know we&#x27;re going to get a certain layer of vulnerability discovered by models we&#x27;re going to fix those models will get</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=780s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="24" data-search="00:13:30 find even more subtle vulnerability so I think that the first aspect is that we need to think at least as much about code security and the implication of a piece of code than on the code writing itself and the grail and you know something my team is working actively on is instead of detecting the vulnerability and then suggesting some fix how about teaching model to write correct things from the start" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:13:30">
+    <img src="frames/frame-025-000810s.jpg" alt="Detected slide-like frame at 00:13:30" loading="lazy">
+    <span class="time">00:13:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 25</span><span>60% · 1551×1080</span></div>
+    <p>find even more subtle vulnerability so I think that the first aspect is that we need to think at least as much about code security and the implication of a piece of code than on the code writing itself and the grail and you know something my team is working actively on is instead of detecting the vulnerability and then suggesting some fix how about teaching model to write correct things from the start</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=810s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="25" data-search="00:14:00 and that is very very hard to do because it is very context dependent the other aspect is that you know that&#x27;s what I call inductive architecture uh I think that models today are still not very good at transferring knowledge of taking knowledge from one domain and applying it to another one or taking two concepts and finding the intersection of those context to be those context to be able to do deductive…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:14:00">
+    <img src="frames/frame-026-000840s.jpg" alt="Detected slide-like frame at 00:14:00" loading="lazy">
+    <span class="time">00:14:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 26</span><span>60% · 1551×1080</span></div>
+    <p>and that is very very hard to do because it is very context dependent the other aspect is that you know that&#x27;s what I call inductive architecture uh I think that models today are still not very good at transferring knowledge of taking knowledge from one domain and applying it to another one or taking two concepts and finding the intersection of those context to be those context to be able to do deductive…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=840s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="26" data-search="00:14:30 software system using ML that is a skill that we need to teach and you know one aspect of that is to really teach models how to do correct planning in front of a problem. How do you look at a very complex problem and decide what is the right decomposition of that problem that will bring the best clarity or correctness to the to the problem. We also need to change the way we do evaluation. I mean u threebench is" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:14:30">
+    <img src="frames/frame-027-000870s.jpg" alt="Detected slide-like frame at 00:14:30" loading="lazy">
+    <span class="time">00:14:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 27</span><span>60% · 1551×1080</span></div>
+    <p>software system using ML that is a skill that we need to teach and you know one aspect of that is to really teach models how to do correct planning in front of a problem. How do you look at a very complex problem and decide what is the right decomposition of that problem that will bring the best clarity or correctness to the to the problem. We also need to change the way we do evaluation. I mean u threebench is</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=870s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="27" data-search="00:15:00 threebench verifies if a piece of code runs and produce the right output. That&#x27;s only a small part of as I mentioned earlier of code engineering. So for instance, I think that we need some problems much more in those benchmarks that we use which are open-ended problem. I I&#x27;ll give an example. Uh I love the question of text compression. How many bits per character do you need and how far can" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:15:00">
+    <img src="frames/frame-028-000900s.jpg" alt="Detected slide-like frame at 00:15:00" loading="lazy">
+    <span class="time">00:15:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 28</span><span>61% · 1551×1080</span></div>
+    <p>threebench verifies if a piece of code runs and produce the right output. That&#x27;s only a small part of as I mentioned earlier of code engineering. So for instance, I think that we need some problems much more in those benchmarks that we use which are open-ended problem. I I&#x27;ll give an example. Uh I love the question of text compression. How many bits per character do you need and how far can</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=900s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="28" data-search="00:15:30 to write. You just take a piece of 10 megabyte of code and you tell the model write the best compressor you can that is lossless and the loss function in that case will be you know the size of the compressed file plus the size of the source code that&#x27;s never ending I mean those problems are I think what&#x27;s going to force those model to do novel things like creating totally new algorithmic for instance and I I…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:15:30">
+    <img src="frames/frame-029-000930s.jpg" alt="Detected slide-like frame at 00:15:30" loading="lazy">
+    <span class="time">00:15:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 29</span><span>61% · 1551×1080</span></div>
+    <p>to write. You just take a piece of 10 megabyte of code and you tell the model write the best compressor you can that is lossless and the loss function in that case will be you know the size of the compressed file plus the size of the source code that&#x27;s never ending I mean those problems are I think what&#x27;s going to force those model to do novel things like creating totally new algorithmic for instance and I I…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=930s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="29" data-search="00:15:42 the compressed file plus the size of the source code that&#x27;s never ending I mean those problems are I think what&#x27;s going to force those model to do novel things like creating totally new algorithmic for instance and I I think we&#x27;re now getting to that stage Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:15:42">
+    <img src="frames/frame-030-000942s.jpg" alt="Detected slide-like frame at 00:15:42" loading="lazy">
+    <span class="time">00:15:42</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 30</span><span>98% · 1887×1080</span></div>
+    <p>the compressed file plus the size of the source code that&#x27;s never ending I mean those problems are I think what&#x27;s going to force those model to do novel things like creating totally new algorithmic for instance and I I think we&#x27;re now getting to that stage Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=942s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="30" data-search="00:16:00 Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very successful and improve models a lot. But humans of course are much more complex in the way they think about problems. I always think that code writing is a very visual activity and that can be I don&#x27;t know the block diagram of what you&#x27;re doing or the flow of…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:16:00">
+    <img src="frames/frame-031-000960s.jpg" alt="Detected slide-like frame at 00:16:00" loading="lazy">
+    <span class="time">00:16:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 31</span><span>72% · 1887×1080</span></div>
+    <p>Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very successful and improve models a lot. But humans of course are much more complex in the way they think about problems. I always think that code writing is a very visual activity and that can be I don&#x27;t know the block diagram of what you&#x27;re doing or the flow of…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=960s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="31" data-search="00:16:30 code. uh but saying that code will be just a set of token that you emit that are going to be the code I think goes only up to a certain point that&#x27;s a very interesting aspect to what we do at Google Gemini we made that choice from the onset that this would be a multimodal model that you know text was only one of the modality that Gemini would be able to apply and we&#x27;re starting to see you know how can a model…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:16:30">
+    <img src="frames/frame-032-000990s.jpg" alt="Detected slide-like frame at 00:16:30" loading="lazy">
+    <span class="time">00:16:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 32</span><span>71% · 1887×1080</span></div>
+    <p>code. uh but saying that code will be just a set of token that you emit that are going to be the code I think goes only up to a certain point that&#x27;s a very interesting aspect to what we do at Google Gemini we made that choice from the onset that this would be a multimodal model that you know text was only one of the modality that Gemini would be able to apply and we&#x27;re starting to see you know how can a model…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=990s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="32" data-search="00:17:00 dynamic representation to to solve problem and I think that&#x27;s going to become a must have another interesting question is is this time to create a new language for models Python you name it have been invented for humans and those language are not very good to write safe or reliable code I mean they&#x27;re great to write code but they&#x27;re certainly not the the best thing" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:17:00">
+    <img src="frames/frame-033-001020s.jpg" alt="Detected slide-like frame at 00:17:00" loading="lazy">
+    <span class="time">00:17:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 33</span><span>71% · 1887×1080</span></div>
+    <p>dynamic representation to to solve problem and I think that&#x27;s going to become a must have another interesting question is is this time to create a new language for models Python you name it have been invented for humans and those language are not very good to write safe or reliable code I mean they&#x27;re great to write code but they&#x27;re certainly not the the best thing</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1020s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="33" data-search="00:17:30 since the pain of writing the code does not exist anymore. How about we make writing the code much harder by having you know very strongly typed languages or you know some inspiration from lean on how to write code that by design it&#x27;s not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don&#x27;t know if we have some…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:17:30">
+    <img src="frames/frame-034-001050s.jpg" alt="Detected slide-like frame at 00:17:30" loading="lazy">
+    <span class="time">00:17:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 34</span><span>71% · 1887×1080</span></div>
+    <p>since the pain of writing the code does not exist anymore. How about we make writing the code much harder by having you know very strongly typed languages or you know some inspiration from lean on how to write code that by design it&#x27;s not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don&#x27;t know if we have some…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1050s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="34" data-search="00:17:47 not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don&#x27;t know if we have some language designers here, but I I I think there&#x27;s something really to be done there and it doesn&#x27;t need to be human readable. I I don&#x27;t think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:17:47">
+    <img src="frames/frame-035-001067s.jpg" alt="Detected slide-like frame at 00:17:47" loading="lazy">
+    <span class="time">00:17:47</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 35</span><span>92% · 1887×1080</span></div>
+    <p>not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don&#x27;t know if we have some language designers here, but I I I think there&#x27;s something really to be done there and it doesn&#x27;t need to be human readable. I I don&#x27;t think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1067s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="35" data-search="00:18:00 need to be human readable. I I don&#x27;t think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I think that what we&#x27;re starting to see is this ability to experiment very quickly in code is impacting other domain very quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:18:00">
+    <img src="frames/frame-036-001080s.jpg" alt="Detected slide-like frame at 00:18:00" loading="lazy">
+    <span class="time">00:18:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 36</span><span>66% · 1441×837</span></div>
+    <p>need to be human readable. I I don&#x27;t think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I think that what we&#x27;re starting to see is this ability to experiment very quickly in code is impacting other domain very quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1080s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="36" data-search="00:18:20 quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:18:20">
+    <img src="frames/frame-037-001100s.jpg" alt="Detected slide-like frame at 00:18:20" loading="lazy">
+    <span class="time">00:18:20</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 37</span><span>92% · 1518×844</span></div>
+    <p>quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1100s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="37" data-search="00:18:30 atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of chemistry. Once you have more than 20 atoms in your molecule it&#x27;s like wow we don&#x27;t know what that thing is going to do. I think we&#x27;re going to see" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:18:30">
+    <img src="frames/frame-038-001110s.jpg" alt="Detected slide-like frame at 00:18:30" loading="lazy">
+    <span class="time">00:18:30</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 38</span><span>71% · 1920×1080</span></div>
+    <p>atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of chemistry. Once you have more than 20 atoms in your molecule it&#x27;s like wow we don&#x27;t know what that thing is going to do. I think we&#x27;re going to see</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1110s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="38" data-search="00:19:00 incredible things emerging out of that. I mean once you are able to put 10,000 atom together that starts to look like life. So what are all the other things you can do with 10,000 atoms? Biology. You probably heard plenty about it, but you know, biology is the case of nature did an incredible engineering job and terrible job at documentation. Um, but we can crack through that now. Models are able to find those…" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:19:00">
+    <img src="frames/frame-039-001140s.jpg" alt="Detected slide-like frame at 00:19:00" loading="lazy">
+    <span class="time">00:19:00</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 39</span><span>71% · 1427×803</span></div>
+    <p>incredible things emerging out of that. I mean once you are able to put 10,000 atom together that starts to look like life. So what are all the other things you can do with 10,000 atoms? Biology. You probably heard plenty about it, but you know, biology is the case of nature did an incredible engineering job and terrible job at documentation. Um, but we can crack through that now. Models are able to find those…</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1140s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><article class="card" data-index="39" data-search="00:20:01 give some examples. I think that&#x27;s one of the thing where ML is such a different viewpoint on many of those problems that we&#x27;re going to get the oh my god this was in front of us the whole time and we could not see it. So exciting times ahead. Thank you very much. [applause]" tabindex="0">
+  <button class="image-button" type="button" aria-label="Open frame at 00:20:01">
+    <img src="frames/frame-040-001201s.jpg" alt="Detected slide-like frame at 00:20:01" loading="lazy">
+    <span class="time">00:20:01</span>
+  </button>
+  <div class="card-body">
+    <div class="meta"><span>Slide 40</span><span>84% · 1920×1080</span></div>
+    <p>give some examples. I think that&#x27;s one of the thing where ML is such a different viewpoint on many of those problems that we&#x27;re going to get the oh my god this was in front of us the whole time and we could not see it. So exciting times ahead. Thank you very much. [applause]</p>
+    <a href="https://www.youtube.com/watch?v=1P1hJ36rxM0&amp;t=1201s" target="_blank" rel="noreferrer">Watch from this moment ↗</a>
+  </div>
+</article><p class="empty" hidden>No frames match that search.</p></main>
+<dialog id="viewer"><img alt=""><div class="dialog-info"><p></p><button class="close" type="button">Close</button></div></dialog>
+<script>
+const frames=[{"timestamp": 25.761, "filename": "frames/frame-001-000025s.jpg", "score": 0.8482, "slide_score": 0.994, "change_before": 0.2198, "stability_after": 0.175, "transcript": "Please welcome to the stage the vice president of research [music] at Google DeepMind, Benois Schillings. [music] >> [music]", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 34.536, "filename": "frames/frame-002-000034s.jpg", "score": 0.7902, "slide_score": 0.795, "change_before": 0.1915, "stability_after": 0.4497, "transcript": "president of research [music] at Google DeepMind, Benois Schillings. [music] >> [music]", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 60.0, "filename": "frames/frame-003-000060s.jpg", "score": 0.6493, "slide_score": 0.8068, "change_before": 0.0734, "stability_after": 0.473, "transcript": ">> All right, good morning. Uh this is really quite exciting to be here and have a chance to to speak with all of you. Uh my name is Benois Shellings. I'm actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 72.0, "filename": "frames/frame-004-000072s.jpg", "score": 0.6702, "slide_score": 0.7995, "change_before": 0.0796, "stability_after": 0.5507, "transcript": "you. Uh my name is Benois Shellings. I'm actually a bit of a noob when it comes to to machine learning. Till a year and a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience…", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 81.0, "filename": "frames/frame-005-000081s.jpg", "score": 0.6864, "slide_score": 0.8183, "change_before": 0.0762, "stability_after": 0.6177, "transcript": "a half ago, I was working for Google X which some of you may know. We've done things like Whimo, which seems to be at every street corner now. Uh we also do things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is…", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 91.156, "filename": "frames/frame-006-000091s.jpg", "score": 0.7942, "slide_score": 0.6706, "change_before": 0.1537, "stability_after": 0.9061, "transcript": "things like Glass. So, you know, we we had a mix of hit and success. But in many ways this was for me an interesting formative experience on how to run a research team in a place like deep mind. I do have an incredible team. Uh my team goal in deep mind is basically to develop whatever technology will be needed to make Gemini incredible between one months and one year from now. So one", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 180.0, "filename": "frames/frame-007-000180s.jpg", "score": 0.6003, "slide_score": 0.7714, "change_before": 0.0046, "stability_after": 0.9759, "transcript": "Pitchfork uh in 2018 which was aimed at looking at how ML could really improve the way code is being written. And this was very interesting because in 2018 when we presented that at Google honestly nobody would give us the time of day. uh there was that point like why would you ever need ML to to write code. Um at the same time I think that we totally", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 210.0, "filename": "frames/frame-008-000210s.jpg", "score": 0.608, "slide_score": 0.7841, "change_before": 0.0073, "stability_after": 0.9542, "transcript": "When we did that project originally the idea was to look at how we could speed up the evolution of a piece of code. How could we make many of those small changes which slows down code speed development? you know the small edit which requires a review that takes three days and how we could compress that cycle. Some people were talking about vibe coding writing code in English and at the time honestly I totally…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 240.0, "filename": "frames/frame-009-000240s.jpg", "score": 0.6024, "slide_score": 0.7796, "change_before": 0.0046, "stability_after": 0.9635, "transcript": "programming language. Well I I guess I was pretty wrong on that front. But the resistance we felt at the time reminded me of how my own career was pretty resistive to to change. Um I've been writing code for 45 years. Uh I started by writing video game for Apple 2 and Commodore 64. So uh my formation was to write assembly language. And when you spend a long time", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 270.0, "filename": "frames/frame-010-000270s.jpg", "score": 0.5965, "slide_score": 0.7716, "change_before": 0.0035, "stability_after": 0.9651, "transcript": "writing assembly language, you look at compilers with a lot of suspicion, right? are those things really working correctly? And then when you switch to C++ and use compiler, you lose you look at garbage collected languages as this h that's not real programming. You need to manage your memory. Well, today I use Python and V coding. So even old dogs can learn new tricks. So uh but I I I do understand what happened…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 390.0, "filename": "frames/frame-011-000390s.jpg", "score": 0.5945, "slide_score": 0.7696, "change_before": 0.003, "stability_after": 0.9647, "transcript": "determined a lot of how software was being written. This is over and we're switching now to that AI frontier where really writing the code is not the challenge anymore. Uh I'll speak some more about it. But the bottlenecks are really how do you ensure that that code is what you really wanted because writing the code is easy but getting what is needed for a specific problem can be much harder to to specify. So…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 420.0, "filename": "frames/frame-012-000420s.jpg", "score": 0.5968, "slide_score": 0.7669, "change_before": 0.0046, "stability_after": 0.9706, "transcript": "thinking of what are really the implication of that piece of code. I'm getting the ML to to design. Inductive thinking is another category where I think humans still have a very clear edge which is to look at a system in a much wider context and to be able to detect patterns and from those pattern take some decision. So where are we today? Um, superhuman", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 450.0, "filename": "frames/frame-013-000450s.jpg", "score": 0.6246, "slide_score": 0.8174, "change_before": 0.0059, "stability_after": 0.961, "transcript": "When is the last time I got Gemini to write a function for me? And I looked at the function and I was like, I can do that better. It's over. Uh, I think that the minutia of code writing, I mean, you can fight, you can argue, you can find counter example, but that time is is gone. Where we still have a lot of work to do is multi-step code base. Uh software engineering is not about writing code.", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 480.0, "filename": "frames/frame-014-000480s.jpg", "score": 0.6202, "slide_score": 0.8027, "change_before": 0.0061, "stability_after": 0.9782, "transcript": "you join a company and you realize that there are 35 million lines of PHP in the codebase and that you need to make some changes. That that's the day you understand what software engineering is and that's a place where our models today or frontier models are progressing. But this ability to manage that extreme complexity and break it down into man manageable pieces is a place where the frontier is still moving.…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 510.0, "filename": "frames/frame-015-000510s.jpg", "score": 0.6195, "slide_score": 0.8037, "change_before": 0.0065, "stability_after": 0.9674, "transcript": "You look at I don't know the Google architecture. Thanks God we have Jeff Dean which was you know the the key architect there. But that's the level of thinking which has many implication which can go from how do you do hardware optimization? How do you manage security? How do you build a system so that 10 years later you're not full of regrets? And I think this is really the the range of progress we are working…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 540.0, "filename": "frames/frame-016-000540s.jpg", "score": 0.7049, "slide_score": 0.9739, "change_before": 0.004, "stability_after": 0.9558, "transcript": "there's plenty to do. There's plenty of progress to be made. Now code is a very unique problem and in some way that's the reason we we did pitchfork on this. Um, first of all, code is a lot of data. There are other domains where you can find a lot of data to train your model, but code was so incredible. You could go and go on GitHub and start to to scrape GitHub. So, this was one of those problem where the amount…", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 570.0, "filename": "frames/frame-017-000570s.jpg", "score": 0.7061, "slide_score": 0.9736, "change_before": 0.003, "stability_after": 0.973, "transcript": "data was a very unique situation. It is also a domain where doing verification is reasonable. You can run a piece of code, you can compile it, you can have unit test. So the ability to figure out is the model generating something correct was something that was pretty reasonable to do. That brought us where we are today. But today what happened is that we run out of training data. I think that 80% of the new code…", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 600.0, "filename": "frames/frame-018-000600s.jpg", "score": 0.7107, "slide_score": 0.9736, "change_before": 0.0055, "stability_after": 0.9736, "transcript": "generated. So the notion of human bringing some knowledge that can be used for mining and to train model is reaching an end. But the good news is that we can do selfplay and selfplay is something we always liked a lot at deep mind. I suppose all know Alpha Zero. Alpha Zero became a superhuman go and chess player without any human knowledge just by playing against itself. We are", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 630.0, "filename": "frames/frame-019-000630s.jpg", "score": 0.7115, "slide_score": 0.9733, "change_before": 0.0063, "stability_after": 0.9721, "transcript": "now at that stage where Frontier model for code are able to do the same where they can create their own challenge. They can judge the validity of the answer. they can even to some extent judge the architecture. So that ability to do those hundreds of millions of hours of selfplay writing code is the thing that will bring us to the to the next layer. You know, it's interesting. Um do the experiment. Take a a…", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 660.0, "filename": "frames/frame-020-000660s.jpg", "score": 0.7028, "slide_score": 0.9731, "change_before": 0.0034, "stability_after": 0.9518, "transcript": "lock him or her in a room for two years and feed pizza and give the mission you need to become a better software engineer. What do you do as a person? you you give yourself some challenges, challenges that you can verify and you keep working and coding on those challenges. We can do the same here. So this is an issue of how much compute, how much selfplay time we can have. But that will bring the horizon of how…", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 690.0, "filename": "frames/frame-021-000690s.jpg", "score": 0.7239, "slide_score": 0.9984, "change_before": 0.0054, "stability_after": 0.9741, "transcript": "So the economics of code are changing dramatically. You know, as I say, we developed a whole software engineering culture and infrastructure and set of companies based on the assumption that writing code was the hard part. That this was the expensive part. We're now in a world where writing code is free or nearly free. That's why I've got the tilda there. That means that the amount of code that we're going to see…", "width": 1886, "height": 1055, "crop": {"x": 0, "y": 25, "width": 1886, "height": 1055}}, {"timestamp": 720.0, "filename": "frames/frame-022-000720s.jpg", "score": 0.7183, "slide_score": 0.9984, "change_before": 0.0051, "stability_after": 0.9458, "transcript": "implications to that. First is the question of design and adequacy. How in front of that mountain of code which will be written or written dynamically, how do we keep systems which works and are reliable at the microscopic level? Great role for human. It is also the issue that you know we're writing code and we're not reading it very much anymore. I mean I know we still have code review but I would", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 750.0, "filename": "frames/frame-023-000750s.jpg", "score": 0.7274, "slide_score": 0.9981, "change_before": 0.0075, "stability_after": 0.9739, "transcript": "Gemini or other model generate the code and nobody will actually look at it. You know it's similar to compilers who still check the assembly output of their compiler and maybe someone there but that's probably the end of it. So the same thing is going to happen to code and that brings some question of what are the new process that we need to put in place to keep that manageable and that's where I've got a [clears…", "width": 1887, "height": 1052, "crop": {"x": 0, "y": 28, "width": 1887, "height": 1052}}, {"timestamp": 780.0, "filename": "frames/frame-024-000780s.jpg", "score": 0.6092, "slide_score": 0.7789, "change_before": 0.0083, "stability_after": 0.9672, "transcript": "guard rails. I mean you've all seen the news of mythos looking at a piece of code and detecting a unreasonable number of vulnerability in that code. there is a rush to go and patch those vulnerability but I think that's going to be a neverending process you know we're going to get a certain layer of vulnerability discovered by models we're going to fix those models will get", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 810.0, "filename": "frames/frame-025-000810s.jpg", "score": 0.5974, "slide_score": 0.7757, "change_before": 0.0041, "stability_after": 0.9526, "transcript": "find even more subtle vulnerability so I think that the first aspect is that we need to think at least as much about code security and the implication of a piece of code than on the code writing itself and the grail and you know something my team is working actively on is instead of detecting the vulnerability and then suggesting some fix how about teaching model to write correct things from the start", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 840.0, "filename": "frames/frame-026-000840s.jpg", "score": 0.6005, "slide_score": 0.7779, "change_before": 0.0024, "stability_after": 0.9787, "transcript": "and that is very very hard to do because it is very context dependent the other aspect is that you know that's what I call inductive architecture uh I think that models today are still not very good at transferring knowledge of taking knowledge from one domain and applying it to another one or taking two concepts and finding the intersection of those context to be those context to be able to do deductive…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 870.0, "filename": "frames/frame-027-000870s.jpg", "score": 0.6008, "slide_score": 0.7815, "change_before": 0.0048, "stability_after": 0.9472, "transcript": "software system using ML that is a skill that we need to teach and you know one aspect of that is to really teach models how to do correct planning in front of a problem. How do you look at a very complex problem and decide what is the right decomposition of that problem that will bring the best clarity or correctness to the to the problem. We also need to change the way we do evaluation. I mean u threebench is", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 900.0, "filename": "frames/frame-028-000900s.jpg", "score": 0.6086, "slide_score": 0.79, "change_before": 0.0041, "stability_after": 0.9714, "transcript": "threebench verifies if a piece of code runs and produce the right output. That's only a small part of as I mentioned earlier of code engineering. So for instance, I think that we need some problems much more in those benchmarks that we use which are open-ended problem. I I'll give an example. Uh I love the question of text compression. How many bits per character do you need and how far can", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 930.0, "filename": "frames/frame-029-000930s.jpg", "score": 0.6065, "slide_score": 0.7927, "change_before": 0.0037, "stability_after": 0.9558, "transcript": "to write. You just take a piece of 10 megabyte of code and you tell the model write the best compressor you can that is lossless and the loss function in that case will be you know the size of the compressed file plus the size of the source code that's never ending I mean those problems are I think what's going to force those model to do novel things like creating totally new algorithmic for instance and I I…", "width": 1551, "height": 1080, "crop": {"x": 369, "y": 0, "width": 1551, "height": 1080}}, {"timestamp": 942.808, "filename": "frames/frame-030-000942s.jpg", "score": 0.9817, "slide_score": 0.9791, "change_before": 0.1625, "stability_after": 0.9609, "transcript": "the compressed file plus the size of the source code that's never ending I mean those problems are I think what's going to force those model to do novel things like creating totally new algorithmic for instance and I I think we're now getting to that stage Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 960.0, "filename": "frames/frame-031-000960s.jpg", "score": 0.7176, "slide_score": 0.979, "change_before": 0.0083, "stability_after": 0.9691, "transcript": "Writing code or doing software engineering is not thinking as a chain of tokens. Thinking and reasoning today is chain of code which has been you know very successful and improve models a lot. But humans of course are much more complex in the way they think about problems. I always think that code writing is a very visual activity and that can be I don't know the block diagram of what you're doing or the flow of…", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 990.0, "filename": "frames/frame-032-000990s.jpg", "score": 0.7118, "slide_score": 0.9792, "change_before": 0.0055, "stability_after": 0.9631, "transcript": "code. uh but saying that code will be just a set of token that you emit that are going to be the code I think goes only up to a certain point that's a very interesting aspect to what we do at Google Gemini we made that choice from the onset that this would be a multimodal model that you know text was only one of the modality that Gemini would be able to apply and we're starting to see you know how can a model…", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 1020.0, "filename": "frames/frame-033-001020s.jpg", "score": 0.7102, "slide_score": 0.9788, "change_before": 0.0063, "stability_after": 0.9475, "transcript": "dynamic representation to to solve problem and I think that's going to become a must have another interesting question is is this time to create a new language for models Python you name it have been invented for humans and those language are not very good to write safe or reliable code I mean they're great to write code but they're certainly not the the best thing", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 1050.0, "filename": "frames/frame-034-001050s.jpg", "score": 0.7068, "slide_score": 0.9782, "change_before": 0.0044, "stability_after": 0.949, "transcript": "since the pain of writing the code does not exist anymore. How about we make writing the code much harder by having you know very strongly typed languages or you know some inspiration from lean on how to write code that by design it's not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don't know if we have some…", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 1067.469, "filename": "frames/frame-035-001067s.jpg", "score": 0.9222, "slide_score": 0.8685, "change_before": 0.1781, "stability_after": 0.9625, "transcript": "not going to be perfect. I mean program proof is something which has some limits but at least putting the burden of correctness on the model. So I don't know if we have some language designers here, but I I I think there's something really to be done there and it doesn't need to be human readable. I I don't think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I…", "width": 1887, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1887, "height": 1080}}, {"timestamp": 1080.0, "filename": "frames/frame-036-001080s.jpg", "score": 0.6566, "slide_score": 0.8753, "change_before": 0.0061, "stability_after": 0.9629, "transcript": "need to be human readable. I I don't think that that will matter anymore. So beyond code, um code is a universal language to solve problems. I think that what we're starting to see is this ability to experiment very quickly in code is impacting other domain very quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and", "width": 1441, "height": 837, "crop": {"x": 446, "y": 0, "width": 1441, "height": 837}}, {"timestamp": 1100.969, "filename": "frames/frame-037-001100s.jpg", "score": 0.9183, "slide_score": 0.9771, "change_before": 0.1239, "stability_after": 0.9653, "transcript": "quickly because doing experiment becomes basically free. So I think that looking at that intersection of code writing and atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of", "width": 1518, "height": 844, "crop": {"x": 369, "y": 0, "width": 1518, "height": 844}}, {"timestamp": 1110.0, "filename": "frames/frame-038-001110s.jpg", "score": 0.7127, "slide_score": 0.976, "change_before": 0.0086, "stability_after": 0.9482, "transcript": "atoms or science is another big front that we are opening that is the place where true novelty is going to appear. two which are especially exciting for me is chemistry. Um you know as humans we do not understand chemistry or we understand a very very small sliver of chemistry. Once you have more than 20 atoms in your molecule it's like wow we don't know what that thing is going to do. I think we're going to see", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}, {"timestamp": 1140.0, "filename": "frames/frame-039-001140s.jpg", "score": 0.708, "slide_score": 0.9761, "change_before": 0.003, "stability_after": 0.9757, "transcript": "incredible things emerging out of that. I mean once you are able to put 10,000 atom together that starts to look like life. So what are all the other things you can do with 10,000 atoms? Biology. You probably heard plenty about it, but you know, biology is the case of nature did an incredible engineering job and terrible job at documentation. Um, but we can crack through that now. Models are able to find those…", "width": 1427, "height": 803, "crop": {"x": 392, "y": 138, "width": 1427, "height": 803}}, {"timestamp": 1201.77, "filename": "frames/frame-040-001201s.jpg", "score": 0.8412, "slide_score": 0.9607, "change_before": 0.1309, "stability_after": 0.5187, "transcript": "give some examples. I think that's one of the thing where ML is such a different viewpoint on many of those problems that we're going to get the oh my god this was in front of us the whole time and we could not see it. So exciting times ahead. Thank you very much. [applause]", "width": 1920, "height": 1080, "crop": {"x": 0, "y": 0, "width": 1920, "height": 1080}}];const cards=[...document.querySelectorAll('.card')];const search=document.querySelector('#search');const count=document.querySelector('#count');const empty=document.querySelector('.empty');const viewer=document.querySelector('#viewer');let active=0;
+function filter(){const q=search.value.trim().toLowerCase();let shown=0;cards.forEach(c=>{const visible=!q||c.dataset.search.toLowerCase().includes(q);c.hidden=!visible;shown+=visible});count.textContent=`${shown} frame${shown===1?'':'s'}`;empty.hidden=shown!==0}search.addEventListener('input',filter);
+function clock(s){s=Math.floor(s);return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,'0')).join(':')}function openFrame(i){active=i;const frame=frames[i];viewer.querySelector('img').src=frame.filename;viewer.querySelector('img').alt=`Frame at ${clock(frame.timestamp)}`;viewer.querySelector('p').textContent=frame.transcript||'No nearby transcript text.';viewer.showModal()}
+cards.forEach((card,i)=>{card.querySelector('button').addEventListener('click',()=>openFrame(i));card.addEventListener('keydown',e=>{if(e.key==='Enter')openFrame(i)})});viewer.querySelector('.close').addEventListener('click',()=>viewer.close());viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});document.addEventListener('keydown',e=>{if(!viewer.open||!frames.length)return;if(e.key==='ArrowRight')openFrame((active+1)%frames.length);if(e.key==='ArrowLeft')openFrame((active-1+frames.length)%frames.length)});
+</script>
+</body></html>
