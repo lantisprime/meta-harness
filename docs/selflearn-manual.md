@@ -38,8 +38,10 @@ probe (novel scenario), and for skills the executable check. Probes gate
 publishing, qualify models, and catch regressions.
 
 **Specialist** — a declarative YAML spec (name, packs, archetype prompt,
-task types, routing constraints). Deliberately **no model field**: any model
-that passes the pack suite can serve the role.
+task types, routing constraints, and an optional improvement policy).
+Deliberately **no serving-model field**: any model that passes the pack suite
+can serve the role. An improvement policy names optimizer and evaluator
+identities separately; neither identity is a serving-model binding.
 
 **The trust rule** — nothing the system produces about itself is trusted:
 distilled entries need corroboration, probes need a *different* model to
@@ -385,6 +387,80 @@ Baselines are model-pinned; comparing across models is refused.
 ---
 
 ## 10. The learning loop
+
+### Domain-ready specialist improvement
+
+Self-improvement is gated separately from retrieval. A specialist may use its
+published packs normally while reporting that it is **not ready to improve**.
+Readiness requires all of the following:
+
+- a declared domain expert and distinct optimizer/evaluator identities;
+- expert examples and explicit pass/fail criteria;
+- criteria backed by validated probes from the specialist's published packs;
+- a frozen suite baseline for every bound pack; and
+- disjoint fit, unseen-validation, and sealed final-test item identifiers.
+
+Deterministic and execution criteria need an explicit anchor. Judge criteria
+need at least two anchors, so a vague numeric quality scale cannot authorize an
+improvement campaign. The evaluator remains evidence-producing only; it cannot
+approve deployment or rewrite its own criteria.
+
+```python
+from selflearn import (
+    EvaluationCriterion, EvaluationSplits, ExpertExample,
+    ImprovementPolicy, SpecialistSpec,
+)
+
+policy = ImprovementPolicy(
+    domain_expert="owner@example.com",
+    optimizer_identity="optimizer-agent",
+    evaluator_identity="frozen-evaluator-v1",
+    criteria=(EvaluationCriterion(
+        id="lifespan-correctness",
+        description="the proposed lifecycle code passes the pack probe",
+        failure_mode="wrong-lifecycle",
+        check_kind="execution",
+        probe_ids=("probe-fastapi-lifespan",),
+        anchors=("the executable check exits zero",),
+        approved_by="owner@example.com",
+    ),),
+    expert_examples=(ExpertExample(
+        id="lifespan-example-1",
+        criterion_id="lifespan-correctness",
+        expected="pass",
+        rationale="the expert-approved lifecycle pattern cleans up resources",
+    ),),
+    splits=EvaluationSplits(
+        fit=("fit-1",), validation=("validation-1",), test=("test-1",),
+    ),
+    target_validation_score=0.90,
+    max_iterations=12,
+    plateau_rounds=3,
+)
+spec = SpecialistSpec(
+    name="fastapi-specialist", packs=("fastapi",),
+    improvement_policy=policy,
+)
+readiness = spec.assess_improvement(store)  # read-only
+```
+
+`Learner.failure_clusters(pack)` returns the largest recurring verified
+failure pattern first. Each proposed update must target that cluster and is
+eligible for human review only when full per-item evidence from the frozen
+evaluator improves the unseen validation score **without regressing any
+previously passing validation item**. Missing, duplicate, or substituted split
+IDs fail closed.
+Fit-set gains alone never qualify an update. Campaigns stop at the configured
+validation target, iteration limit, or plateau; only then may the caller
+explicitly open `splits.items_for("final_test")`.
+`suggest_specialist_improvement(spec, store)` surfaces this as read-only advice
+and never starts an optimizer.
+
+This is intentionally a **contract and decision layer**, not an autonomous
+trainer or deployment path. The host still owns candidate generation, final
+test execution, human promotion, and exact rollback.
+
+### Outcome learning
 
 Feed every externally verified task outcome to the `Learner`:
 
