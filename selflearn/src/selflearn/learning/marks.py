@@ -3,9 +3,10 @@
 The plan's rules, exactly:
 
 - Helpful marks are cheap and noisy-tolerant: a verified PASS credits every
-  injected entry, weighted heavier for entries the worker cited as used
-  (``applied_knowledge``). A false helpful mark only keeps an entry
-  retrievable.
+  entry in ``outcome.credited`` — the injected entries plus any workflow
+  entries that seeded the plan (``seeded_by``) — weighted heavier for
+  entries the worker cited as used (``applied_knowledge``). A false helpful
+  mark only keeps an entry retrievable.
 - Harmful marks require implication evidence: a verified FAIL harms only
   the entries the host explicitly implicated (grounded reflection cited
   them, or the failure landed in their claimed domain). Injection alone
@@ -43,11 +44,10 @@ from selflearn.evidence import (  # noqa: E402
     MARK_HALF_LIFE_DAYS,
     decay_factor,
     laplace_score,
-    parse_iso as _parse_iso,
 )
 
 __all__ = ["MarkReport", "apply_outcome", "effective_counts", "decay_factor",
-           "laplace_score", "MARK_HALF_LIFE_DAYS", "_parse_iso",
+           "laplace_score", "MARK_HALF_LIFE_DAYS",
            "HELPFUL_WEIGHT", "APPLIED_WEIGHT", "HARMFUL_WEIGHT",
            "DEPRECATE_THRESHOLD"]
 

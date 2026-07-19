@@ -105,9 +105,13 @@ def expected_free_energy_value(signal: GapSignal) -> float:
                  "staleness": 0.5, "uncertainty": 0.0}.get(signal.kind, 0.3)
     epistemic = {"coverage": 1.0, "quality": 0.3,
                  "staleness": 0.4, "uncertainty": 0.6}.get(signal.kind, 0.3)
-    # more cited failures => more expected pragmatic payoff, saturating
-    n = _leading_int(signal.evidence)
-    pragmatic *= 1.0 + min(n, 10) / 10.0
+    if signal.kind in ("coverage", "quality"):
+        # more cited failures => more expected pragmatic payoff, saturating.
+        # Only these kinds lead their evidence with a failure count;
+        # staleness leads with age-in-days and uncertainty with a variance,
+        # so boosting them here would invert the documented ordering.
+        n = _leading_int(signal.evidence)
+        pragmatic *= 1.0 + min(n, 10) / 10.0
     return pragmatic + epistemic
 
 
@@ -250,12 +254,20 @@ class Learner:
             if key in suppressed:
                 continue
             retrieved_any = any(f.injected for f in fails)
-            if coverage.get(topic) != "covered" or not retrieved_any:
+            covered = coverage.get(topic) == "covered"
+            if not covered or not retrieved_any:
+                # the join above guarantees topic is in this pack's coverage
+                # map, so the only cases are claimed-but-not-covered and
+                # covered-but-retrieval-surfaced-nothing
+                if not covered:
+                    detail = "claimed but not covered"
+                    if not retrieved_any:
+                        detail += "; nothing was retrieved"
+                else:
+                    detail = "covered but nothing was retrieved"
                 signals.append(GapSignal(
                     pack=pack, topic=topic, kind="coverage",
-                    evidence=f"{len(fails)} verified failures; topic "
-                             f"{'claimed but not covered' if topic in coverage else 'not in coverage map'}"
-                             f"{'' if retrieved_any else '; nothing was retrieved'}"))
+                    evidence=f"{len(fails)} verified failures; topic {detail}"))
             else:
                 signals.append(GapSignal(
                     pack=pack, topic=topic, kind="quality",

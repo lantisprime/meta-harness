@@ -5,11 +5,16 @@ to turn the store's current state into concrete operator moves, ordered by
 urgency:
 
 1. quarantined candidates      — need a journaled human release
-2. candidates awaiting gates   — run verification, then approve
+2. candidates awaiting gates   — run verification, then approve (also:
+   a specialist not ready for self-improvement, from
+   ``suggest_specialist_improvement``)
 3. harmful published entries   — deprecate or refresh (marks say they hurt)
 4. stale published entries     — sources aged and evidence faded; re-fetch
-5. claimed-but-uncovered topics — the coverage map admits a gap; acquire
+5. thin epistemic evidence and claimed-but-uncovered topics — probe or
+   acquire before relying
 6. missing embeddings          — retrieval is degraded to keyword matching
+7. bounded improvement campaign — a ready specialist's next safe step
+   (``suggest_specialist_improvement``)
 
 Everything here is advisory-only, same rule as the learning module: the
 advisor proposes commands, a human runs them. Nothing is executed and no

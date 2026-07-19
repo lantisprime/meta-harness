@@ -346,6 +346,23 @@ def test_regression_loud_paths(store):
         check_regression(store, "fastapi", suite("OTHER", 2, 2))
 
 
+def test_baseline_reason_distinguishes_missing_from_no_injection(store):
+    """META-24 finding 3: readiness said 'has no frozen suite baseline' even
+    when a baseline existed but was a without-injection run (which
+    snapshot_baseline happily writes); the two cases now read differently,
+    and the baseline path comes from regression.BASELINE_FILE."""
+    from selflearn.learning.improvement import _baseline_issue
+
+    assert _baseline_issue(store, "fastapi") == "has no frozen suite baseline"
+    no_inj = SuiteResult(model_id="m1", pack="fastapi", injected=False)
+    no_inj.results = [ProbeResult("p0", "recall", True)]
+    snapshot_baseline(store, "fastapi", no_inj)
+    assert _baseline_issue(store, "fastapi") == \
+        "suite baseline is not a with-injection run"
+    snapshot_baseline(store, "fastapi", suite("m1", 1, 1))
+    assert _baseline_issue(store, "fastapi") == ""
+
+
 # ---------------------------------------------------------------------------
 # Phase 1/2 — posterior uncertainty and epistemic (EFE) acquisition
 # (design note docs/selflearn-learning-module-improvements.md §3.1/§3.2)
@@ -414,7 +431,10 @@ def test_expected_free_energy_orders_kinds():
     assert efe(cov) > efe(few)
 
 
-def test_suggestions_efe_ranked_and_readonly(store):
+def test_suggestions_efe_ranked(store):
+    """suggestions() is deliberately NOT read-only — it runs the gap sweep,
+    which ages backoff counters and saves learner state (use
+    ``staleness_signals``/``epistemic_signals`` for read-only views)."""
     # a covered-but-thin topic (epistemic) plus a claimed-uncovered topic
     publish(store, "kn-f-cov", "Covered.", "covered")
     store.claim_topics("fastapi", ["missing"])
@@ -424,3 +444,93 @@ def test_suggestions_efe_ranked_and_readonly(store):
     # sorted by descending EFE value
     vals = [d["efe_value"] for d in out]
     assert vals == sorted(vals, reverse=True)
+
+
+def test_staleness_efe_never_boosted_by_age(store):
+    """META-24 finding 1: _leading_int read the staleness evidence's leading
+    age-in-days (always >=180) as a failure count, so every staleness signal
+    got the max 2x pragmatic boost (EFE 1.40) and outranked quality signals
+    (1.38) — inverting the documented quality-high > staleness-moderate
+    ordering. The failure-count boost now applies only to coverage/quality."""
+    from selflearn.contracts import GapSignal
+    from selflearn.learning.gaps import expected_free_energy_value as efe
+
+    stale = GapSignal(pack="p", topic="t", kind="staleness",
+                      evidence="kn-x: sources 320d old, evidence score 0.20 "
+                               "(decayed helpful=0.5, harmful=2.0)")
+    qual = GapSignal(pack="p", topic="t", kind="quality",
+                     evidence="2 verified failures despite retrieval; "
+                              "implicated: ['kn-x']")
+    assert efe(qual) > efe(stale)          # documented ordering restored
+    ancient = GapSignal(pack="p", topic="t", kind="staleness",
+                        evidence="kn-x: sources 9999d old, evidence "
+                                 "score 0.20 (decayed helpful=0.5, "
+                                 "harmful=2.0)")
+    assert efe(stale) == efe(ancient)      # staleness value is age-independent
+    assert efe(stale) == pytest.approx(0.9)   # 0.5 pragmatic + 0.4 epistemic
+
+
+def test_covered_topic_with_no_retrieval_says_so(store):
+    """META-24 finding 2: the covered-but-nothing-retrieved coverage signal
+    used to misprint 'claimed but not covered' (and the 'not in coverage
+    map' branch was unreachable — the join requires topic membership)."""
+    learner = Learner(store)
+    for i in range(2):
+        learner.observe(fail("lifespan", task_id=f"t{i}"))   # no injection
+    signals = learner.gap_signals("fastapi")
+    assert len(signals) == 1 and signals[0].kind == "coverage"
+    assert "covered but nothing was retrieved" in signals[0].evidence
+    assert "claimed but not covered" not in signals[0].evidence
+
+
+def test_min_validation_gain_gates_eligibility():
+    """META-24 finding 5: the min_validation_gain eligibility gate was
+    untested (every existing trial test used the 0.0 default)."""
+    from selflearn.learning import (
+        EvaluationCriterion,
+        EvaluationItemResult,
+        EvaluationSplits,
+        ExpertExample,
+        FailureCluster,
+        ImprovementPolicy,
+        ImprovementTrial,
+        evaluate_improvement_trial,
+    )
+
+    def policy(gate):
+        crit = EvaluationCriterion(
+            id="c", description="label matches", failure_mode="wrong",
+            check_kind="deterministic", probe_ids=("p",),
+            anchors=("exact",), approved_by="expert@example.org")
+        return ImprovementPolicy(
+            domain_expert="expert@example.org",
+            optimizer_identity="opt", evaluator_identity="eval",
+            criteria=(crit,),
+            expert_examples=(ExpertExample(
+                id="e", criterion_id="c", expected="x", rationale="r"),),
+            splits=EvaluationSplits(fit=("f1",), validation=("v1", "v2"),
+                                    test=("t1",)),
+            target_validation_score=1.0, max_iterations=10,
+            plateau_rounds=10, min_validation_gain=gate)
+
+    def result(item, passed):
+        return EvaluationItemResult(
+            item_id=item, passed=passed, evidence="frozen evidence",
+            evaluator_identity="eval",
+            failure_mode="" if passed else "wrong")
+
+    dominant = FailureCluster(topic="t", failure_mode="wrong", count=2,
+                              task_ids=("a", "b"))
+    trial = ImprovementTrial(
+        iteration=1, target_cluster=dominant.id, evaluator_identity="eval",
+        fit_results=(result("f1", True),),
+        validation_results=(result("v1", True), result("v2", False)))
+    best = (result("v1", False), result("v2", False))    # gain = +0.5
+    below = evaluate_improvement_trial(
+        policy(0.6), trial, dominant_cluster=dominant,
+        best_validation_results=best, stagnant_rounds=0)
+    assert not below.eligible and below.stagnant_rounds == 1
+    met = evaluate_improvement_trial(
+        policy(0.5), trial, dominant_cluster=dominant,
+        best_validation_results=best, stagnant_rounds=0)
+    assert met.eligible and met.stagnant_rounds == 0

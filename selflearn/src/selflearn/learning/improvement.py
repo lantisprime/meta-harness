@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
 from selflearn.contracts import ContractError, TaskOutcome
+from selflearn.learning.regression import BASELINE_FILE
 
 if TYPE_CHECKING:
     from selflearn.specialist import SpecialistSpec
@@ -51,12 +52,6 @@ class EvaluationCriterion:
                 f"unsupported evaluation check_kind {self.check_kind!r}")
         _nonempty_unique(self.probe_ids, "criterion probe_ids")
         _nonempty_unique(self.anchors, "criterion anchors")
-
-    @property
-    def high_signal(self) -> bool:
-        """Whether the criterion is objective or sufficiently anchored."""
-        minimum_anchors = 2 if self.check_kind == "judge" else 1
-        return bool(self.approved_by) and len(self.anchors) >= minimum_anchors
 
     def to_dict(self) -> dict:
         return {
@@ -280,19 +275,25 @@ def cluster_failures(outcomes: Iterable[TaskOutcome]) -> tuple[FailureCluster, .
                                           item.failure_mode)))
 
 
-def _valid_baseline(store: "PackStore", pack: str) -> bool:
-    path = store.root / pack / "evals" / "baseline.json"
+def _baseline_issue(store: "PackStore", pack: str) -> str:
+    """Empty string when the pack has a usable with-injection suite
+    baseline, else the reason it is unusable."""
+    path = store.root / pack / "evals" / BASELINE_FILE
     if not path.is_file():
-        return False
+        return "has no frozen suite baseline"
     try:
         data = json.loads(path.read_text())
-        return (data.get("pack") == pack
-                and bool(data.get("model_id"))
-                and int(data.get("total", 0)) > 0
-                and 0.0 <= float(data.get("pass_rate", -1.0)) <= 1.0
-                and data.get("injected") is True)
+        well_formed = (data.get("pack") == pack
+                       and bool(data.get("model_id"))
+                       and int(data.get("total", 0)) > 0
+                       and 0.0 <= float(data.get("pass_rate", -1.0)) <= 1.0)
     except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
-        return False
+        return "has no frozen suite baseline"
+    if not well_formed:
+        return "has no frozen suite baseline"
+    if data.get("injected") is not True:
+        return "suite baseline is not a with-injection run"
+    return ""
 
 
 def assess_domain_readiness(spec: "SpecialistSpec",
@@ -330,8 +331,9 @@ def assess_domain_readiness(spec: "SpecialistSpec",
         published = store.published(pack)
         if not published:
             reasons.append(f"pack {pack!r} has no published knowledge")
-        if not _valid_baseline(store, pack):
-            reasons.append(f"pack {pack!r} has no frozen suite baseline")
+        baseline_issue = _baseline_issue(store, pack)
+        if baseline_issue:
+            reasons.append(f"pack {pack!r} {baseline_issue}")
         for entry in published:
             for probe in store.probes_for(entry.cand.id):
                 probes[probe.id] = probe
