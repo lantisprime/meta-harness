@@ -6,3 +6,9 @@ data/runtime/
 *.egg-info/
 .mh_state/
 .episodic-memory/
+
+# BP-1 per-run HMAC key (RFC-004)
+**/.episodic-memory/runs/*/run.key
+
+# Episodic memory install-version manifest
+.episodic-memory-install.json

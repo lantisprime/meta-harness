@@ -1,0 +1,424 @@
+   manifest.manifest_hash =
+ sha256:18c64c778ad51f04eb2899944c59125edb7ad94d9949ab95611e08648178e6aa
+ probe5 PASS
+
+ Took 0.1s
+
+
+ ### Probe 6 — oversized structured tool_calls under tiny budget raises
+ LiveContextViolation
+
+
+ write /private/tmp/meta19-probes/probe6_oversized_tool_calls.py
+
+ """Probe 6: oversized structured tool_calls under a tiny budget.
+
+ FIX-5 (live.py): structured turns (tool_calls/tool_call_id) are real bytes on
+ the wire but invisible to messages_tokens — they must be counted into
+ budget_used_tokens; if they push past the budget, the assembly must FAIL
+ CLOSED with LiveContextViolation (no truncation of structured turns).
+ """
+ from __future__ import annotations
+
+ import json
+ ... (121 more lines, 131 total, ctrl+o to expand)
+
+
+
+ $ cd /private/tmp/meta19-probes &&
+ /private/tmp/meta-harness-meta-19/.venv/bin/python
+ probe6_oversized_tool_calls.py
+
+ ... (2 earlier lines, ctrl+o to expand)
+   PASS: oversized tool_calls rejected: assembled chat context exceeds hard
+ budget: 12534 > 200 tokens (protected sections cannot be omitted to fit)
+   PASS: oversized tool_call_id rejected: assembled chat context exceeds hard
+ budget: 2004 > 120 tokens (protected sections cannot be omitted to fit)
+ probe6 PASS
+
+ Took 0.1s
+
+
+ ### Probe 4 — OpenAICompatWorker end-to-end against a local stub server with
+ run-event sink
+
+
+ write /private/tmp/meta19-probes/probe4_worker_end_to_end.py
+
+ """Probe 4: OpenAICompatWorker end-to-end against a local stub HTTP server.
+
+   (a) the POST body the server RECEIVES equals the messages + tool_schemas
+       surfaces the assembler attested to in the manifest (canonical-JSON
+ equal).
+   (b) a `context.manifest` event with `shadow=False` is emitted per round to a
+       run-event sink we bind via metaharness.observability.run_events.
+   (c) a trust-violating task (UNTRUSTED_EVIDENCE draft in an instruction slot)
+       fails with WorkerResult.error_kind == "context_contract" and the server
+       is NEVER hit.
+ """
+ ... (141 more lines, 151 total, ctrl+o to expand)
+
+ terminated
+
+
+ ### Probe 4 — OpenAICompatWorker end-to-end against a stub HTTP server
+
+
+ write /private/tmp/meta19-probes/probe4_worker_end_to_end.py
+
+ """Probe 4: OpenAICompatWorker end-to-end against a local stub HTTP server.
+
+ Three checks:
+   (a) happy path: a normal task sends a POST whose body matches the manifest's
+       attested message surfaces byte-for-byte.
+   (b) per-round context.manifest event with shadow=False is emitted into a
+       bound run-event sink.
+   (c) trust-violating task fails with
+ WorkerResult.error_kind='context_contract'
+       and the server is NEVER hit (request count unchanged).
+ """
+ ... (296 more lines, 306 total, ctrl+o to expand)
+
+
+
+ $ cd /private/tmp/meta19-probes &&
+ /private/tmp/meta-harness-meta-19/.venv/bin/python probe4_worker_end_to_end.py
+ 2>&1 | head -80
+
+ ... (11 earlier lines, ctrl+o to expand)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ TypeError: case_c_round_count_matches() takes 0 positional arguments but 1 was
+ given
+
+ probe4 FAIL
+
+ Took 1.2s
+
+
+ Two issues to fix:
+
+ 1. case_a: manifest_hash mismatch — this is because each worker.run() call
+    resets some state; I think the api_key being a different value (the test
+    took an api_key="" and then a different one). Actually wait — in case_a I
+    do TWO runs: first with api_key="sk-APIKEY...", then bind sink + run with
+    api_key="sk-APIKEY-OBFUSCATE-ME-please" (same!). But the comparison is
+    between the second run's manifest event hash and the assembly computed
+    inside the first run with api_key=....
+
+ Let me re-read my own code carefully:
+
+ ```python
+   result = asyncio.run(worker.run(task))  # FIRST run with
+ api_key="sk-APIKEY..."
+   ...
+   # Round 1: re-run assemble_live with the same drafts
+   from metaharness.harness.local import _build_drafts
+   drafts = _build_drafts(task, worker.system_prompt)
+   ...
+   assembly = assemble_live(
+       drafts,
+       ...
+       redaction_values=[worker.api_key] if worker.api_key else (),
+   )
+   # Compare messages...
+   # Capture events from the next run
+   token = bind_run_event_sink(...)
+   try:
+       _StubHandler.state.requests.clear()
+       _StubHandler.state.request_count = 0
+       asyncio.run(worker.run(_simple_task("second")))  # SECOND run
+   finally:
+       reset_run_event_sink(token)
+ ```
+
+ So I compute assembly (from the FIRST run's drafts/budget/api_key), but
+ capture events from the SECOND run (different task!). The manifest_attested is
+ from the second run's task "second", but the comparison assembly is from the
+ FIRST run's task "look up token". That's the bug — manifest_hash mismatch is
+ the symptom.
+
+ Let me fix this by computing assembly using the SECOND task inside the
+ event-capture block, or equivalently, comparing just one task's data
+ throughout.
+
+ 2. case_c: signature — I gave the function signature _loop then
+    case_c_round_count_matches() doesn't accept any args. Need to remove the
+    arg in case_c and the call site loop uses positional
+    fn(asyncio.new_event_loop()). Actually case_c_round_count_matches was the
+    only one without the _loop parameter. Let me fix that — either add the arg
+    or stop passing it.
+
+ Let me also consider: I'd like to add an isolation check —
+ server.request_count from the second run is the right thing. And the
+ manifest_hash should match the event manifest_hash when both come from the
+ same run.
+
+ Let me rewrite case_a more cleanly:
+
+ ```python
+   def case_a(_loop):
+       server, port = _start_stub()
+       try:
+           worker = _worker(f"http://127.0.0.1:{port}",
+                            api_key="sk-APIKEY-OBFUSCATE-ME-please")
+           task = _simple_task("look up token")
+           events = []
+           token = bind_run_event_sink(lambda k, p: events.append((k, p)))
+           try:
+               result = asyncio.run(worker.run(task))
+           finally:
+               reset_run_event_sink(token)
+           assert result.error is None, f"worker errored: {result.error}"
+           assert _StubHandler.state.request_count == 1
+           sent = _StubHandler.state.requests[0]
+           # Reconstruct what assemble_live produced for THIS task
+           from metaharness.harness.local import _build_drafts
+           from metaharness.context import budget_for
+           drafts = _build_drafts(task, worker.system_prompt)
+           assembly = assemble_live(
+               drafts, transport="chat",
+               budget_tokens=budget_for(Tier.SMALL, worker.context_budget),
+               model_id=worker.model, harness_version="metaharness:0.1.0",
+               tier=worker.tier,
+               redaction_values=[worker.api_key] if worker.api_key else (),
+           )
+           # Compare messages
+           sent_canon = [canonical_json(m) for m in sent["messages"]]
+           asm_canon = [canonical_json(m) for m in assembly.messages]
+           assert sent_canon == asm_canon, f"server.messages diverge from
+ assembly.messages: {sent_canon} vs {asm_canon}"
+           # Check api_key not in body
+           assert worker.api_key not in json.dumps(sent)
+           # Event check
+           manifest_events = [p for k, p in events if k == "context.manifest"]
+           assert manifest_events, f"no context.manifest events: {[k for k,_ in
+  events]}"
+           for ev in manifest_events:
+               assert ev.get("shadow") is False, f"shadow=True in {ev}"
+           rounds = sorted({ev["round"] for ev in manifest_events})
+           assert rounds == [0], f"unexpected rounds: {rounds}"
+           ev_hash = manifest_events[0]["manifest"]["manifest_hash"]
+           assert ev_hash == assembly.manifest.manifest_hash
+           return ("a", True, f"events={len(manifest_events)}, rounds={rounds},
+ "
+                               f"manifest_hash={ev_hash[:24]}...,
+ server_hits=1")
+       except Exception as exc:
+           return ("a", False, repr(exc))
+       finally:
+           try: server.shutdown()
+           except: pass
+ ```
+
+ That's much cleaner.
+
+ The case_a bug: I'm comparing assembly from the first run's task against
+ manifest events from the second run's different task; and case_c has a sig
+ mismatch. Let me fix both.
+
+
+ write /private/tmp/meta19-probes/probe4_worker_end_to_end.py
+
+ """Probe 4: OpenAICompatWorker end-to-end against a local stub HTTP server.
+
+ Three checks:
+   (a) happy path: a normal task sends a POST whose body matches the manifest's
+       attested message surfaces byte-for-byte; a bound run-event sink receives
+       a context.manifest event with shadow=False, one per round, whose
+       manifest_hash matches the assembly the worker produced for that run.
+   (b) trust-violating task fails with
+ WorkerResult.error_kind='context_contract'
+       and the server is NEVER hit (request count unchanged).
+   (c) per-round context.manifest events fire over multiple rounds.
+ ... (308 more lines, 318 total, ctrl+o to expand)
+
+
+
+ $ cd /private/tmp/meta19-probes &&
+ /private/tmp/meta-harness-meta-19/.venv/bin/python probe4_worker_end_to_end.py
+ 2>&1 | head -40
+
+ ... (3 earlier lines, ctrl+o to expand)
+   case_b: PASS — error_kind='context_contract', server_hits=0,
+ error="LiveContextViolation: instruction slot 'system_instructions' requires
+ INSTRUCTIO"
+   case_c: PASS — manifest events=1, rounds=[0]
+ probe4 PASS
+
+ Took 1.7s
+
+
+ All three cases of probe 4 PASS. Now let me also write an aggregator/driver
+ that runs all probes and produces a single PASS/FAIL table.
+
+ All individual probes pass. Now let me write a single driver that runs all of
+ them and produces the report table.
+
+
+ write /private/tmp/meta19-probes/run_all_probes.py
+
+ """Independent BEHAVIORAL VERIFICATION driver for META-19.
+
+ Runs every probe under /private/tmp/meta19-probes/ in a fresh subprocess so a
+ crash in one probe does not taint the others, and prints a PASS/FAIL table.
+
+ This script does NOT import the repo tests and does NOT copy them; it is the
+ verification seat's own driver wiring the probe scripts to the table.
+ """
+ from __future__ import annotations
+
+ ... (70 more lines, 80 total, ctrl+o to expand)
+
+
+
+ $ cd /private/tmp/meta19-probes &&
+ /private/tmp/meta-harness-meta-19/.venv/bin/python run_all_probes.py
+
+ ... (21 earlier lines, ctrl+o to expand)
+ envelope/manifest hashes
+ 6     PASS   0.10    Oversized structured tool_calls under a tiny budget raise
+ LiveContextViolation
+
+ # overall: 0 failures of 6 probes in 2.19s
+
+ Took 2.2s
+
+
+ All six probes pass. Let me also verify the frozen commit matches what we
+ expect, and check there are no signs of cnnection to ensure the verification
+ seat is clean of repo-test contamination.
+
+ Let me also verify the commit fingerprint in the worktree and confirm none of
+ the probes imported metaharness.tests or copied any repo test.
+
+
+ $ git -C /private/tmp/meta-harness-meta-19 rev-parse HEAD 2>&1 | head -3 &&
+ echo "---" && git -C /private/tmp/meta-harness-meta-19 status --short 2>&1 |
+ head -10 && echo "---" && grep -rln "metaharness.tests\|from tests\|import
+ tests\|conftest\|/tests/" /private/tmp/meta19-probes/ 2>&1 | head -10 && echo
+ "--- imported modules from probe dir" && grep -h "^from metaharness\|^import
+ metaharness" /private/tmp/meta19-probes/*.py | sort -u
+
+ ... (6 earlier lines, ctrl+o to expand)
+ from metaharness.context.models import canonical_json
+ from metaharness.core.types import Task, TaskType, Tier, WorkerResult
+ from metaharness.core.types import Tier
+ from metaharness.harness.local import OpenAICompatWorker, _build_drafts
+ from metaharness.observability.run_events import (
+
+ Took 14.0s
+
+
+ Good:
+ - HEAD = 1661bd127718803bf281301ed01a219732bad64d ✓ matches the requirement
+ - Worktree is clean (no status output)
+ - Probes import only from metaharness.context.*, metaharness.core.types,
+   metaharness.harness.local, metaharness.observability.run_events — no from
+   tests / import tests / paths under /tests/
+
+ All six probes PASS. Let me also list the final probe files and write a brief
+ summary.
+
+
+ $ ls -la /private/tmp/meta19-probes/
+
+ ... (9 earlier lines, ctrl+o to expand)
+ probe4_worker_end_to_end.py
+ -rw-r--r--@   1 charltondho  wheel   4650 19 Jul 18:32 probe5_determinism.py
+ -rw-r--r--@   1 charltondho  wheel   4287 19 Jul 18:32
+ probe6_oversized_tool_calls.py
+ -rw-r--r--@   1 charltondho  wheel   3502 19 Jul 18:40 run_all_probes.py
+
+ Took 0.0s
+
+
+ Verification report
+
+ Worktree: /private/tmp/meta-harness-meta-19 (HEAD =
+ 1661bd127718803bf281301ed01a219732bad64d ✓ matches the frozen commit; worktree
+ clean).
+ Probes: six standalone Python files under /private/tmp/meta19-probes/,
+ executed with /private/tmp/meta-harness-meta-19/.venv/bin/python. None of them
+ import or copy any tests/* module.
+
+ ┌─────────────────────┬────────┬──────┬──────────────────────────────────────┐
+ │ Probe               │ Result │ Time │ What it asserts                      │
+ │                     │        │ (s)  │                                      │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 1 — assemble_live   │ PASS   │ 0.11 │ (a) UNTRUSTED_EVIDENCE draft in      │
+ │ trust/role          │        │      │ SYSTEM_INSTRUCTIONS raises           │
+ │                     │        │      │ LiveContextViolation; (b)            │
+ │                     │        │      │ role="system" on a non-instruction   │
+ │                     │        │      │ draft raises LiveContextViolation    │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 2 — Redaction       │ PASS   │ 0.10 │ Secret sk-SECRETPROBE-… passed via   │
+ │ coverage            │        │      │ redaction_values appears in no       │
+ │                     │        │      │ surface (chat messages, flat prompt, │
+ │                     │        │      │ system prompt, tool_schemas, every   │
+ │                     │        │      │ manifest payload_json, the redacted  │
+ │                     │        │      │ envelope JSON,                       │
+ │                     │        │      │ reconstruct_messages()); [REDACTED]  │
+ │                     │        │      │ replaces it in draft content,        │
+ │                     │        │      │ tool_calls arguments, AND            │
+ │                     │        │      │ tool_call_id (FIX-4)                 │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 3 — Reconstruct +   │ PASS   │ 0.10 │ manifest.reconstruct_messages()      │
+ │ surface attestation │        │      │ equals assembly.messages after       │
+ │                     │        │      │ canonical-JSON; with                 │
+ │                     │        │      │ transport="chat" only "message" (and │
+ │                     │        │      │ "tool_schemas" when supplied) appear │
+ │                     │        │      │ in entries — never                   │
+ │                     │        │      │ "flat_prompt"/"system_prompt";       │
+ │                     │        │      │ conversely the "cli" transport       │
+ │                     │        │      │ attests only "flat_prompt" (and      │
+ │                     │        │      │ "system_prompt" when a system-role   │
+ │                     │        │      │ draft exists) — never                │
+ │                     │        │      │ "message"/"tool_schemas"             │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 4 —                 │ PASS   │ 1.66 │ Server (stub HTTPServer) receives a  │
+ │ OpenAICompatWorker  │        │      │ POST body whose messages field       │
+ │ end-to-end          │        │      │ equals assembly.messages             │
+ │                     │        │      │ byte-for-byte; raw api_key is        │
+ │                     │        │      │ scrubbed; a context.manifest event   │
+ │                     │        │      │ (shadow=False, round=0,              │
+ │                     │        │      │ manifest_hash matches                │
+ │                     │        │      │ assembly.manifest.manifest_hash) is  │
+ │                     │        │      │ captured by a bound run_event_sink;  │
+ │                     │        │      │ trust-violating task (via            │
+ │                     │        │      │ _build_drafts monkey-patch inserting │
+ │                     │        │      │ UNTRUSTED_EVIDENCE in a              │
+ │                     │        │      │ SYSTEM_INSTRUCTIONS slot) returns    │
+ │                     │        │      │ WorkerResult(error_kind="context_con │
+ │                     │        │      │ tract", error="LiveContextViolation: │
+ │                     │        │      │ …") with server hits=0               │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 5 — Determinism     │ PASS   │ 0.11 │ Two identical assemble_live calls    │
+ │                     │        │      │ yield the same                       │
+ │                     │        │      │ envelope.content_hash,               │
+ │                     │        │      │ manifest.manifest_hash,              │
+ │                     │        │      │ manifest.envelope_hash,              │
+ │                     │        │      │ manifest.redacted_envelope_hash, and │
+ │                     │        │      │ identical serialized                 │
+ │                     │        │      │ messages/tool_schemas                │
+ ├─────────────────────┼────────┼──────┼──────────────────────────────────────┤
+ │ 6 — Oversized       │ PASS   │ 0.10 │ A draft with a 50 KB tool_calls      │
+ │ structured          │        │      │ arguments payload under              │
+ │ tool_calls          │        │      │ budget_tokens=200 raises             │
+ │                     │        │      │ LiveContextViolation("… exceeds hard │
+ │                     │        │      │ budget: 12534 > 200 tokens …"); same │
+ │                     │        │      │ for a bloated tool_call_id under     │
+ │                     │        │      │ budget_tokens=120 (2004 > 120) —     │
+ │                     │        │      │ FIX-5 fail-closed                    │
+ └─────────────────────┴────────┴──────┴──────────────────────────────────────┘
+
+ No FAIL rows. Driver: run_all_probes.py runs each probe in a fresh subprocess
+ (so a crashing probe cannot taint the table); overall 0/6 failures in 2.19 s.
+
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+/private/tmp/meta-harness-meta-19 (dev/meta-19-live-context-envelope)
+↑80k ↓20k R1.1M CH99.0% $0.116 4.8%/1.0M (auto)      (minimax) MiniMax-M3 • high
+│ permission: read-only │ runbooks: 0
+
+

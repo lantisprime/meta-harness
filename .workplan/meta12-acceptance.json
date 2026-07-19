@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta12-user-approved-accept",
+  "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+  "integrationCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+  "commands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q selflearn/tests --rootdir selflearn",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_knowledge_acquisition.py tests/test_knowledge_adapter.py tests/test_web.py",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "evidenceRefs": [
+    "github:lantisprime/meta-harness#43@46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+    "github-actions:29668497625/job/88143165219",
+    ".review-store/replies/20260719-meta12-p1-pi-glm-5.2.md",
+    "post-merge:222-selflearn;57-integration;115-workplan;diff-clean"
+  ],
+  "receiptHash": "sha256:c9453bfa95b80fa35aa447a46490230ea7d26a760a86b6d2c6dd6cd726537673"
+}

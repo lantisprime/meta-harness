@@ -1,0 +1,1533 @@
+{
+  "schemaVersion": 1,
+  "revision": 49,
+  "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
+  "cards": [
+    {
+      "id": "TASK-20260714-001",
+      "title": "Build and test the worktree-aware atomic Kanban control root",
+      "status": "done",
+      "owner": "",
+      "paths": [],
+      "evidence": [
+        "https://github.com/lantisprime/meta-harness/pull/32",
+        "a48fa4a3766f655feeb3c780a9a9c1974fce9da7",
+        "node --test scripts/workplan.test.mjs: 115 passed"
+      ]
+    },
+    {
+      "id": "TASK-20260714-010",
+      "title": "Add the transactional remote claim gateway, Linear projection adapter, remote MCP facade, fencing, and cross-host race/recovery tests",
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:codex-meta2-20260715",
+      "paths": [],
+      "priority": 0,
+      "trace": "Linear META-2; charter/plan hashes recorded in qualified definition",
+      "dependencies": [
+        "TASK-20260714-001"
+      ],
+      "evidence": [
+        "Linear:META-2",
+        "PR32:a48fa4a",
+        "plan-sha256:2cc6b28e",
+        "charter-sha256:62e07328"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim",
+        "start"
+      ],
+      "definition": {
+        "sourceRevision": "git:a48fa4a3766f655feeb3c780a9a9c1974fce9da7;Linear:META-2;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "definitionHash": "sha256:36fd9e3c17ad3576e6c6993afb99a451b643758d6b641cd9f726beadfd1720ef",
+        "worktreePath": "/private/tmp/meta-harness-meta-2",
+        "branch": "dev/meta-2-remote-gateway",
+        "baseCommit": "a48fa4a3766f655feeb3c780a9a9c1974fce9da7",
+        "currentHead": "a48fa4a3766f655feeb3c780a9a9c1974fce9da7",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded multi-agent implementation card; stdlib SQLite reference gateway; no live infrastructure deployment or product-runtime scope.",
+        "stopCondition": "Fail closed on ambiguous authority, inability to prove one-winner cross-host claims, stale-token mutation, credential disclosure, product-runtime imports, dirty-path overlap, failing acceptance command, or unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The coding owner cannot self-approve. Coordinator integration and acceptance require an independent adversarial review plus immutable test and receipt evidence.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/development",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check",
+          "rg -n 'metaharness\\.(routing|core|workflows|harness)' development/remote_workplan"
+        ],
+        "nextCheckpoint": "Transactional SQLite schema and failing two-host claim/fencing tests exist in the isolated worktree.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 1,
+          "revisionTo": 2,
+          "at": "2026-07-14T23:58:46.540Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 2,
+          "revisionTo": 3,
+          "at": "2026-07-14T23:58:46.604Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 3,
+          "revisionTo": 4,
+          "at": "2026-07-14T23:59:12.925Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 4,
+          "revisionTo": 5,
+          "at": "2026-07-15T00:44:17.474Z",
+          "evidence": {
+            "branch": "dev/meta-2-remote-gateway",
+            "head": "d80728d1a621a0fda4c8ba9002af47e516f041ed"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 5,
+          "revisionTo": 6,
+          "at": "2026-07-15T00:48:25.946Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-2-remote-gateway",
+            "reviewHead": "d80728d1a621a0fda4c8ba9002af47e516f041ed",
+            "integrationCommit": "7ed92fdd286335d3aa91ac3520b9896263480b37"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+          "revisionFrom": 6,
+          "revisionTo": 7,
+          "at": "2026-07-15T00:49:08.889Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+            "definitionHash": "sha256:36fd9e3c17ad3576e6c6993afb99a451b643758d6b641cd9f726beadfd1720ef",
+            "integrationCommit": "7ed92fdd286335d3aa91ac3520b9896263480b37",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/development",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check",
+              "rg -n 'metaharness\\.(routing|core|workflows|harness)' development/remote_workplan"
+            ],
+            "evidenceRefs": [
+              "PR33",
+              "GitHub Actions run 29379969428: pass",
+              "pytest focused: 83 passed",
+              "pytest full: 1088 passed",
+              "Node isolated-HOME: 115 passed",
+              "security re-review: ACCEPT no P0/P1"
+            ],
+            "receiptHash": "sha256:e219f2e63d5f37b4c08d5aacf2cab99e284c2fd1422f51a59c65d3244ec63c11"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:codex-meta2-20260715",
+        "definitionHash": "sha256:36fd9e3c17ad3576e6c6993afb99a451b643758d6b641cd9f726beadfd1720ef",
+        "sourceRevision": "git:a48fa4a3766f655feeb3c780a9a9c1974fce9da7;Linear:META-2;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "worktreePath": "/private/tmp/meta-harness-meta-2",
+        "branch": "dev/meta-2-remote-gateway",
+        "baseCommit": "a48fa4a3766f655feeb3c780a9a9c1974fce9da7",
+        "currentHead": "a48fa4a3766f655feeb3c780a9a9c1974fce9da7",
+        "paths": [
+          "development/remote_workplan",
+          "tests/development",
+          ".github/workflows/ci.yml",
+          "pyproject.toml"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded multi-agent implementation card; stdlib SQLite reference gateway; no live infrastructure deployment or product-runtime scope.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/development",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check",
+          "rg -n 'metaharness\\.(routing|core|workflows|harness)' development/remote_workplan"
+        ],
+        "nextCheckpoint": "Transactional SQLite schema and failing two-host claim/fencing tests exist in the isolated worktree.",
+        "revisionFrom": 2,
+        "revisionTo": 3,
+        "at": "2026-07-14T23:58:46.604Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-2-remote-gateway",
+        "head": "d80728d1a621a0fda4c8ba9002af47e516f041ed",
+        "revisionFrom": 4,
+        "revisionTo": 5,
+        "at": "2026-07-15T00:44:17.474Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+        "reviewBranch": "dev/meta-2-remote-gateway",
+        "reviewHead": "d80728d1a621a0fda4c8ba9002af47e516f041ed",
+        "integrationCommit": "7ed92fdd286335d3aa91ac3520b9896263480b37",
+        "definitionHash": "sha256:36fd9e3c17ad3576e6c6993afb99a451b643758d6b641cd9f726beadfd1720ef",
+        "revisionFrom": 5,
+        "revisionTo": 6,
+        "at": "2026-07-15T00:48:25.946Z"
+      },
+      "releasedPaths": [
+        "development/remote_workplan",
+        "tests/development",
+        ".github/workflows/ci.yml",
+        "pyproject.toml"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+        "definitionHash": "sha256:36fd9e3c17ad3576e6c6993afb99a451b643758d6b641cd9f726beadfd1720ef",
+        "integrationCommit": "7ed92fdd286335d3aa91ac3520b9896263480b37",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/development",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check",
+          "rg -n 'metaharness\\.(routing|core|workflows|harness)' development/remote_workplan"
+        ],
+        "evidenceRefs": [
+          "PR33",
+          "GitHub Actions run 29379969428: pass",
+          "pytest focused: 83 passed",
+          "pytest full: 1088 passed",
+          "Node isolated-HOME: 115 passed",
+          "security re-review: ACCEPT no P0/P1"
+        ],
+        "receiptHash": "sha256:e219f2e63d5f37b4c08d5aacf2cab99e284c2fd1422f51a59c65d3244ec63c11",
+        "actor": "coordinator:charltons-mbp.home.lan:codex-meta2-20260715",
+        "releasedPaths": [
+          "development/remote_workplan",
+          "tests/development",
+          ".github/workflows/ci.yml",
+          "pyproject.toml"
+        ],
+        "revisionFrom": 6,
+        "revisionTo": 7,
+        "at": "2026-07-15T00:49:08.889Z"
+      }
+    },
+    {
+      "id": "TASK-20260714-002",
+      "title": "Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests",
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:codex-meta4-20260715",
+      "paths": [],
+      "priority": 0,
+      "trace": "Linear META-4; charter stages 2-4; full-fidelity evidence, frozen comparisons, bounded authority, reversible lineage; H/E/W frozen",
+      "dependencies": [
+        "TASK-20260714-010"
+      ],
+      "evidence": [
+        "Linear:META-4",
+        "PR33:8434c8e",
+        "plan-sha256:73d94f52",
+        "charter-sha256:62e07328"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim",
+        "start",
+        "first checkpoint: failing invalid-input and determinism tests"
+      ],
+      "definition": {
+        "sourceRevision": "git:8434c8e3a1b761b82ba07da7106a0260fdbae976;Linear:META-4@2026-07-14T02:54:21.377Z;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "definitionHash": "sha256:11fb7b86db2d1dcbbfca5b06f2b03411652a3aa928a8a77e491b28222d3405d8",
+        "worktreePath": "/private/tmp/meta-harness-meta-4",
+        "branch": "dev/meta-4-context-contracts",
+        "baseCommit": "8434c8e3a1b761b82ba07da7106a0260fdbae976",
+        "currentHead": "8434c8e3a1b761b82ba07da7106a0260fdbae976",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded product-contract card: typed context/source/manifest contracts, deterministic section budgeting and compression receipts, and shadow-only local-worker manifest emission. No memory database, retrieval, optimizer, prompt activation, model routing change, evaluator evolution, training, deployment, or unrelated contract families.",
+        "stopCondition": "Stop and fail closed on any live prompt/message change, secret or unredacted sensitive content in a manifest, nondeterminism for identical immutable inputs, inability to reconstruct the redacted envelope, H/E/W drift, owned-path expansion, failing acceptance command, or unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The coding owner cannot self-approve. Coordinator integration and acceptance require immutable focused/full test evidence plus an independent adversarial contract/security review with no unresolved P0/P1 findings; shadow receipts are evidence only and cannot promote a candidate.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_context.py tests/test_tools.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Failing invalid-input and determinism tests define the typed source, section, envelope, manifest, budgeting/compression, redaction, and unchanged-live-prompt shadow boundary before implementation.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 8,
+          "revisionTo": 9,
+          "at": "2026-07-15T05:59:53.995Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 9,
+          "revisionTo": 10,
+          "at": "2026-07-15T06:00:22.151Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 10,
+          "revisionTo": 11,
+          "at": "2026-07-15T06:00:22.222Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 11,
+          "revisionTo": 12,
+          "at": "2026-07-15T06:38:37.755Z",
+          "evidence": {
+            "branch": "dev/meta-4-context-contracts",
+            "head": "bd31f5b7f4f1700a3a8370b56bd4ed766be5ffc8"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 12,
+          "revisionTo": 13,
+          "at": "2026-07-15T06:41:52.710Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-4-context-contracts",
+            "reviewHead": "bd31f5b7f4f1700a3a8370b56bd4ed766be5ffc8",
+            "integrationCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+          "revisionFrom": 13,
+          "revisionTo": 14,
+          "at": "2026-07-15T06:47:19.340Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+            "definitionHash": "sha256:11fb7b86db2d1dcbbfca5b06f2b03411652a3aa928a8a77e491b28222d3405d8",
+            "integrationCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_context.py tests/test_tools.py tests/test_local_worker.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "PR34:merged:89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+              "GitHub Actions run 29394857569:pass",
+              "integrated focused:44 passed",
+              "integrated full:1106 passed",
+              "integrated Node:115 passed",
+              "independent re-review:ACCEPT:no P0/P1/P2:20260715-063805-667f3a6b6b72"
+            ],
+            "receiptHash": "sha256:16ab4fd4e00e02a60ccd4106b0a4bea53553430aef411e40ef7cb8832b214062"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:codex-meta4-20260715",
+        "definitionHash": "sha256:11fb7b86db2d1dcbbfca5b06f2b03411652a3aa928a8a77e491b28222d3405d8",
+        "sourceRevision": "git:8434c8e3a1b761b82ba07da7106a0260fdbae976;Linear:META-4@2026-07-14T02:54:21.377Z;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "worktreePath": "/private/tmp/meta-harness-meta-4",
+        "branch": "dev/meta-4-context-contracts",
+        "baseCommit": "8434c8e3a1b761b82ba07da7106a0260fdbae976",
+        "currentHead": "8434c8e3a1b761b82ba07da7106a0260fdbae976",
+        "paths": [
+          "src/metaharness/context.py",
+          "src/metaharness/context",
+          "src/metaharness/harness/local.py",
+          "tests/test_context.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded product-contract card: typed context/source/manifest contracts, deterministic section budgeting and compression receipts, and shadow-only local-worker manifest emission. No memory database, retrieval, optimizer, prompt activation, model routing change, evaluator evolution, training, deployment, or unrelated contract families.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_context.py tests/test_tools.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Failing invalid-input and determinism tests define the typed source, section, envelope, manifest, budgeting/compression, redaction, and unchanged-live-prompt shadow boundary before implementation.",
+        "revisionFrom": 9,
+        "revisionTo": 10,
+        "at": "2026-07-15T06:00:22.150Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-4-context-contracts",
+        "head": "bd31f5b7f4f1700a3a8370b56bd4ed766be5ffc8",
+        "revisionFrom": 11,
+        "revisionTo": 12,
+        "at": "2026-07-15T06:38:37.755Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+        "reviewBranch": "dev/meta-4-context-contracts",
+        "reviewHead": "bd31f5b7f4f1700a3a8370b56bd4ed766be5ffc8",
+        "integrationCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "definitionHash": "sha256:11fb7b86db2d1dcbbfca5b06f2b03411652a3aa928a8a77e491b28222d3405d8",
+        "revisionFrom": 12,
+        "revisionTo": 13,
+        "at": "2026-07-15T06:41:52.710Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/context.py",
+        "src/metaharness/context",
+        "src/metaharness/harness/local.py",
+        "tests/test_context.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+        "definitionHash": "sha256:11fb7b86db2d1dcbbfca5b06f2b03411652a3aa928a8a77e491b28222d3405d8",
+        "integrationCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_context.py tests/test_tools.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "PR34:merged:89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+          "GitHub Actions run 29394857569:pass",
+          "integrated focused:44 passed",
+          "integrated full:1106 passed",
+          "integrated Node:115 passed",
+          "independent re-review:ACCEPT:no P0/P1/P2:20260715-063805-667f3a6b6b72"
+        ],
+        "receiptHash": "sha256:16ab4fd4e00e02a60ccd4106b0a4bea53553430aef411e40ef7cb8832b214062",
+        "actor": "coordinator:charltons-mbp.home.lan:codex-meta4-20260715",
+        "releasedPaths": [
+          "src/metaharness/context.py",
+          "src/metaharness/context",
+          "src/metaharness/harness/local.py",
+          "tests/test_context.py"
+        ],
+        "revisionFrom": 13,
+        "revisionTo": 14,
+        "at": "2026-07-15T06:47:19.340Z"
+      }
+    },
+    {
+      "id": "TASK-20260714-003",
+      "title": "Red-team the frozen context contracts with disjoint invalid-input, authority, determinism, and memory-skill fixtures",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:meta5-20260715",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-5; charter stages 3-4; full-fidelity evidence, frozen comparisons, evaluator non-self-approval, bounded authority; H/E/W frozen",
+      "dependencies": [
+        "TASK-20260714-002"
+      ],
+      "evidence": [
+        "Linear:META-5",
+        "PR34:89f3e1c",
+        "context-plan-sha256:73d94f52",
+        "delivery-plan-sha256:2cc6b28e",
+        "charter-sha256:62e07328"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Claude lane",
+        "start",
+        "first checkpoint: executable adversarial corpus and strict expected-failure memory-skill fixtures"
+      ],
+      "definition": {
+        "sourceRevision": "git:89f3e1c885f42e1486ba6859f940fc7382d1e3ca;Linear:META-5@2026-07-14T02:54:35.494Z;META4-acceptance:sha256:16ab4fd4e00e02a60ccd4106b0a4bea53553430aef411e40ef7cb8832b214062;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "definitionHash": "sha256:cc2942889073a309e1d14fdf138092fadd959817b2c4aa14df3964eb594e9703",
+        "worktreePath": "/private/tmp/meta-harness-meta-5",
+        "branch": "dev/meta-5-contract-redteam",
+        "baseCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "currentHead": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded adversarial-fixture card owned by the Claude lane. Add disjoint tests and fixture corpora only under tests/adversarial and tests/fixtures/meta5. Existing implemented META-4 boundaries must receive executable negative tests; future memory-skill behavior may be represented only by explicit strict expected-failure tests tied to a named missing contract. No memory store, retrieval runtime, optimizer, model routing, evaluator evolution, weight training, deployment, or production source change.",
+        "stopCondition": "Stop and fail closed on any production-source edit, modification of META-4 builder tests, live prompt/message change, fixture that grants memory/evaluator/tool/promotion authority, nondeterministic fixture output, unbounded or unexplained expected failure, H/E/W drift, owned-path expansion, failing acceptance command beyond declared strict expected failures, or unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The Claude fixture author cannot self-approve. Coordinator integration and acceptance require immutable focused/full test evidence plus an independent adversarial review with no unresolved P0/P1 findings. Expected-failure fixtures document missing behavior and cannot be counted as implemented capability or promotion evidence.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_authority.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_determinism.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "A machine-readable adversarial corpus and four disjoint test modules exist; implemented META-4 negative boundaries are green, while future memory-skill gaps are explicit strict expected failures with stable requirement identifiers.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 15,
+          "revisionTo": 16,
+          "at": "2026-07-15T09:35:38.165Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 16,
+          "revisionTo": 17,
+          "at": "2026-07-15T09:36:09.645Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 17,
+          "revisionTo": 18,
+          "at": "2026-07-15T09:36:13.677Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 18,
+          "revisionTo": 19,
+          "at": "2026-07-15T10:08:43.302Z",
+          "evidence": {
+            "branch": "dev/meta-5-contract-redteam",
+            "head": "bae4fe45a1f63187345bca2cb07c27aa4f0e8777"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 19,
+          "revisionTo": 20,
+          "at": "2026-07-15T10:11:30.233Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-5-contract-redteam",
+            "reviewHead": "bae4fe45a1f63187345bca2cb07c27aa4f0e8777",
+            "integrationCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+          "revisionFrom": 20,
+          "revisionTo": 21,
+          "at": "2026-07-15T10:17:02.304Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+            "definitionHash": "sha256:cc2942889073a309e1d14fdf138092fadd959817b2c4aa14df3964eb594e9703",
+            "integrationCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_invalid_inputs.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_authority.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_determinism.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "PR35:merged:24dadaeec0e7d45b0953e76bfad220d656465b1f",
+              "GitHub Actions run 29407125918:pass",
+              "integrated focused:10+7+10+1 passed,15 strict xfailed",
+              "integrated combined:90 passed,15 strict xfailed",
+              "integrated full:1134 passed,15 strict xfailed",
+              "integrated Node:115 passed",
+              "independent final review:ACCEPT:no remaining findings:20260715"
+            ],
+            "receiptHash": "sha256:711612e1e5a62b5d29a3ee1010ca614045c438a267fe284a87713dc66a65e4aa"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta5-20260715",
+        "definitionHash": "sha256:cc2942889073a309e1d14fdf138092fadd959817b2c4aa14df3964eb594e9703",
+        "sourceRevision": "git:89f3e1c885f42e1486ba6859f940fc7382d1e3ca;Linear:META-5@2026-07-14T02:54:35.494Z;META4-acceptance:sha256:16ab4fd4e00e02a60ccd4106b0a4bea53553430aef411e40ef7cb8832b214062;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "worktreePath": "/private/tmp/meta-harness-meta-5",
+        "branch": "dev/meta-5-contract-redteam",
+        "baseCommit": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "currentHead": "89f3e1c885f42e1486ba6859f940fc7382d1e3ca",
+        "paths": [
+          "tests/adversarial",
+          "tests/fixtures/meta5"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded adversarial-fixture card owned by the Claude lane. Add disjoint tests and fixture corpora only under tests/adversarial and tests/fixtures/meta5. Existing implemented META-4 boundaries must receive executable negative tests; future memory-skill behavior may be represented only by explicit strict expected-failure tests tied to a named missing contract. No memory store, retrieval runtime, optimizer, model routing, evaluator evolution, weight training, deployment, or production source change.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_authority.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_determinism.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "A machine-readable adversarial corpus and four disjoint test modules exist; implemented META-4 negative boundaries are green, while future memory-skill gaps are explicit strict expected failures with stable requirement identifiers.",
+        "revisionFrom": 16,
+        "revisionTo": 17,
+        "at": "2026-07-15T09:36:09.644Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-5-contract-redteam",
+        "head": "bae4fe45a1f63187345bca2cb07c27aa4f0e8777",
+        "revisionFrom": 18,
+        "revisionTo": 19,
+        "at": "2026-07-15T10:08:43.302Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+        "reviewBranch": "dev/meta-5-contract-redteam",
+        "reviewHead": "bae4fe45a1f63187345bca2cb07c27aa4f0e8777",
+        "integrationCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "definitionHash": "sha256:cc2942889073a309e1d14fdf138092fadd959817b2c4aa14df3964eb594e9703",
+        "revisionFrom": 19,
+        "revisionTo": 20,
+        "at": "2026-07-15T10:11:30.233Z"
+      },
+      "releasedPaths": [
+        "tests/adversarial",
+        "tests/fixtures/meta5"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+        "definitionHash": "sha256:cc2942889073a309e1d14fdf138092fadd959817b2c4aa14df3964eb594e9703",
+        "integrationCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_authority.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_context_determinism.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "PR35:merged:24dadaeec0e7d45b0953e76bfad220d656465b1f",
+          "GitHub Actions run 29407125918:pass",
+          "integrated focused:10+7+10+1 passed,15 strict xfailed",
+          "integrated combined:90 passed,15 strict xfailed",
+          "integrated full:1134 passed,15 strict xfailed",
+          "integrated Node:115 passed",
+          "independent final review:ACCEPT:no remaining findings:20260715"
+        ],
+        "receiptHash": "sha256:711612e1e5a62b5d29a3ee1010ca614045c438a267fe284a87713dc66a65e4aa",
+        "actor": "coordinator:charltons-mbp.home.lan:meta5-20260715",
+        "releasedPaths": [
+          "tests/adversarial",
+          "tests/fixtures/meta5"
+        ],
+        "revisionFrom": 20,
+        "revisionTo": 21,
+        "at": "2026-07-15T10:17:02.304Z"
+      }
+    },
+    {
+      "id": "TASK-20260714-004",
+      "title": "Implement the typed memory substrate, deterministic scaffold-only LOG/CONSULT baseline, shadow MemoryActionBroker, and immutable receipts",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:meta6-20260716",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-6; charter stages 2,4-5; evidence-before-learning, bounded authority, reversible lineage, evaluator non-self-approval; H/E/W frozen; live context bytes unchanged",
+      "dependencies": [
+        "TASK-20260714-002",
+        "TASK-20260714-003"
+      ],
+      "evidence": [
+        "Linear:META-6",
+        "PR35:24dadae",
+        "META5-acceptance:sha256:711612e1",
+        "context-plan-sha256:73d94f52",
+        "delivery-plan-sha256:2cc6b28e",
+        "charter-sha256:62e07328"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Claude lane (coordinator-reassigned from Codex with user approval)",
+        "start",
+        "first checkpoint: typed store and shadow broker with receipts"
+      ],
+      "definition": {
+        "sourceRevision": "git:24dadaeec0e7d45b0953e76bfad220d656465b1f;Linear:META-6@2026-07-14T02:54:50.264Z;META5-acceptance:sha256:711612e1e5a62b5d29a3ee1010ca614045c438a267fe284a87713dc66a65e4aa;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+        "worktreePath": "/private/tmp/meta-harness-meta-6",
+        "branch": "dev/meta-6-memory-substrate",
+        "baseCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "currentHead": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded implementation card owned by the Claude lane (coordinator-reassigned from the preferred Codex lane with user approval, 2026-07-16). Implement the Phase-2 typed memory substrate: a new src/metaharness/memory package with append-only typed MemoryRecord stores (working/episodic/semantic/procedural kinds), activation lifecycle with evidence-preserving tombstoning, receipted mutation, commit-before-log audit ordering, bounded SpecialistTaskAction authorization, and a memory-skill health circuit breaker; SQLite/WAL-backed durability with schema migrations and FTS5 lexical search; a deterministic scaffold-only LOG/CONSULT baseline operating through a shadow MemoryActionBroker restricted to allowlisted scoped operations (search, read, create_candidate, append, upsert, revise_candidate, link, compress_candidate) that rejects unknown operations, path traversal, cross-scope IDs, immutable-evidence writes, lifecycle bypass, and domain task actions, emitting immutable self-verifying MemoryActionReceipt records; and additive context-contract boundary validators closing META5-MEM-002, 003, 006, 010, 012, 014, and 015. Flip the closed contracts strict xfails to enforced tests and update tests/fixtures/meta5 corpus statuses; META5-MEM-009 and META5-MEM-011 remain strict expected failures reserved for TASK-20260714-008 and TASK-20260714-007. Live prompts, fitted messages, and request bytes remain byte-identical. No memory.training or memory.promotion implementation, no retrieval wiring into workers, no prompt activation, no optimizer, no evaluator evolution, no weight training, no deployment, no playbook migration, and no new runtime authority.",
+        "stopCondition": "Stop and fail closed on any live prompt, fitted-message, or request-byte change; any grant to a specialist of domain-action commit, visibility-widening, evaluator, promotion, deployment, or self-approval authority; destructive deletion or durable activation exposed as a direct model action; any unreceipted mutation path; weakening or deletion of existing META-4/META-5 test assertions; H/E/W drift; owned-path expansion; nondeterministic scaffold-baseline output; a failing acceptance command; or an unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Coordinator integration and acceptance require immutable focused and full test evidence plus an independent adversarial review panel (GLM-5.2 frozen-diff, codex CLI, Claude reviewer) with no unresolved P0/P1 findings, and independent MiniMax-M3 behavioral verification with its own scratch probes. An xfail flip counts as implemented capability only with a green enforced test and review acceptance.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_memory.py tests/test_memory_broker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "The src/metaharness/memory package exists with append-only stores, activation lifecycle, receipted mutation, and commit-ordered audit; the shadow MemoryActionBroker and immutable MemoryActionReceipt validate allowlisted scoped operations; the scaffold-only LOG/CONSULT baseline is deterministic; thirteen META5-MEM contracts are enforced while META5-MEM-009 and META5-MEM-011 remain strict expected failures.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 22,
+          "revisionTo": 23,
+          "at": "2026-07-16T12:38:48.897Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 23,
+          "revisionTo": 24,
+          "at": "2026-07-16T12:39:41.951Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 24,
+          "revisionTo": 25,
+          "at": "2026-07-16T12:39:42.024Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 29,
+          "revisionTo": 30,
+          "at": "2026-07-18T23:45:33.944Z",
+          "evidence": {
+            "branch": "dev/meta-6-memory-substrate",
+            "head": "c8efb12be88ede71b5595ad01d0a5224f8e3a044"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 30,
+          "revisionTo": 31,
+          "at": "2026-07-18T23:47:41.585Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-6-memory-substrate",
+            "reviewHead": "c8efb12be88ede71b5595ad01d0a5224f8e3a044",
+            "integrationCommit": "53fb43060690ab0062425c2da4d795df4eb3c298"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+          "revisionFrom": 31,
+          "revisionTo": 32,
+          "at": "2026-07-18T23:52:45.983Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+            "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+            "integrationCommit": "53fb43060690ab0062425c2da4d795df4eb3c298",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_memory.py tests/test_memory_broker.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "github:pull/42:ci-test-pass",
+              "github:merge:53fb43060690ab0062425c2da4d795df4eb3c298",
+              "glm5.2:frozen-diff-review:PASS",
+              "minimax-m3:fresh-committed-candidate-verification:PASS",
+              "integrated:focused-memory:104-pass",
+              "integrated:boundary:14-pass-2-expected-xfail",
+              "integrated:broader-slice:103-pass-2-expected-xfail",
+              "integrated:full:1205-pass-1-skip-2-expected-xfail:PYTHONPATH=src:selflearn/src",
+              "integrated:workplan:115-pass-0-fail",
+              "integrated:git-diff-check:clean"
+            ],
+            "receiptHash": "sha256:e28ff468c6374e3940748ad5b3dd30a72b625d2492b40cab416bebbce710a266"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta6-20260716",
+        "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+        "sourceRevision": "git:24dadaeec0e7d45b0953e76bfad220d656465b1f;Linear:META-6@2026-07-14T02:54:50.264Z;META5-acceptance:sha256:711612e1e5a62b5d29a3ee1010ca614045c438a267fe284a87713dc66a65e4aa;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+        "worktreePath": "/private/tmp/meta-harness-meta-6",
+        "branch": "dev/meta-6-memory-substrate",
+        "baseCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "currentHead": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+        "paths": [
+          "src/metaharness/memory",
+          "src/metaharness/context",
+          "tests/test_memory.py",
+          "tests/test_memory_broker.py",
+          "tests/test_context.py",
+          "tests/adversarial",
+          "tests/fixtures/meta5",
+          "tests/fixtures/meta6"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded implementation card owned by the Claude lane (coordinator-reassigned from the preferred Codex lane with user approval, 2026-07-16). Implement the Phase-2 typed memory substrate: a new src/metaharness/memory package with append-only typed MemoryRecord stores (working/episodic/semantic/procedural kinds), activation lifecycle with evidence-preserving tombstoning, receipted mutation, commit-before-log audit ordering, bounded SpecialistTaskAction authorization, and a memory-skill health circuit breaker; SQLite/WAL-backed durability with schema migrations and FTS5 lexical search; a deterministic scaffold-only LOG/CONSULT baseline operating through a shadow MemoryActionBroker restricted to allowlisted scoped operations (search, read, create_candidate, append, upsert, revise_candidate, link, compress_candidate) that rejects unknown operations, path traversal, cross-scope IDs, immutable-evidence writes, lifecycle bypass, and domain task actions, emitting immutable self-verifying MemoryActionReceipt records; and additive context-contract boundary validators closing META5-MEM-002, 003, 006, 010, 012, 014, and 015. Flip the closed contracts strict xfails to enforced tests and update tests/fixtures/meta5 corpus statuses; META5-MEM-009 and META5-MEM-011 remain strict expected failures reserved for TASK-20260714-008 and TASK-20260714-007. Live prompts, fitted messages, and request bytes remain byte-identical. No memory.training or memory.promotion implementation, no retrieval wiring into workers, no prompt activation, no optimizer, no evaluator evolution, no weight training, no deployment, no playbook migration, and no new runtime authority.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_memory.py tests/test_memory_broker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "The src/metaharness/memory package exists with append-only stores, activation lifecycle, receipted mutation, and commit-ordered audit; the shadow MemoryActionBroker and immutable MemoryActionReceipt validate allowlisted scoped operations; the scaffold-only LOG/CONSULT baseline is deterministic; thirteen META5-MEM contracts are enforced while META5-MEM-009 and META5-MEM-011 remain strict expected failures.",
+        "revisionFrom": 23,
+        "revisionTo": 24,
+        "at": "2026-07-16T12:39:41.951Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-6-memory-substrate",
+        "head": "c8efb12be88ede71b5595ad01d0a5224f8e3a044",
+        "revisionFrom": 29,
+        "revisionTo": 30,
+        "at": "2026-07-18T23:45:33.943Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+        "reviewBranch": "dev/meta-6-memory-substrate",
+        "reviewHead": "c8efb12be88ede71b5595ad01d0a5224f8e3a044",
+        "integrationCommit": "53fb43060690ab0062425c2da4d795df4eb3c298",
+        "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+        "revisionFrom": 30,
+        "revisionTo": 31,
+        "at": "2026-07-18T23:47:41.585Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/memory",
+        "src/metaharness/context",
+        "tests/test_memory.py",
+        "tests/test_memory_broker.py",
+        "tests/test_context.py",
+        "tests/adversarial",
+        "tests/fixtures/meta5",
+        "tests/fixtures/meta6"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+        "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+        "integrationCommit": "53fb43060690ab0062425c2da4d795df4eb3c298",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_memory.py tests/test_memory_broker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "github:pull/42:ci-test-pass",
+          "github:merge:53fb43060690ab0062425c2da4d795df4eb3c298",
+          "glm5.2:frozen-diff-review:PASS",
+          "minimax-m3:fresh-committed-candidate-verification:PASS",
+          "integrated:focused-memory:104-pass",
+          "integrated:boundary:14-pass-2-expected-xfail",
+          "integrated:broader-slice:103-pass-2-expected-xfail",
+          "integrated:full:1205-pass-1-skip-2-expected-xfail:PYTHONPATH=src:selflearn/src",
+          "integrated:workplan:115-pass-0-fail",
+          "integrated:git-diff-check:clean"
+        ],
+        "receiptHash": "sha256:e28ff468c6374e3940748ad5b3dd30a72b625d2492b40cab416bebbce710a266",
+        "actor": "coordinator:charltons-mbp.home.lan:meta6-20260716",
+        "releasedPaths": [
+          "src/metaharness/memory",
+          "src/metaharness/context",
+          "tests/test_memory.py",
+          "tests/test_memory_broker.py",
+          "tests/test_context.py",
+          "tests/adversarial",
+          "tests/fixtures/meta5",
+          "tests/fixtures/meta6"
+        ],
+        "revisionFrom": 31,
+        "revisionTo": 32,
+        "at": "2026-07-18T23:52:45.983Z"
+      }
+    },
+    {
+      "id": "TASK-20260719-012",
+      "title": "Domain-readiness gates and high-signal evaluation applied to standalone selflearn specialists",
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:meta12-20260719",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-12; charter stages 3-5; evidence-before-learning; evaluator non-self-approval; frozen H/E/W",
+      "evidence": [
+        "video transcript eAXxdtNlK04",
+        "research episode 20260718-232028-domain-expertise-and-high-signal-evaluat-b20f"
+      ],
+      "next": [
+        "focused selflearn tests",
+        "full selflearn suite",
+        "independent review"
+      ],
+      "definition": {
+        "sourceRevision": "git:49987ec2cbab6574eff9df8b3a3b84d7ed64afc9;Linear:META-12@2026-07-18T23:23:12.117Z;research:20260718-232028-domain-expertise-and-high-signal-evaluat-b20f",
+        "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+        "worktreePath": "/Users/charltondho/Developer/projects/meta-harness",
+        "branch": "main",
+        "baseCommit": "49987ec2cbab6574eff9df8b3a3b84d7ed64afc9",
+        "currentHead": "49987ec2cbab6574eff9df8b3a3b84d7ed64afc9",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex implementation card confined to the standalone selflearn learning, advisor, specialist, verification contracts, focused tests, and directly relevant selflearn documentation. Add deterministic typed domain-readiness assessment, high-signal evaluator classification, fit-validation-test isolation metadata, quantified failure-cluster targeting, and bounded stop criteria. Preserve existing acquisition, publishing, retrieval, pack storage, evaluator authority, and human approval behavior. No automatic acquisition, promotion, deployment, model training, runtime permission expansion, or unrelated root metaharness changes.",
+        "stopCondition": "Stop and fail closed on any evaluator self-approval, test-set visibility before final assessment, aggregate-only promotion, unanchored model-judge score treated as high signal, automatic mutation or acquisition, domain-action authority expansion, destructive store migration, backward-incompatible default specialist behavior, owned-path expansion, failing acceptance command, or unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Readiness is deterministic contract validation over declared domain criteria and immutable evaluation artifacts. Candidate improvement eligibility requires frozen validation evidence; sealed test data remains unavailable until final assessment. Human approval remains required for acquisition and promotion. Independent second-opinion review must report no unresolved P0/P1 findings.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q selflearn/tests --rootdir selflearn",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_knowledge_acquisition.py tests/test_knowledge_adapter.py tests/test_web.py",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Typed domain-readiness results explain every unmet criterion; specialist improvement advice refuses weak evaluation foundations; failure-cluster targets and explicit target, iteration, and plateau stops are represented; fit, validation, and sealed-test roles remain distinct; focused tests are green.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 26,
+          "revisionTo": 27,
+          "at": "2026-07-18T23:24:48.327Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 27,
+          "revisionTo": 28,
+          "at": "2026-07-18T23:24:53.647Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 28,
+          "revisionTo": 29,
+          "at": "2026-07-18T23:24:58.472Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 32,
+          "revisionTo": 33,
+          "at": "2026-07-19T00:02:25.635Z",
+          "evidence": {
+            "branch": "main",
+            "head": "664f2ca483086e8c9cc9c082034f1797897cda0e"
+          }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 33,
+          "revisionTo": 34,
+          "at": "2026-07-19T00:58:49.717Z",
+          "evidence": {
+            "reason": "Pi/GLM-5.2 review found unresolved P1 evaluator self-validation",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 34,
+          "revisionTo": 35,
+          "at": "2026-07-19T00:58:49.843Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Pi/GLM-5.2 review found unresolved P1 evaluator self-validation",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta12-20260719",
+          "revisionFrom": 35,
+          "revisionTo": 36,
+          "at": "2026-07-19T01:03:36.975Z",
+          "evidence": {
+            "branch": "main",
+            "head": "de7df2488a5761031b32801fbb4b029230c4e6d2"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta12-user-approved-merge",
+          "revisionFrom": 36,
+          "revisionTo": 37,
+          "at": "2026-07-19T01:32:36.129Z",
+          "evidence": {
+            "reviewBranch": "main",
+            "reviewHead": "de7df2488a5761031b32801fbb4b029230c4e6d2",
+            "integrationCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta12-user-approved-accept",
+          "revisionFrom": 37,
+          "revisionTo": 38,
+          "at": "2026-07-19T01:34:39.877Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta12-user-approved-accept",
+            "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+            "integrationCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q selflearn/tests --rootdir selflearn",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_knowledge_acquisition.py tests/test_knowledge_adapter.py tests/test_web.py",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "github:lantisprime/meta-harness#43@46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+              "github-actions:29668497625/job/88143165219",
+              ".review-store/replies/20260719-meta12-p1-pi-glm-5.2.md",
+              "post-merge:222-selflearn;57-integration;115-workplan;diff-clean"
+            ],
+            "receiptHash": "sha256:c9453bfa95b80fa35aa447a46490230ea7d26a760a86b6d2c6dd6cd726537673"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:meta12-20260719",
+        "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+        "sourceRevision": "git:49987ec2cbab6574eff9df8b3a3b84d7ed64afc9;Linear:META-12@2026-07-18T23:23:12.117Z;research:20260718-232028-domain-expertise-and-high-signal-evaluat-b20f",
+        "worktreePath": "/Users/charltondho/Developer/projects/meta-harness",
+        "branch": "main",
+        "baseCommit": "49987ec2cbab6574eff9df8b3a3b84d7ed64afc9",
+        "currentHead": "49987ec2cbab6574eff9df8b3a3b84d7ed64afc9",
+        "paths": [
+          "selflearn/src",
+          "selflearn/tests",
+          "docs/selflearn-manual.md",
+          "docs/selflearn-learning-module-improvements.md"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex implementation card confined to the standalone selflearn learning, advisor, specialist, verification contracts, focused tests, and directly relevant selflearn documentation. Add deterministic typed domain-readiness assessment, high-signal evaluator classification, fit-validation-test isolation metadata, quantified failure-cluster targeting, and bounded stop criteria. Preserve existing acquisition, publishing, retrieval, pack storage, evaluator authority, and human approval behavior. No automatic acquisition, promotion, deployment, model training, runtime permission expansion, or unrelated root metaharness changes.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q selflearn/tests --rootdir selflearn",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_knowledge_acquisition.py tests/test_knowledge_adapter.py tests/test_web.py",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Typed domain-readiness results explain every unmet criterion; specialist improvement advice refuses weak evaluation foundations; failure-cluster targets and explicit target, iteration, and plateau stops are represented; fit, validation, and sealed-test roles remain distinct; focused tests are green.",
+        "revisionFrom": 27,
+        "revisionTo": 28,
+        "at": "2026-07-18T23:24:53.646Z"
+      },
+      "reviewFreeze": {
+        "branch": "main",
+        "head": "de7df2488a5761031b32801fbb4b029230c4e6d2",
+        "revisionFrom": 35,
+        "revisionTo": 36,
+        "at": "2026-07-19T01:03:36.975Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta12-user-approved-merge",
+        "reviewBranch": "main",
+        "reviewHead": "de7df2488a5761031b32801fbb4b029230c4e6d2",
+        "integrationCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+        "revisionFrom": 36,
+        "revisionTo": 37,
+        "at": "2026-07-19T01:32:36.129Z"
+      },
+      "releasedPaths": [
+        "selflearn/src",
+        "selflearn/tests",
+        "docs/selflearn-manual.md",
+        "docs/selflearn-learning-module-improvements.md"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta12-user-approved-accept",
+        "definitionHash": "sha256:b2b9a2242d01b69f10694c0d59da3a67e3e538cdc984f9e06e569d6d16e50c18",
+        "integrationCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q selflearn/tests --rootdir selflearn",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_knowledge_acquisition.py tests/test_knowledge_adapter.py tests/test_web.py",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "github:lantisprime/meta-harness#43@46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+          "github-actions:29668497625/job/88143165219",
+          ".review-store/replies/20260719-meta12-p1-pi-glm-5.2.md",
+          "post-merge:222-selflearn;57-integration;115-workplan;diff-clean"
+        ],
+        "receiptHash": "sha256:c9453bfa95b80fa35aa447a46490230ea7d26a760a86b6d2c6dd6cd726537673",
+        "actor": "coordinator:charltons-mbp.home.lan:meta12-user-approved-accept",
+        "releasedPaths": [
+          "selflearn/src",
+          "selflearn/tests",
+          "docs/selflearn-manual.md",
+          "docs/selflearn-learning-module-improvements.md"
+        ],
+        "revisionFrom": 37,
+        "revisionTo": 38,
+        "at": "2026-07-19T01:34:39.877Z"
+      }
+    },
+    {
+      "id": "TASK-20260719-013",
+      "title": "Promote the shadow ContextEnvelope to the single live prompt assembler: both worker families consume typed envelope sections, trust rules and redaction enforced on sent bytes, per-attempt manifest journaled as the authoritative what-model-saw record",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:meta19-20260719",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-19; charter stages 2-4; full-fidelity evidence, bounded authority, evaluator non-self-approval, reversible lineage; H/E/W frozen; lifts the shadow-era byte-identity freeze as the planned promotion",
+      "evidence": [
+        "Linear:META-19",
+        "architecture-scorecard-sha256:97e454a8d074827ec726232fdd01d06dd70d01759521e7f979967db358744198",
+        "charter-sha256:62e07328"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Claude lane",
+        "start",
+        "first checkpoint: live assembler consumed by both builders with trust enforcement"
+      ],
+      "definition": {
+        "sourceRevision": "git:46c60fad04eb92f07d33b5c02f00e2fd9f30413f;Linear:META-19@2026-07-19T05:11:49.434Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:6922f7512b1110b0bd15ce40a5eb611dbadb7c7fa7e09cb1ba472b1a480167e2",
+        "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+        "worktreePath": "/private/tmp/meta-harness-meta-19",
+        "branch": "dev/meta-19-live-context-envelope",
+        "baseCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "currentHead": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded implementation card owned by the Claude lane. Promote the shadow ContextEnvelope to the single live prompt assembler (Linear META-19; the planned promotion of the META-4 shadow staging): add a section-based live assembly entry point in src/metaharness/context that accepts typed declared sections (section_type, source kind, trust, sensitivity, content) and deterministically produces both the chat-message list consumed by OpenAICompatWorker (harness/local.py) and the flat prompt consumed by CodingAgentWorker (harness/coding.py), so both worker families consume envelope sections rather than concatenating ad hoc. Enforce ContextTrust rules on the live path: UNTRUSTED_EVIDENCE and GENERATED_SUMMARY content can never occupy SYSTEM_INSTRUCTIONS, RESPONSE_CONTRACT, or TOOL_SCHEMAS instruction slots; evaluator receipts never carry INSTRUCTION trust; violations fail closed before any model call. Apply secret/credential redaction to the messages and prompts actually sent, not only the manifest; manifest entries must be derived from the same envelope that produced the live bytes so shadow/live divergence is impossible by construction. Journal the ContextManifest per attempt through the existing run-event sink as a non-shadow context.manifest event so 'what did the model see on attempt N' is answerable from the run journal; assembler failure remains fail-closed for contract violations and must not silently fall back to an unvalidated prompt for trust/redaction failures. The prior shadow-era byte-identity freeze is explicitly lifted by this card: live prompt bytes may change only as required by unified assembly, trust enforcement, and redaction, with tests attesting content parity otherwise. Existing META-4/5/6 test assertions may be updated only where they assert the superseded shadow-only contract, and each such update must cite this card.",
+        "stopCondition": "Stop and fail closed on: any grant of evaluator, merge, promotion, deployment, credential, or self-approval authority; any expansion of specialist or worker runtime authority; H/E/W drift; owned-path expansion; a live message or prompt whose bytes are not derived from the validated envelope (shadow/live divergence); untrusted content accepted into an instruction slot; deletion or weakening of META-4/META-5/META-6 assertions other than superseded shadow-only byte-identity assertions updated with citation; nondeterministic assembly for identical inputs; a failing acceptance command; or an unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Coordinator integration and acceptance require immutable focused and full test evidence plus an independent adversarial review panel (GLM-5.2 frozen-diff per AGENTS.md, codex CLI read-only, Claude opus reviewer subagent) with no unresolved P0/P1 findings, and independent MiniMax-M3 behavioral verification with its own scratch probes driving trust enforcement, live redaction, both-builder envelope consumption, and per-attempt manifest journaling.",
+        "acceptanceCommands": [
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/test_context.py tests/test_local_worker.py tests/test_coding.py tests/test_harness.py",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/adversarial",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "A live section-based assembler exists in src/metaharness/context; harness/local.py and harness/coding.py both consume envelope sections; a test proves untrusted content cannot claim instruction trust on the live path; redaction demonstrably applies to sent bytes; the per-attempt context.manifest journal answers what the model saw on attempt N.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 39,
+          "revisionTo": 40,
+          "at": "2026-07-19T06:54:01.001Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 40,
+          "revisionTo": 41,
+          "at": "2026-07-19T06:54:01.072Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 41,
+          "revisionTo": 42,
+          "at": "2026-07-19T06:54:01.140Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 42,
+          "revisionTo": 43,
+          "at": "2026-07-19T08:10:08.904Z",
+          "evidence": {
+            "reason": "Coordinator scope amendment after independent codex plan review (verdict UNSOUND, 3 P0): acceptance boxes require journal.py canonical kind, advice provenance channel, and context-contract retry classification. Definition v2 at .agents/meta19-definition-v2.json sha256:ec3503080424a678ec016f0a92324366219dcdc2509ec10b8c96aa541faa4072; user approved expansion.",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 43,
+          "revisionTo": 44,
+          "at": "2026-07-19T08:10:08.987Z",
+          "evidence": {
+            "blockedFrom": "in_progress",
+            "reason": "Coordinator scope amendment after independent codex plan review (verdict UNSOUND, 3 P0): acceptance boxes require journal.py canonical kind, advice provenance channel, and context-contract retry classification. Definition v2 at .agents/meta19-definition-v2.json sha256:ec3503080424a678ec016f0a92324366219dcdc2509ec10b8c96aa541faa4072; user approved expansion.",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 44,
+          "revisionTo": 45,
+          "at": "2026-07-19T09:25:05.131Z",
+          "evidence": {
+            "reason": "Scope amendment v3: panel finding 1 (workflow $steps.* boundary substitution launders worker output into instruction trust) requires a limited engine.py fix; definition v3 .agents/meta19-definition-v3.json",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 45,
+          "revisionTo": 46,
+          "at": "2026-07-19T09:25:05.205Z",
+          "evidence": {
+            "blockedFrom": "in_progress",
+            "reason": "Scope amendment v3: panel finding 1 (workflow $steps.* boundary substitution launders worker output into instruction trust) requires a limited engine.py fix; definition v3 .agents/meta19-definition-v3.json",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 46,
+          "revisionTo": 47,
+          "at": "2026-07-19T10:42:10.960Z",
+          "evidence": {
+            "branch": "dev/meta-19-live-context-envelope",
+            "head": "1661bd127718803bf281301ed01a219732bad64d"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 47,
+          "revisionTo": 48,
+          "at": "2026-07-19T10:45:30.590Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-19-live-context-envelope",
+            "reviewHead": "1661bd127718803bf281301ed01a219732bad64d",
+            "integrationCommit": "bcad4c2fb167bd1709f4ea7229f535cba37c0b72"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+          "revisionFrom": 48,
+          "revisionTo": 49,
+          "at": "2026-07-19T10:46:24.656Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+            "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+            "integrationCommit": "bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+            "commands": [
+              "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/test_context.py tests/test_local_worker.py tests/test_coding.py tests/test_harness.py",
+              "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/adversarial",
+              "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "github:lantisprime/meta-harness#44@bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+              "github-actions:29683022388",
+              "tree-identity:merge-commit-tree==reviewed-head-tree@51890e3d4f05249d024c9ae7658a36d1427f694c",
+              "orchestrator-verified@1661bd1:105-focused;118+2xf;full-1230/1/2xf;node-115/115;diff-clean",
+              "plan-review:.agents/meta19-plan-review-codex.txt",
+              "panel:.agents/meta19-review-codex2.txt;.review-store/meta19-glm-initial-review.txt;opus-ACCEPT",
+              "fix-parity:.review-store/meta19-glm-fixparity-review.txt=PASS",
+              "behavioral-verify:.review-store/meta19-minimax-behavioral-verify.txt=6/6-PASS",
+              "deferred:META-23-mcp-schema-provenance",
+              "definition-amendments:v2-sha256:ec350308+v3-sha256:29c7c9bd@block-resume-rev43/44+45/46",
+              "superset-note:run-b-executed-tests/adversarial-plus-run_events/executor/workflows-per-definition-v2"
+            ],
+            "receiptHash": "sha256:54c94680da1a4381774782945082e5e852bafcc085758fe1ebdddb2df47f0338"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta19-20260719",
+        "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+        "sourceRevision": "git:46c60fad04eb92f07d33b5c02f00e2fd9f30413f;Linear:META-19@2026-07-19T05:11:49.434Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:6922f7512b1110b0bd15ce40a5eb611dbadb7c7fa7e09cb1ba472b1a480167e2",
+        "worktreePath": "/private/tmp/meta-harness-meta-19",
+        "branch": "dev/meta-19-live-context-envelope",
+        "baseCommit": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "currentHead": "46c60fad04eb92f07d33b5c02f00e2fd9f30413f",
+        "paths": [
+          "src/metaharness/context",
+          "src/metaharness/harness/local.py",
+          "src/metaharness/harness/coding.py",
+          "tests/test_context.py",
+          "tests/test_local_worker.py",
+          "tests/test_coding.py",
+          "tests/test_harness.py",
+          "tests/adversarial"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded implementation card owned by the Claude lane. Promote the shadow ContextEnvelope to the single live prompt assembler (Linear META-19; the planned promotion of the META-4 shadow staging): add a section-based live assembly entry point in src/metaharness/context that accepts typed declared sections (section_type, source kind, trust, sensitivity, content) and deterministically produces both the chat-message list consumed by OpenAICompatWorker (harness/local.py) and the flat prompt consumed by CodingAgentWorker (harness/coding.py), so both worker families consume envelope sections rather than concatenating ad hoc. Enforce ContextTrust rules on the live path: UNTRUSTED_EVIDENCE and GENERATED_SUMMARY content can never occupy SYSTEM_INSTRUCTIONS, RESPONSE_CONTRACT, or TOOL_SCHEMAS instruction slots; evaluator receipts never carry INSTRUCTION trust; violations fail closed before any model call. Apply secret/credential redaction to the messages and prompts actually sent, not only the manifest; manifest entries must be derived from the same envelope that produced the live bytes so shadow/live divergence is impossible by construction. Journal the ContextManifest per attempt through the existing run-event sink as a non-shadow context.manifest event so 'what did the model see on attempt N' is answerable from the run journal; assembler failure remains fail-closed for contract violations and must not silently fall back to an unvalidated prompt for trust/redaction failures. The prior shadow-era byte-identity freeze is explicitly lifted by this card: live prompt bytes may change only as required by unified assembly, trust enforcement, and redaction, with tests attesting content parity otherwise. Existing META-4/5/6 test assertions may be updated only where they assert the superseded shadow-only contract, and each such update must cite this card.",
+        "acceptanceCommands": [
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/test_context.py tests/test_local_worker.py tests/test_coding.py tests/test_harness.py",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/adversarial",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "A live section-based assembler exists in src/metaharness/context; harness/local.py and harness/coding.py both consume envelope sections; a test proves untrusted content cannot claim instruction trust on the live path; redaction demonstrably applies to sent bytes; the per-attempt context.manifest journal answers what the model saw on attempt N.",
+        "revisionFrom": 40,
+        "revisionTo": 41,
+        "at": "2026-07-19T06:54:01.072Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-19-live-context-envelope",
+        "head": "1661bd127718803bf281301ed01a219732bad64d",
+        "revisionFrom": 46,
+        "revisionTo": 47,
+        "at": "2026-07-19T10:42:10.960Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+        "reviewBranch": "dev/meta-19-live-context-envelope",
+        "reviewHead": "1661bd127718803bf281301ed01a219732bad64d",
+        "integrationCommit": "bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+        "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+        "revisionFrom": 47,
+        "revisionTo": 48,
+        "at": "2026-07-19T10:45:30.590Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/context",
+        "src/metaharness/harness/local.py",
+        "src/metaharness/harness/coding.py",
+        "tests/test_context.py",
+        "tests/test_local_worker.py",
+        "tests/test_coding.py",
+        "tests/test_harness.py",
+        "tests/adversarial"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+        "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+        "integrationCommit": "bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+        "commands": [
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/test_context.py tests/test_local_worker.py tests/test_coding.py tests/test_harness.py",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/adversarial",
+          "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "github:lantisprime/meta-harness#44@bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+          "github-actions:29683022388",
+          "tree-identity:merge-commit-tree==reviewed-head-tree@51890e3d4f05249d024c9ae7658a36d1427f694c",
+          "orchestrator-verified@1661bd1:105-focused;118+2xf;full-1230/1/2xf;node-115/115;diff-clean",
+          "plan-review:.agents/meta19-plan-review-codex.txt",
+          "panel:.agents/meta19-review-codex2.txt;.review-store/meta19-glm-initial-review.txt;opus-ACCEPT",
+          "fix-parity:.review-store/meta19-glm-fixparity-review.txt=PASS",
+          "behavioral-verify:.review-store/meta19-minimax-behavioral-verify.txt=6/6-PASS",
+          "deferred:META-23-mcp-schema-provenance",
+          "definition-amendments:v2-sha256:ec350308+v3-sha256:29c7c9bd@block-resume-rev43/44+45/46",
+          "superset-note:run-b-executed-tests/adversarial-plus-run_events/executor/workflows-per-definition-v2"
+        ],
+        "receiptHash": "sha256:54c94680da1a4381774782945082e5e852bafcc085758fe1ebdddb2df47f0338",
+        "actor": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+        "releasedPaths": [
+          "src/metaharness/context",
+          "src/metaharness/harness/local.py",
+          "src/metaharness/harness/coding.py",
+          "tests/test_context.py",
+          "tests/test_local_worker.py",
+          "tests/test_coding.py",
+          "tests/test_harness.py",
+          "tests/adversarial"
+        ],
+        "revisionFrom": 48,
+        "revisionTo": 49,
+        "at": "2026-07-19T10:46:24.656Z"
+      }
+    }
+  ]
+}

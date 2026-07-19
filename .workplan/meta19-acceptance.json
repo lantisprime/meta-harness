@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta19-20260719",
+  "definitionHash": "sha256:3557334572665080c7d2ddd28af5bca5bf35f9d12aeeb983f04d972bd9b55d96",
+  "integrationCommit": "bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+  "commands": [
+    "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/test_context.py tests/test_local_worker.py tests/test_coding.py tests/test_harness.py",
+    "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q tests/adversarial",
+    "/private/tmp/meta-harness-meta-19/.venv/bin/pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "evidenceRefs": [
+    "github:lantisprime/meta-harness#44@bcad4c2fb167bd1709f4ea7229f535cba37c0b72",
+    "github-actions:29683022388",
+    "tree-identity:merge-commit-tree==reviewed-head-tree@51890e3d4f05249d024c9ae7658a36d1427f694c",
+    "orchestrator-verified@1661bd1:105-focused;118+2xf;full-1230/1/2xf;node-115/115;diff-clean",
+    "plan-review:.agents/meta19-plan-review-codex.txt",
+    "panel:.agents/meta19-review-codex2.txt;.review-store/meta19-glm-initial-review.txt;opus-ACCEPT",
+    "fix-parity:.review-store/meta19-glm-fixparity-review.txt=PASS",
+    "behavioral-verify:.review-store/meta19-minimax-behavioral-verify.txt=6/6-PASS",
+    "deferred:META-23-mcp-schema-provenance",
+    "definition-amendments:v2-sha256:ec350308+v3-sha256:29c7c9bd@block-resume-rev43/44+45/46",
+    "superset-note:run-b-executed-tests/adversarial-plus-run_events/executor/workflows-per-definition-v2"
+  ],
+  "receiptHash": "sha256:54c94680da1a4381774782945082e5e852bafcc085758fe1ebdddb2df47f0338"
+}

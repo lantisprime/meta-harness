@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/charltondho/Developer/projects/meta-harness/.claude/hooks/bp1-approval-check.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/charltondho/Developer/projects/meta-harness/.claude/hooks/bp1-sweep-on-session.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/charltondho/Developer/projects/meta-harness/.claude/hooks/activation-sessionstart.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/charltondho/Developer/projects/meta-harness/.claude/hooks/activation-prompt.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/charltondho/Developer/projects/meta-harness/.claude/hooks/activation-tool.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,6 +2,20 @@
 
 An intelligent **meta agent harness**: a control plane that orchestrates, steers, and learns from other agent harnesses. It plans goals into workflows, routes each step to the cheapest capable model tier, verifies every outcome against an external signal, and gets better over time — all while confirming the signed identity of every worker it delegates to.
 
+## Project mission
+
+Meta-Harness is the control plane for creating, recommending, managing,
+correcting, evolving, packaging, and deploying goal-specific agent harnesses.
+It converts verified solutions into reusable templates for other harnesses and
+builds self-contained evolving releases around either a hybrid portfolio of
+frontier plus open-weight models or a pure open-weight portfolio. Each release
+carries its own governed routing, parameters, sensing, evaluation, memory,
+repair, open-weight training, and rollback loop.
+
+The canonical mission, product loop, invariants, and enhancement decision gate
+are defined in [`docs/PROJECT_CHARTER.md`](docs/PROJECT_CHARTER.md). All future
+architecture and feature work must trace back to that charter.
+
 ## Design principles
 
 - **Harness beats model.** Delegation contracts, verification, and context engineering move results more than a bigger model does.
@@ -10,7 +24,11 @@ An intelligent **meta agent harness**: a control plane that orchestrates, steers
 - **Authenticity before delegation.** No task is dispatched to a worker whose Ed25519 identity hasn't been confirmed against the registry; every action lands in a hash-chained provenance log.
 - **Failures are loud.** Bad references and crashes fail runs visibly — never a silent "running".
 
-The full design (with subsystem detail and a component diagram) is in [`docs/architecture.md`](docs/architecture.md).
+The current implemented design (with subsystem detail and a component diagram)
+is in [`docs/architecture.md`](docs/architecture.md). The staged plan for the
+larger context, memory, rehearsal, evaluation, code-generation, H/E/W learning,
+and release loop is in
+[`docs/context-memory-self-improving-harness-plan.md`](docs/context-memory-self-improving-harness-plan.md).
 
 ## What's inside
 

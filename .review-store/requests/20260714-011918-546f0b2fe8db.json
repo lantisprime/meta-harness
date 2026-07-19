@@ -1,0 +1,9 @@
+{
+  "request_id": "20260714-011918-546f0b2fe8db",
+  "summary": "Review Pi through orchestrator with Linear coordination",
+  "tags": "",
+  "work-area": "",
+  "round": "1",
+  "provider": "claude-subagent",
+  "body_path": "/Users/charltondho/Developer/projects/meta-harness/.review-store/requests/20260714-011918-546f0b2fe8db.body.md"
+}

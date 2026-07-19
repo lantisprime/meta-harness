@@ -1,0 +1,15 @@
+{"kind":"request","id":"20260709-074514-d6479122d1a8","summary":"Plan review: metaharness harvest — journal-to-suite-extras extraction (pre-build)","tags":"","work-area":"","round":"1","provider":"codex"}
+{"kind":"reply","id":"20260709-075002-8f392353369b","request_id":"20260709-074514-d6479122d1a8","summary":"Reply (codex) to 20260709-074514-d6479122d1a8","tags":"","work-area":"","round":"1","provider":"codex"}
+{"kind":"request","id":"20260709-080414-70286d42ffe2","summary":"Adversarial diff review: metaharness harvest (frozen diff, pre-commit)","tags":"","work-area":"","round":"1","provider":"codex"}
+{"kind":"request","id":"20260709-214110-7233b09eb8a4","summary":"Issue #9 pre-build plan review: check_value_ok value-safety hardening","tags":"","work-area":"","round":"1","provider":"codex"}
+{"kind":"request","id":"20260714-011918-546f0b2fe8db","summary":"Review Pi through orchestrator with Linear coordination","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"request","id":"20260714-011929-e80f18f22bf4","summary":"Review Pi through orchestrator with Linear coordination","tags":"","work-area":"","round":"1","provider":"opencode"}
+{"kind":"request","id":"20260714-012510-354b6b87ed74","summary":"Review Pi through orchestrator with Linear coordination","tags":"","work-area":"","round":"1","provider":"opencode"}
+{"kind":"request","id":"20260714-013433-0099c7c8ffc4","summary":"Review development-only Pi Linear coordination boundary","tags":"","work-area":"","round":"1","provider":"codex"}
+{"kind":"request","id":"20260715-061811-e5aa90cd40b9","summary":"META-4 independent contract and security review","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"request","id":"20260715-062331-57adde527fa8","summary":"META-4 independent contract and security review retry","tags":"","work-area":"","round":"1","provider":"opencode"}
+{"kind":"request","id":"20260715-062353-96cb6a51340d","summary":"META-4 bounded frozen-diff review retry","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"request","id":"20260715-062430-25aa0b8a9cae","summary":"META-4 bounded frozen-diff review a03a330","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"reply","id":"20260715-063046-2c4d685b32c4","request_id":"20260715-062430-25aa0b8a9cae","summary":"Reply (claude-subagent) to 20260715-062430-25aa0b8a9cae","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"request","id":"20260715-063301-4c76155c3ac8","summary":"META-4 remediation re-review bd31f5b","tags":"","work-area":"","round":"1","provider":"claude-subagent"}
+{"kind":"reply","id":"20260715-063805-667f3a6b6b72","request_id":"20260715-063301-4c76155c3ac8","summary":"Reply (claude-subagent) to 20260715-063301-4c76155c3ac8","tags":"","work-area":"","round":"1","provider":"claude-subagent"}

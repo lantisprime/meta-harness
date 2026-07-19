@@ -1,0 +1,29 @@
+{
+  "sourceRevision": "git:24dadaeec0e7d45b0953e76bfad220d656465b1f;Linear:META-6@2026-07-14T02:54:50.264Z;META5-acceptance:sha256:711612e1e5a62b5d29a3ee1010ca614045c438a267fe284a87713dc66a65e4aa;AGENTS-sha256:8933d7dbbff702d5014351be6427adcb2d5bfdd1d4a2020bacf695bdf6e764c0;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;context-plan-sha256:73d94f52ce8e5260e3f5fd5ed5416316778702e8474ad14762905ba84e642a03;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4",
+  "definitionHash": "sha256:ffb309c8853148ae44ca8df6f37a03c85bee3da8e17be4b785479603e01bfe5e",
+  "worktreePath": "/private/tmp/meta-harness-meta-6",
+  "branch": "dev/meta-6-memory-substrate",
+  "baseCommit": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+  "currentHead": "24dadaeec0e7d45b0953e76bfad220d656465b1f",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "One bounded implementation card owned by the Claude lane (coordinator-reassigned from the preferred Codex lane with user approval, 2026-07-16). Implement the Phase-2 typed memory substrate: a new src/metaharness/memory package with append-only typed MemoryRecord stores (working/episodic/semantic/procedural kinds), activation lifecycle with evidence-preserving tombstoning, receipted mutation, commit-before-log audit ordering, bounded SpecialistTaskAction authorization, and a memory-skill health circuit breaker; SQLite/WAL-backed durability with schema migrations and FTS5 lexical search; a deterministic scaffold-only LOG/CONSULT baseline operating through a shadow MemoryActionBroker restricted to allowlisted scoped operations (search, read, create_candidate, append, upsert, revise_candidate, link, compress_candidate) that rejects unknown operations, path traversal, cross-scope IDs, immutable-evidence writes, lifecycle bypass, and domain task actions, emitting immutable self-verifying MemoryActionReceipt records; and additive context-contract boundary validators closing META5-MEM-002, 003, 006, 010, 012, 014, and 015. Flip the closed contracts strict xfails to enforced tests and update tests/fixtures/meta5 corpus statuses; META5-MEM-009 and META5-MEM-011 remain strict expected failures reserved for TASK-20260714-008 and TASK-20260714-007. Live prompts, fitted messages, and request bytes remain byte-identical. No memory.training or memory.promotion implementation, no retrieval wiring into workers, no prompt activation, no optimizer, no evaluator evolution, no weight training, no deployment, no playbook migration, and no new runtime authority.",
+  "stopCondition": "Stop and fail closed on any live prompt, fitted-message, or request-byte change; any grant to a specialist of domain-action commit, visibility-widening, evaluator, promotion, deployment, or self-approval authority; destructive deletion or durable activation exposed as a direct model action; any unreceipted mutation path; weakening or deletion of existing META-4/META-5 test assertions; H/E/W drift; owned-path expansion; nondeterministic scaffold-baseline output; a failing acceptance command; or an unresolved independent-review P0/P1 finding.",
+  "evaluatorAuthority": "The implementing seat cannot self-approve. Coordinator integration and acceptance require immutable focused and full test evidence plus an independent adversarial review panel (GLM-5.2 frozen-diff, codex CLI, Claude reviewer) with no unresolved P0/P1 findings, and independent MiniMax-M3 behavioral verification with its own scratch probes. An xfail flip counts as implemented capability only with a green enforced test and review acceptance.",
+  "acceptanceCommands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_memory.py tests/test_memory_broker.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial/test_memory_skill_boundaries.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/adversarial tests/test_context.py tests/test_harness.py tests/test_local_worker.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "nextCheckpoint": "The src/metaharness/memory package exists with append-only stores, activation lifecycle, receipted mutation, and commit-ordered audit; the shadow MemoryActionBroker and immutable MemoryActionReceipt validate allowlisted scoped operations; the scaffold-only LOG/CONSULT baseline is deterministic; thirteen META5-MEM contracts are enforced while META5-MEM-009 and META5-MEM-011 remain strict expected failures.",
+  "allowedOwnerNamespaces": [
+    "claude"
+  ]
+}
