@@ -1,0 +1,114 @@
+BEGIN_META18_GLM_REVIEW
+
+ VERDICT: APPROVE
+
+ Summary
+
+ I reviewed the immutable diff e5347a62..102dfca0 (commit 102dfca0db6d8314ef4e97cf254c38995dd7f843, "fix: enforce META-18 worker execution boundaries") against AGENTS.md, docs/PROJECT_CHARTER.md,
+ .agents/meta18-definition.json, .agents/meta18-build-spec.md, the full diff, and the relevant unchanged call sites (workflows/journal.py, runner.py, subscription.py, web/state.py, learning.py, mast.py, types.py).
+ Worktree clean, HEAD exact match confirmed.
+
+ The implementation is correct, faithful to the META-18 boundary, and does not inflate any security boundary. All four acceptance pillars hold: (1) honest per-adapter ExecutionBoundary (codex workspace-write →
+ cli_native/workspace; subscription codex/claude read-only → cli_native/none; pi/opencode/editable-claude → operator_trusted/unbounded, harness_os_sandbox=false, never described as sandboxed); (2) resolved-path
+ cross-process exclusive lease (process-local holder set + nonblocking fcntl.flock on a lockfile outside the workspace, keyed by SHA‑256 of Path.resolve(), never unlinks lockfiles, no git worktree/branch operations);
+ (3) TaskExecutor pre-dispatch signed short-lived token minted and re-validated through the SAME issuer, bound to worker/task/task:execute/tier/task_type, fail-closed before assignment/start/runner with zero runner
+ calls, no Attempt, no capability-matrix sample, and a reasoned signed task.authorization_denied provenance record; (4) post-hoc verifier sandbox, result authenticity, routing, budgets, context assembly, and approvals
+ are all untouched.
+
+ Transparency / attribution note (process, not a code finding): AGENTS.md requires the independent second-opinion review to be "Pi using NeuralWatt GLM-5.2." I am Claude (an Anthropic model), not GLM‑5.2 via NeuralWatt,
+ and I was invoked directly rather than via the pi --provider neuralwatt --model glm-5.2 one-shot. My code review below is substantive and read-only, but the coordinator should decide whether a genuine GLM‑5.2 pass is
+ additionally required to satisfy the AGENTS.md gate; I do not claim this output is a GLM‑5.2 review.
+
+ No P0 or P1 findings. Four minor findings (1×P2, 3×P3) are listed below; none block integration.
+
+ Findings (sorted by severity)
+
+ ### P2-1 — Authorization-denied FAIL outcome still banks playbook learning evidence via the observer
+
+ - Evidence: src/metaharness/core/executor.py:244-255 (denial sets outcome.final_verdict = Verdict.FAIL then break); src/metaharness/core/executor.py:596-598 (if self.observer is not None: ... self.observer(outcome)
+   runs unconditionally after the loop, including for a denied outcome); src/metaharness/correction/learning.py:89-92 (if outcome.final_verdict != Verdict.UNVERIFIED: passed = outcome.final_verdict == Verdict.PASS; for
+   bullet_id in used: self.playbook.mark(bullet_id, helpful=passed) — marks applied hints helpful=False on the FAIL). FailureStats.observe is clean (it iterates outcome.attempts, which is empty on denial —
+   mast.py:40-44), so only the playbook bullet scoring is affected.
+ - Impact: In canonical wiring (web/state.py sets observer=self.learning.observe and playbook_hints=self.knowledge_aware_hints, so LearningLoop.hints_for populates self._applied[task.id] before the loop), a denied
+   dispatch marks the task's applied playbook hints harmful — a non-causal attribution (an authorization denial says nothing about hint quality), which .agents/meta18-build-spec.md §1 explicitly forbids ("no ...
+   learning evidence" on denial). The capability matrix and failure stats remain clean. Low impact: the path only fires for a defective/malicious issuer or a revocation-between-issue-and-check race (the canonical
+   TokenIssuer always issues valid tokens, so denials do not occur in normal operation), it is consistent with pre-existing FAIL handling (budget/routing FAILs already mark hints), and the focused denial tests pass
+   observer=None so they neither cover nor catch this.
+ - Remediation: In TaskExecutor.execute, do not call self.observer(outcome) when the outcome is FAIL due to authorization denial — e.g., set an internal _authorization_denied flag at executor.py:254 and gate the
+   observer call at executor.py:596 on it — so a denial produces only the task.authorization_denied provenance record and a FAIL outcome. Add a canonical-wiring denial test that supplies a real observer+playbook and
+   asserts no playbook marks are banked ( locking the spec's "no learning evidence" clause currently uncovered by tests/test_executor.py:75).
+
+ ### P3-1 — No owned test locks the private-default (no explicit issuer) legacy attempt.assigned payload
+
+ - Evidence: src/metaharness/core/executor.py:94-99 (the token_issuer_explicit flag) and executor.py:270 (if self.token_issuer_explicit: gates the assignment["authorization"] addition); tests/test_executor.py:198
+   (valid-path test supplies token_issuer=TokenIssuer() explicitly, so it exercises only the explicit path); the compatibility shim is protected solely by the out-of-scope tests/test_run_events.py:47, which asserts an
+   exact legacy attempt.assigned payload via a bare TaskExecutor.
+ - Impact: A future owned-path change could accidentally always-emit the authorization key and break test_run_events.py:47 with no owned test catching the regression. The shim is correct and well-commented; this is a
+   test-coverage gap, not a defect.
+ - Remediation: Add an owned test in tests/test_executor.py asserting that a TaskExecutor constructed without token_issuer omits "authorization" from the attempt.assigned payload (legacy payload byte-for-byte).
+
+ ### P3-2 — No end-to-end manifest-boundary test for the SubscriptionWorker read-only path
+
+ - Evidence: tests/test_coding.py:733 (test_execution_boundary_lands_in_manifest_before_subprocess_spawn) constructs a plain CodingAgentWorker(cli="codex") only — proving the manifest ordering + classification for codex
+   workspace-write. The read-only classification is unit-tested in isolation (tests/test_coding.py:228) and the read-only argv is pre-existing-tested (tests/test_coding.py:201), but no test runs a SubscriptionWorker and
+   asserts the emitted manifest execution_boundary is kind=cli_native, write_scope=none matching its --sandbox read-only --ephemeral / --permission-mode plan --tools Read,Glob,Grep argv.
+ - Impact: The read-only boundary is correct by construction (SubscriptionWorker sets self.sandbox="read-only" at subscription.py:99, and _execute routes it through the same execution_boundary_for + manifest code path
+   proven for codex), so this is a coverage gap, not a correctness defect.
+ - Remediation: Add a SubscriptionWorker manifest test asserting boundary.kind=="cli_native", write_scope=="none", and argv consistency for both codex and claude subscription CLIs.
+
+ ### P3-3 — Authorization-object emission is conditional on token_issuer_explicit; spec/doc state it unconditionally
+
+ - Evidence: .agents/meta18-build-spec.md §1 ("On success: add a redacted authorization object to the existing attempt.assigned payload" — unconditional) and docs/architecture.md:104 (§3.3 "On success, the redacted
+   authorization object ... rides INSIDE the existing attempt.assigned payload" — unconditional) versus src/metaharness/core/executor.py:270 (if self.token_issuer_explicit:) and executor.py:93-99 (code comment
+   justifying the conditional to preserve the out-of-scope canonical event-equality test at tests/test_run_events.py:47).
+ - Impact: A bare TaskExecutor (no explicit issuer — library callers and test_run_events.py) does NOT emit the authorization object on a valid dispatch, diverging from the spec/doc wording. The SECURITY gate
+   (mint+validate) is universal and unaffected; only the evidence emission is conditional. The canonical harness wiring (web/state.py passes token_issuer=self.issuer) is explicit, so the doc is accurate for the
+   canonical harness; the divergence is only for non-canonical library/test use.
+ - Remediation: Note the conditional in docs/architecture.md §3.3 (one clause: "... when the TaskExecutor is wired with the canonical harness issuer"), or always emit and update the out-of-scope test_run_events.py:47
+   (crosses the META-18 ownership fence — not preferred).
+
+ Test / coverage assessment
+
+ - Verification performed (read-only): git diff --check e5347a62..102dfca0 → clean. pytest --collect-only (no execution, so no lockfile side effects) confirms the claimed counts: focused (tests/test_identity.py
+   tests/test_executor.py tests/test_coding.py) = 106; regression (tests/test_web.py tests/test_workflows.py tests/test_optimization.py) = 159; full suite = 1320 collected = 1318 pass + 2 xfail, matching the claimed
+   "1318 passed and 2 xfailed." The workplan (node --test scripts/workplan.test.mjs) was not re-executed to keep external state unchanged; the META-18 diff touches no file under scripts/, so the workplan has no META-18
+   regression surface and the 115-pass claim is plausible.
+ - Not executed by me: the actual pass/fail runs. The cross-process (test_workspace_claim_is_cross_process) and overlapping-worker (test_shared_workspace_allows_one_active_coding_worker) tests create real, never-deleted
+   lockfiles under ~/.metaharness/workspace_leases/ (by design per the spec), which is an external-state side effect I avoided under the read-only constraint. The pass/fail evidence is per the task's claim; my code
+   reading confirms the tests are well-formed and would pass.
+ - Test quality: high. The six denial defects (expired/revoked/wrong-subject/wrong-task/missing-scope/wrong-scope) are parametrized (tests/test_executor.py:75) and assert zero runner calls, events == [],
+   outcome.attempts == [], matrix.samples(...) == 0, and a reasoned task.authorization_denied provenance entry with no signature leakage. The valid-path test (tests/test_executor.py:198) proves ordering
+   (attempt.assigned before attempt.started), exact subject/task/scope binding, redaction, and no new event kind. The manifest test (tests/test_coding.py:733) proves the boundary lands before subprocess spawn by
+   capturing started.exists() AT emit time, and ties the classification to the actual --sandbox workspace-write argv. The lease tests cover same-process overlap, real cross-process flock (subprocess + select ready
+   handshake, 5s bounded hold, no 30s sleeper), symlink-alias collision, distinct-worktree independence, and exception-path release. The fcntl-based lease is sound on this macOS review host.
+ - Coverage gaps: (a) no observer-wired denial test (P2-1); (b) no default-issuer legacy-payload owned test (P3-1); (c) no SubscriptionWorker read-only manifest test (P3-2); (d) no dedicated asyncio-cancellation
+   lease-release test — the mechanism is proven via test_workspace_claim_releases_after_exception and the with-block __exit__ (which runs on BaseException including CancelledError), so this is negligible.
+
+ Charter assessment
+
+ - Product-loop stage: stages 3-4 (managed execution/rehearsal + verification). The change strengthens bounded-authority execution (dispatch token gate + exclusive workspace lease + honest ExecutionBoundary) without
+   weakening the post-hoc verifier or any other stage.
+ - Invariant 7 — Bounded authority: satisfied. The gate mints only narrowly-scoped tokens (task:execute, tier:<tier>, task_type:<type>) bound to the exact selected worker and task, re-validates through the same issuer,
+   and fail-closes on every invalidity. No permission minting, no data-scope widening, no secret exposure (no raw token/signature in provenance or event payload — verified at executor.py:245-253 and
+   executor.py:271-277).
+ - Invariant 4 — Evaluator non-self-approval: unchanged. The verifier hierarchy, judge, and evalgen author≠validator rule are untouched (no file under src/metaharness/evals/ modified).
+ - Invariant 2 — Full-fidelity evidence: preserved; the only blemish is the P2-1 playbook-marking-on-denial (a non-causal attribution on a rare path), which does not lose or aggregate-away any per-attempt/task evidence.
+ - Invariant 3 — Frozen comparisons / H/E/W: .agents/meta18-definition.json declares frozenAxes:[H,E,W], plane:development. The diff is development-plane enforcement (runtime dispatch gate + lease + boundary) and
+   touches no H/E/W learning code (optimization/, evals/evaluator.py, correction/ learning loops untouched). No learning axis is mutated.
+ - Invariant 8 — Reversible operation / exact rollback: preserved. The lease is ephemeral (released in finally) and the harness explicitly does NOT create/switch/delete git worktrees or branches, so no versioned-state
+   mutation requires rollback. Provenance lineage is append-only and hash-chained; task.authorization_denied is a signed provenance entry.
+ - Controlled attribution: provenance entries are signed by the orchestrator key; denial provenance carries token_id + reason but no signature/private material; the redacted attempt.assigned authorization object carries
+   no signature. (Process attribution caveat noted in the summary: I am Claude, not GLM‑5.2.)
+ - Stop conditions: none tripped. No authorization failure invokes a runner or emits attempt.started (verified at executor.py:244-255); no token is unbound at the dispatch gate (Task.id always non-empty via types.py:85
+   default_factory, so check(task_id=task.id) always runs the exact-task validation); no shared-workspace collision permits concurrent execution; no worktree/branch auto-management; no operator-trusted adapter labeled
+   sandboxed; no credential stripping or network denial breaking authenticated CLI use (all boundaries carry network_access=true); verifier sandbox and result-signature checks unchanged; git diff --check clean.
+
+ P0/P1 count
+
+ - P0: 0
+ - P1: 0
+
+ Per AGENTS.md ("Any unresolved P0 or P1 blocks integration"), no P0/P1 findings are outstanding. Verdict: APPROVE (subject to the attribution note that this review is from Claude, not GLM‑5.2 — the coordinator decides
+ whether a genuine GLM‑5.2 pass is additionally required).
+
+ END_META18_GLM_REVIEW
