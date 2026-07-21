@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 64,
+  "revision": 66,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -1532,20 +1532,9 @@
     {
       "id": "TASK-20260719-014",
       "title": "Enforce and attest coding-worker execution boundaries, serialize shared workspaces, and gate dispatch with scoped capability tokens",
-      "status": "review",
+      "status": "done",
       "owner": "codex:charltons-mbp.home.lan:meta18-20260719",
-      "paths": [
-        "src/metaharness/harness/coding.py",
-        "src/metaharness/harness/subscription.py",
-        "src/metaharness/harness/isolation.py",
-        "src/metaharness/core/executor.py",
-        "src/metaharness/identity/tokens.py",
-        "src/metaharness/web/state.py",
-        "tests/test_coding.py",
-        "tests/test_executor.py",
-        "tests/test_identity.py",
-        "docs/architecture.md"
-      ],
+      "paths": [],
       "priority": 1,
       "trace": "Linear META-18; charter stages 3-4; bounded authority; generated code executes only after explicit isolation and pre-dispatch authorization; H/E/W frozen",
       "evidence": [
@@ -1669,6 +1658,49 @@
             "branch": "dev/meta-18-worker-execution-boundary",
             "head": "9472741d0186b730aa4628b9ee38a6da73c5161a"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+          "revisionFrom": 64,
+          "revisionTo": 65,
+          "at": "2026-07-21T14:17:56.555Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-18-worker-execution-boundary",
+            "reviewHead": "9472741d0186b730aa4628b9ee38a6da73c5161a",
+            "integrationCommit": "649c23bbc14f81b739dbbd306774f44efc58af27"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+          "revisionFrom": 65,
+          "revisionTo": 66,
+          "at": "2026-07-21T14:23:58.590Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+            "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+            "integrationCommit": "649c23bbc14f81b739dbbd306774f44efc58af27",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "github:lantisprime/meta-harness#46@649c23bbc14f81b739dbbd306774f44efc58af27",
+              "github-actions:29830266953:success@9472741d0186b730aa4628b9ee38a6da73c5161a",
+              "linear:META-18:glm-5.2-approve@9472741d0186b730aa4628b9ee38a6da73c5161a",
+              "ancestry:9472741d0186b730aa4628b9ee38a6da73c5161a<=649c23bbc14f81b739dbbd306774f44efc58af27",
+              "acceptance-run@649c23b:focused-110;regression-159;full-1322/2xf;workplan-115;diff-clean"
+            ],
+            "receiptHash": "sha256:31cd7221407c57e76b1bdb061c2a6c5864cbf336423052bfceadaef1a9a7ead9"
+          }
         }
       ],
       "claimSnapshot": {
@@ -1716,6 +1748,66 @@
         "revisionFrom": 63,
         "revisionTo": 64,
         "at": "2026-07-19T14:07:47.643Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+        "reviewBranch": "dev/meta-18-worker-execution-boundary",
+        "reviewHead": "9472741d0186b730aa4628b9ee38a6da73c5161a",
+        "integrationCommit": "649c23bbc14f81b739dbbd306774f44efc58af27",
+        "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+        "revisionFrom": 64,
+        "revisionTo": 65,
+        "at": "2026-07-21T14:17:56.555Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/harness/coding.py",
+        "src/metaharness/harness/subscription.py",
+        "src/metaharness/harness/isolation.py",
+        "src/metaharness/core/executor.py",
+        "src/metaharness/identity/tokens.py",
+        "src/metaharness/web/state.py",
+        "tests/test_coding.py",
+        "tests/test_executor.py",
+        "tests/test_identity.py",
+        "docs/architecture.md"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+        "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+        "integrationCommit": "649c23bbc14f81b739dbbd306774f44efc58af27",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "github:lantisprime/meta-harness#46@649c23bbc14f81b739dbbd306774f44efc58af27",
+          "github-actions:29830266953:success@9472741d0186b730aa4628b9ee38a6da73c5161a",
+          "linear:META-18:glm-5.2-approve@9472741d0186b730aa4628b9ee38a6da73c5161a",
+          "ancestry:9472741d0186b730aa4628b9ee38a6da73c5161a<=649c23bbc14f81b739dbbd306774f44efc58af27",
+          "acceptance-run@649c23b:focused-110;regression-159;full-1322/2xf;workplan-115;diff-clean"
+        ],
+        "receiptHash": "sha256:31cd7221407c57e76b1bdb061c2a6c5864cbf336423052bfceadaef1a9a7ead9",
+        "actor": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+        "releasedPaths": [
+          "src/metaharness/harness/coding.py",
+          "src/metaharness/harness/subscription.py",
+          "src/metaharness/harness/isolation.py",
+          "src/metaharness/core/executor.py",
+          "src/metaharness/identity/tokens.py",
+          "src/metaharness/web/state.py",
+          "tests/test_coding.py",
+          "tests/test_executor.py",
+          "tests/test_identity.py",
+          "docs/architecture.md"
+        ],
+        "revisionFrom": 65,
+        "revisionTo": 66,
+        "at": "2026-07-21T14:23:58.590Z"
       }
     },
     {
