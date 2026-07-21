@@ -1,3 +1,40 @@
+# Session Handoff — meta-harness (2026-07-21, session 43: META-18 shipped, accepted, Done)
+
+## State: META-18 delivery complete; no workplan card remains in flight
+
+- **PR #46** merged as **`649c23bbc14f81b739dbbd306774f44efc58af27`**.
+  Its second parent is the immutable reviewed head
+  **`9472741d0186b730aa4628b9ee38a6da73c5161a`**; ancestry was verified before
+  coordinator integration.
+- GitHub Actions run **29830266953** was rerun after public-repository CI became
+  available and passed on frozen head `9472741d`. The earlier failure had no
+  runner or test steps and was solely a GitHub billing/spending-limit rejection.
+- Canonical workplan `TASK-20260719-014` transitioned Review → Verifying at
+  revision **65**, then Verifying → Done at revision **66**, under distinct
+  coordinator actor
+  `coordinator:charltons-mbp.home.lan:meta18-closeout-20260721`.
+- Integration acceptance at `649c23b`: focused identity/executor/coding
+  **110 passed**; regression web/workflows/optimization **159 passed**; full
+  suite **1322 passed, 2 xfailed**; workplan suite **115 passed**;
+  `git diff --check` clean.
+- Receipt `.workplan/meta18-acceptance.json` has deterministic hash
+  `sha256:31cd7221407c57e76b1bdb061c2a6c5864cbf336423052bfceadaef1a9a7ead9`.
+  The workplan acceptance receipt releases all META-18 owned paths.
+- Linear META-18 was restored to Verifying after GitHub's merge automation
+  skipped that gate; it should be moved to Done only after these canonical
+  closeout records land on `main`.
+- The primary checkout intentionally retains untracked `.codex/` content; it
+  is unrelated and must remain excluded from delivery commits.
+
+### Next step
+
+1. Merge the canonical closeout-records PR, then move Linear META-18 to Done
+   with the acceptance receipt and closeout merge evidence.
+2. Consult the Ready lane before claiming another card; META-21 is unblocked
+   only after that final Linear transition.
+
+---
+
 # Session Handoff — meta-harness (2026-07-19, session 42: META-18 approved, awaiting coordinator integration)
 
 ## State: META-18 implementation and mandatory review complete; frozen in Review

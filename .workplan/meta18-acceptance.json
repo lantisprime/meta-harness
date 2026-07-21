@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta18-closeout-20260721",
+  "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+  "integrationCommit": "649c23bbc14f81b739dbbd306774f44efc58af27",
+  "commands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "evidenceRefs": [
+    "github:lantisprime/meta-harness#46@649c23bbc14f81b739dbbd306774f44efc58af27",
+    "github-actions:29830266953:success@9472741d0186b730aa4628b9ee38a6da73c5161a",
+    "linear:META-18:glm-5.2-approve@9472741d0186b730aa4628b9ee38a6da73c5161a",
+    "ancestry:9472741d0186b730aa4628b9ee38a6da73c5161a<=649c23bbc14f81b739dbbd306774f44efc58af27",
+    "acceptance-run@649c23b:focused-110;regression-159;full-1322/2xf;workplan-115;diff-clean"
+  ],
+  "receiptHash": "sha256:31cd7221407c57e76b1bdb061c2a6c5864cbf336423052bfceadaef1a9a7ead9"
+}
