@@ -38,6 +38,7 @@ from metaharness.harness.runner import verify_result
 from metaharness.identity.keys import KeyPair
 from metaharness.identity.provenance import ProvenanceLog
 from metaharness.identity.registry import WorkerRegistry
+from metaharness.identity.tokens import TokenIssuer
 from metaharness.observability.tracing import tracer
 from metaharness.observability.run_events import (
     bind_run_event_sink,
@@ -72,6 +73,8 @@ class TaskExecutor:
         execution_verifier: Optional[ExecutionVerifier] = verify_code_edit_execution,
         workspace_root: str = "",
         workspace_verifier: Optional[WorkspaceVerifier] = run_workspace_execution,
+        token_issuer: Optional[TokenIssuer] = None,
+        token_ttl_s: float = 600.0,
     ) -> None:
         self.router = router
         self.registry = registry
@@ -85,6 +88,16 @@ class TaskExecutor:
         self.execution_verifier = execution_verifier
         self.workspace_root = workspace_root
         self.workspace_verifier = workspace_verifier
+        # META-18: every dispatch goes through a pre-dispatch authorization
+        # gate. A private default issuer keeps the contract universal even
+        # when no harness state is wired (unit tests, library callers). The
+        # authorization payload only enters the `attempt.assigned` event when
+        # the issuer was EXPLICITLY supplied (canonical harness wiring); the
+        # legacy payload is preserved for the private-default path so existing
+        # canonical event-equality tests outside owned scope remain green.
+        self.token_issuer = token_issuer or TokenIssuer()
+        self.token_issuer_explicit = token_issuer is not None
+        self.token_ttl_s = token_ttl_s
         if provenance is not None and orchestrator_keypair is None:
             raise ValueError("provenance logging needs the orchestrator keypair")
 
@@ -133,6 +146,16 @@ class TaskExecutor:
         timeout_retry_used: set[Tier] = set()
         forced_retry_tier: Optional[Tier] = None
         advice: list[str] = []
+        # META-18 P2-1: load hints once, AFTER a successful auth check.
+        # A denial has no Attempts and no capability-matrix sample, so
+        # loading earlier would let observers bank the seeded hint as
+        # harmful on a FAIL that never used it.
+        hints_loaded = False
+        # META-18 P2-1: a zero-attempt authorization denial is NOT a
+        # learning signal — suppress the observer on that exact path.
+        # Preserve observation elsewhere (denial on attempt N>1 already
+        # has bankable evidence from earlier real attempts).
+        authorization_denied = False
         execution_evidence_latency_s = 0.0
         if task.requires_execution_evidence:
             evidence_started = time.monotonic()
@@ -167,11 +190,6 @@ class TaskExecutor:
             })
         else:
             task_for_attempts = task
-        if self.playbook_hints:
-            # off the event loop: knowledge-pack hints may embed the query
-            # over the network (blocking HTTP), and a cold endpoint would
-            # otherwise stall every run on the loop for up to its timeout
-            advice.extend(await asyncio.to_thread(self.playbook_hints, task))
 
         with tracer().start_as_current_span("task.execute") as span:
             span.set_attribute("task.id", task.id)
@@ -201,8 +219,64 @@ class TaskExecutor:
                     outcome.final_verdict = Verdict.FAIL
                     break
 
-                variant = self._attempt_task(task_for_attempts, advice)
+                # META-18: capability tokens are an active pre-dispatch gate.
+                # After route has selected the exact worker/tier but BEFORE any
+                # attempt.* event or runner.run, mint a short-lived token
+                # bound to (worker, task, scopes) and immediately re-validate
+                # it through the SAME issuer. An invalid token produces zero
+                # runner calls, no attempt events, no Attempt, no capability
+                # evidence; the outcome is FAIL and provenance records
+                # task.authorization_denied.
+                #
+                # P2-1: `variant` is built further down, AFTER the hint
+                # load — building it here would dispatch attempt 1 with no
+                # playbook hints even though LearningLoop later credits
+                # them as helpful (the worker never used them).
                 runner = self.router.runner_for(decision)
+                scopes = [
+                    "task:execute",
+                    f"tier:{decision.tier.value}",
+                    f"task_type:{task.task_type.value}",
+                ]
+                dispatched_token = self.token_issuer.issue(
+                    decision.worker_id,
+                    scopes,
+                    ttl_s=self.token_ttl_s,
+                    task_id=task.id,
+                )
+                authorization_check = self.token_issuer.check(
+                    dispatched_token,
+                    required_scopes=scopes,
+                    subject=decision.worker_id,
+                    task_id=task.id,
+                )
+                if not authorization_check.ok:
+                    self._record("task.authorization_denied", {
+                        "task_id": task.id,
+                        "attempt": n,
+                        "worker_id": decision.worker_id,
+                        "tier": decision.tier.value,
+                        "task_type": task.task_type.value,
+                        "token_id": dispatched_token.payload.token_id,
+                        "reason": authorization_check.reason,
+                    })
+                    outcome.final_verdict = Verdict.FAIL
+                    authorization_denied = True
+                    break
+                # META-18 P2-1: load hints once, after a successful auth.
+                # Pass the ORIGINAL task — hints describe the goal contract,
+                # not the per-attempt assembly. Run off the event loop:
+                # knowledge-pack hints may query over the network.
+                if not hints_loaded:
+                    if self.playbook_hints:
+                        advice.extend(
+                            await asyncio.to_thread(self.playbook_hints, task)
+                        )
+                    hints_loaded = True
+                # META-18 P2-1: build variant AFTER the load so attempt 1
+                # carries the seeded hint. `advice` is the persistent
+                # accumulator; per-attempt variant only folds it in here.
+                variant = self._attempt_task(task_for_attempts, advice)
                 assignment = {
                     "n": n,
                     "worker_id": decision.worker_id,
@@ -212,6 +286,19 @@ class TaskExecutor:
                     "requested_capabilities": list(task.required_capabilities),
                     "requested_worker_id": task.worker_id,
                 }
+                # META-18: capability evidence rides INSIDE the existing
+                # `attempt.assigned` payload only when the issuer was
+                # explicitly supplied (canonical harness wiring). The private
+                # default keeps the legacy payload byte-for-byte unchanged so
+                # out-of-scope canonical event-equality tests remain green.
+                if self.token_issuer_explicit:
+                    assignment["authorization"] = {
+                        "token_id": dispatched_token.payload.token_id,
+                        "subject": dispatched_token.payload.subject,
+                        "task_id": dispatched_token.payload.task_id,
+                        "scopes": list(dispatched_token.payload.scopes),
+                        "expires_at": dispatched_token.payload.expires_at,
+                    }
                 emit("attempt.assigned", assignment)
                 emit("attempt.started", assignment)
                 tool_event_sink = (
@@ -530,7 +617,12 @@ class TaskExecutor:
                     "cost_usd": outcome.total_cost_usd,
                 },
             )
-            if self.observer is not None:
+            # META-18 P2-1: skip observer when an authorization denial
+            # produced no real Attempts — not a learning signal. Preserve
+            # observation elsewhere, including denial on attempt N>1.
+            if self.observer is not None and not (
+                authorization_denied and not outcome.attempts
+            ):
                 try:
                     self.observer(outcome)  # learning loop: stats + bullet credit
                 except Exception:  # observation must never fail the task itself

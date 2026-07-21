@@ -28,6 +28,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from metaharness.core.types import Task, TaskType, Tier, WorkerResult
+from metaharness.harness.isolation import (
+    ExecutionBoundary,
+    claim_workspace,
+    execution_boundary_for,
+)
 from metaharness.harness.runner import BaseRunner, WorkerTimeout
 from metaharness.identity.keys import KeyPair
 from metaharness.observability.run_events import emit_run_event
@@ -395,6 +400,13 @@ class CodingAgentWorker(BaseRunner):
     ) -> None:
         if cli not in CLI_ADAPTERS:
             raise ValueError(f"unknown coding CLI '{cli}' (known: {sorted(CLI_ADAPTERS)})")
+        # The default CLI-native sandbox for code-edit work is codex's
+        # workspace-write jail. SubscriptionWorker overrides to "read-only";
+        # Pi/OpenCode/edit-capable Claude are operator-trusted (no sandbox
+        # attribute at all — the boundary table reads `sandbox=None` for them).
+        self.sandbox: Optional[str] = (
+            "workspace-write" if cli == "codex" else None
+        )
         # model has two jobs kept strictly apart: `model` (display/matrix key,
         # falls back to '<cli>-cli') vs `cli_model` (the explicit override the
         # CLI receives; empty = the CLI's own configured default — a display
@@ -431,6 +443,22 @@ class CodingAgentWorker(BaseRunner):
         from metaharness.context import assemble_live, budget_for, content_hash
 
         workspace = self._workspace_for(task)
+        # META-18: the honest execution boundary is selected BEFORE argv/spawn.
+        # Its JSON-compatible representation lands in the context.manifest
+        # payload so an audit reader can compare it against the actual argv
+        # the adapter produced. Operator-trusted adapters (pi/opencode/claude
+        # non-read-only) are labeled honestly; the harness does not describe
+        # them as sandboxed. Unknown CLI/sandbox combinations REJECT — there is
+        # no permissive default that would silently downgrade a restriction.
+        boundary = execution_boundary_for(self.cli, sandbox=self.sandbox)
+        with claim_workspace(workspace, worker_id=self.worker_id, task_id=task.id):
+            return await self._execute_held(task, workspace, boundary)
+
+    async def _execute_held(
+        self, task: Task, workspace: Path, boundary: ExecutionBoundary
+    ) -> WorkerResult:
+        from metaharness.context import assemble_live, budget_for, content_hash
+
         # META-19: the ContextEnvelope is the single live assembler. The system
         # prompt is declared ONLY for adapters that actually transport one, so the
         # manifest attests truthfully. Any LiveContextViolation PROPAGATES (fail
@@ -459,6 +487,7 @@ class CodingAgentWorker(BaseRunner):
                     "round": 0,
                     "live_messages_hash": content_hash(prompt),
                     "manifest": assembly.manifest.model_dump(mode="json"),
+                    "execution_boundary": boundary.model_dump(mode="json"),
                 },
             )
         except Exception:

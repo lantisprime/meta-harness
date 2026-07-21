@@ -3,6 +3,9 @@ budget ceilings, plateau stop, capability matrix learning, provenance trail."""
 from __future__ import annotations
 
 import asyncio
+import time
+
+import pytest
 
 from metaharness.core import (
     Budget,
@@ -22,7 +25,13 @@ from metaharness.harness import (
     sign_result,
 )
 from metaharness.harness.runner import Runner, WorkerTimeout
-from metaharness.identity import KeyPair, ProvenanceLog, WorkerRegistry, registration_payload
+from metaharness.identity import (
+    KeyPair,
+    ProvenanceLog,
+    TokenIssuer,
+    WorkerRegistry,
+    registration_payload,
+)
 from metaharness.routing import CapabilityMatrix, Router
 
 
@@ -50,6 +59,202 @@ async def test_pass_on_first_attempt():
     assert outcome.final_verdict == Verdict.PASS
     assert len(outcome.attempts) == 1 and outcome.escalations == 0
     assert outcome.final_output == "positive"
+
+
+@pytest.mark.parametrize(
+    "defect,reason_substring",
+    [
+        ("expired", "expired"),
+        ("wrong_subject", "token subject is"),
+        ("wrong_task", "token bound to task"),
+        ("missing_scope", "no scope covers"),
+        ("wrong_scope", "no scope covers"),
+        ("revoked", "token revoked"),
+    ],
+)
+async def test_pre_dispatch_authorization_denial_paths(defect, reason_substring):
+    """META-18: every pre-dispatch denial path must fail closed — the runner
+    is never called, no `attempt.*` event is emitted, no `Attempt` is appended,
+    no capability-matrix sample is banked, the outcome is FAIL, the signed
+    provenance records the reason, AND (P2-1) the observer is never invoked,
+    the seeded playbook bullet's helpful/harmful counters stay at zero, and
+    `LearningLoop._applied` has no stranded entry for the denied task. Each
+    defect is produced by a token that is validly signed by the configured
+    issuer (the issuer mints tokens that trip exactly one validation rule)."""
+    from metaharness.correction import LearningLoop, Playbook
+
+    calls = 0
+    events: list[tuple[str, dict]] = []
+    matrix = CapabilityMatrix()
+    provenance = ProvenanceLog()
+    playbook = Playbook()
+    seeded = playbook.add("seeded advice", task_type=TaskType.CLASSIFY)
+    loop = LearningLoop(playbook)
+    observer_calls: list = []
+
+    def observer(outcome):
+        # The wrapper also invokes loop.observe so the canonical LearningLoop
+        # path runs even if the gate ever leaks: a buggy gate that loads
+        # hints across the denial would surface as a non-zero counter shift
+        # below, and the _applied check would catch a stranded entry.
+        observer_calls.append(outcome)
+        loop.observe(outcome)
+
+    def handler(task: Task):
+        nonlocal calls
+        calls += 1
+        return "positive"
+
+    class DefectIssuer(TokenIssuer):
+        """Issuer that mints a validly-signed token, but with exactly one
+        defect of the requested kind so the executor's re-check returns a
+        different reasoned `TokenCheck` per parameter."""
+
+        def issue(self, subject, scopes, *, ttl_s=600.0, task_id=None, now=None):
+            from metaharness.identity.tokens import TokenPayload, CapabilityToken
+            at = now if now is not None else time.time()
+            if defect == "expired":
+                # Issue with TTL=0 in a past clock; the signature is valid
+                # for the bytes, but `at > expires_at` fails.
+                effective_now = at - 10.0
+                payload = TokenPayload(
+                    subject=subject, scopes=sorted(scopes), task_id=task_id,
+                    issued_at=effective_now, expires_at=effective_now,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_subject":
+                # Valid signature, but bound to a different subject.
+                payload = TokenPayload(
+                    subject="someone-else", scopes=sorted(scopes), task_id=task_id,
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_task":
+                payload = TokenPayload(
+                    subject=subject, scopes=sorted(scopes), task_id="some-other-task",
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "missing_scope":
+                # Valid signature, but no scopes at all — every required scope
+                # is missing.
+                payload = TokenPayload(
+                    subject=subject, scopes=[], task_id=task_id,
+                    issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "wrong_scope":
+                # Valid signature, but the only scope is unrelated to what the
+                # dispatch gate requires (so required_scopes are uncovered).
+                payload = TokenPayload(
+                    subject=subject, scopes=["totally:unrelated"],
+                    task_id=task_id, issued_at=at, expires_at=at + ttl_s,
+                )
+                return CapabilityToken(
+                    payload=payload,
+                    issuer_public_b64=self.public_b64(),
+                    signature_b64=self._keypair.sign(payload.signing_bytes()),
+                )
+            if defect == "revoked":
+                token = super().issue(subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now)
+                self.revoke(token.payload.token_id)
+                return token
+            return super().issue(subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now)
+
+    worker = ScriptedWorker(
+        "w", handler, tier=Tier.SMALL, model="small-model",
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: worker}, matrix=matrix),
+        token_issuer=DefectIssuer(),
+        provenance=provenance,
+        orchestrator_keypair=KeyPair.generate(),
+        playbook_hints=loop.hints_for,
+        observer=observer,
+    ).execute(
+        classify_task(max_attempts=1),
+        event_sink=lambda k, p: events.append((k, p)),
+    )
+
+    assert calls == 0
+    assert outcome.final_verdict is Verdict.FAIL
+    assert outcome.attempts == []
+    assert events == []
+    assert matrix.samples("small-model", TaskType.CLASSIFY) == 0
+    actions = [e.action for e in provenance.entries()]
+    assert "task.authorization_denied" in actions
+    denied = [e for e in provenance.entries() if e.action == "task.authorization_denied"]
+    assert len(denied) == 1
+    detail = denied[0].detail
+    assert detail["task_id"] == outcome.task.id
+    assert detail["attempt"] == 1
+    assert detail["worker_id"] == "w"
+    assert detail["tier"] == Tier.SMALL.value
+    assert detail["task_type"] == TaskType.CLASSIFY.value
+    assert reason_substring in detail["reason"]
+    # no raw token bytes leak into the redacted provenance detail
+    assert "signature" not in detail
+    assert "signature_b64" not in detail
+    # META-18 P2-1: a denial that produced no real Attempts must not be
+    # observed and must bank no learning evidence — no observer call, the
+    # seeded bullet stays untouched, no stranded _applied entry, and the
+    # loop's slow-loop stats book stays clean.
+    assert observer_calls == []
+    assert seeded.helpful == 0
+    assert seeded.harmful == 0
+    assert outcome.task.id not in loop._applied
+    assert loop.stats.as_dict() == {}
+
+
+async def test_valid_dispatch_token_is_bound_and_precedes_assignment():
+    """META-18: capability evidence rides INSIDE the existing
+    `attempt.assigned` payload — no new canonical event kind. The authorization
+    object is redacted (no signature/private material), exactly bound to the
+    chosen worker and task, and precedes any runner call. The issuer must be
+    explicitly supplied for the redacted payload to land on the event (the
+    private default preserves the legacy payload byte-for-byte for out-of-scope
+    canonical event-equality tests)."""
+    events: list[tuple[str, dict]] = []
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: MockLLMWorker(
+            "w", Tier.SMALL, seed=1, skills={TaskType.CLASSIFY: 1.0}
+        )}),
+        token_issuer=TokenIssuer(),
+    ).execute(classify_task(), event_sink=lambda k, p: events.append((k, p)))
+
+    assert outcome.final_verdict is Verdict.PASS
+    kinds = [kind for kind, _ in events]
+    assert "attempt.authorized" not in kinds  # no new canonical event kind
+    assert kinds.index("attempt.assigned") < kinds.index("attempt.started")
+    assigned = next(payload for kind, payload in events if kind == "attempt.assigned")
+    authorization = assigned["authorization"]
+    assert authorization["subject"] == "w"
+    assert authorization["task_id"] == outcome.task.id
+    assert authorization["scopes"] == [
+        "task:execute", "task_type:classify", "tier:small"
+    ]
+    assert "token_id" in authorization and authorization["token_id"]
+    assert authorization["expires_at"] > 0
+    # no signature/private material in the redacted object
+    assert "signature" not in authorization
+    assert "signature_b64" not in authorization
+    assert "issuer_private_b64" not in authorization
 
 
 async def test_required_execution_evidence_is_attached_without_worker_shell(tmp_path):
@@ -740,3 +945,275 @@ async def test_broken_observer_never_fails_the_task():
     executor = TaskExecutor(Router({Tier.SMALL: runner}), observer=bad_observer)
     outcome = await executor.execute(classify_task())
     assert outcome.final_verdict == Verdict.PASS
+
+
+async def test_valid_dispatch_with_real_learner_observes_and_credits_bullets():
+    """META-18 P2-1 (round 2): a valid dispatched attempt wired with the
+    canonical explicit issuer must observe normally AND the worker on
+    attempt 1 must actually receive the seeded hint. The previous round
+    passed the counter check (helpful=1) but the worker never saw the hint
+    because variant was built before the one-time hint load. This test
+    captures the worker's per-attempt `task.advice`, asserts the seeded
+    hint reaches attempt 1, then verifies helpful credit. Counter credit
+    without the worker actually seeing the hint is non-causal attribution;
+    causal attribution requires the hint to be observable on the worker
+    side first."""
+    from metaharness.correction import LearningLoop, Playbook
+
+    playbook = Playbook()
+    seeded = playbook.add("Pick exactly one of the provided labels.",
+                          task_type=TaskType.CLASSIFY)
+    loop = LearningLoop(playbook)
+    seen_advice: list[list[str]] = []
+
+    class SpyWorker(MockLLMWorker):
+        async def _execute(self, task):
+            # Capture the *actual* advice list each attempt dispatched with,
+            # so we can prove the hint was visible to the worker before
+            # accepting the helpful credit.
+            seen_advice.append(list(task.advice))
+            return await super()._execute(task)
+
+    runner = SpyWorker(
+        "w", Tier.SMALL, seed=1, skills={TaskType.CLASSIFY: 1.0}
+    )
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        token_issuer=TokenIssuer(),  # canonical explicit issuer
+        playbook_hints=loop.hints_for,
+        observer=loop.observe,
+    ).execute(classify_task())
+
+    assert outcome.final_verdict is Verdict.PASS
+    # exactly one attempt, exactly one captured advice list
+    assert len(seen_advice) == 1
+    assert outcome.task.id not in loop._applied  # observe consumed the entry
+    # CAUSAL CHECK: the seeded hint must reach the worker on attempt 1,
+    # before any of the LearningLoop counters are trusted. This is what
+    # makes the later helpful=1 a real causal signal.
+    assert seeded.text in seen_advice[0], (
+        f"sealed causal check failed: attempt 1 advice {seen_advice[0]!r} "
+        f"did not contain seeded hint {seeded.text!r}"
+    )
+    # NOW and only now can the counter credit be trusted
+    assert seeded.helpful == 1
+    assert seeded.harmful == 0
+
+
+async def test_bare_executor_omits_authorization_from_attempt_assigned():
+    """META-18 P3-1 ACCEPT: a TaskExecutor constructed WITHOUT an explicit
+    token_issuer (library callers, unit tests outside the canonical harness)
+    keeps the legacy `attempt.assigned` payload byte-for-byte unchanged. The
+    pre-dispatch authorization gate still enforces fail-closed behavior via
+    the private default issuer; only the redacted authorization object is
+    conditional on the explicit-issuer wiring. No new canonical event kind is
+    introduced regardless of wiring."""
+    events: list[tuple[str, dict]] = []
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: MockLLMWorker(
+            "w", Tier.SMALL, seed=1, skills={TaskType.CLASSIFY: 1.0}
+        )}),
+        # NOTE: no token_issuer= → private default issuer is used
+    ).execute(classify_task(), event_sink=lambda k, p: events.append((k, p)))
+
+    assert outcome.final_verdict is Verdict.PASS
+    # the private default issuer's token still passes the gate: a real attempt
+    assert len(outcome.attempts) == 1
+    assigned = next(
+        payload for kind, payload in events if kind == "attempt.assigned"
+    )
+    # legacy payload preserved byte-for-byte: no authorization key
+    assert "authorization" not in assigned
+    # legacy fields still present (sanity)
+    assert assigned["worker_id"] == "w"
+    assert assigned["tier"] == Tier.SMALL.value
+    assert assigned["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# META-18 P2-1 (round 2) — pinned-worker retry wiring under the new gate.
+#
+# These tests pin the worker to a deterministic identity so retries hit the
+# SAME hand-crafted script, exercising the *exactly-once* hint-load and
+# the *denial-on-attempt-N>1* preservation branch described in the round-2
+# brief. The P1 bug was: variant was constructed before hints were loaded,
+# so attempt 1 saw empty advice even though LearningLoop later credited the
+# unseen hint. These tests pin that behavior to the actual worker flow.
+# ---------------------------------------------------------------------------
+
+
+async def test_pinned_worker_two_attempt_all_authorized_sees_hint_both_times():
+    """Two real attempts run on the SAME pinned script; both pass the gate;
+    both must see the seeded hint. Hints are loaded exactly once across the
+    task (load is gated on `hints_loaded`, never re-evaluated), so the
+    accumulated advice list is identical for attempt 1 and attempt 2.
+    The LearningLoop consumes normally (helpful=1 on the eventual PASS)."""
+    from metaharness.correction import LearningLoop, Playbook
+
+    playbook = Playbook()
+    seeded = playbook.add("Pick exactly one of the provided labels.",
+                          task_type=TaskType.CLASSIFY)
+    loop = LearningLoop(playbook)
+    seen_advice: list[list[str]] = []
+    runner_calls = 0
+
+    def handler(task: Task) -> str:
+        nonlocal runner_calls
+        runner_calls += 1
+        # First call wrong, second call correct: forces one retry.
+        return "wrong" if runner_calls == 1 else "positive"
+
+    class SpyWorker(ScriptedWorker):
+        async def _execute(self, task: Task):
+            seen_advice.append(list(task.advice))
+            return await super()._execute(task)
+
+    runner = SpyWorker("w", handler, tier=Tier.SMALL, model="small-model")
+    task = classify_task(worker_id="w", max_attempts=3)
+
+    hint_calls = 0
+    original_hints = loop.hints_for
+
+    def counting_hints(t: Task) -> list[str]:
+        nonlocal hint_calls
+        hint_calls += 1
+        return original_hints(t)
+
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        token_issuer=TokenIssuer(),  # both tokens valid
+        playbook_hints=counting_hints,
+        observer=loop.observe,
+    ).execute(task)
+
+    assert outcome.final_verdict is Verdict.PASS
+    # exactly two attempts: FAIL then PASS
+    assert len(outcome.attempts) == 2
+    assert outcome.attempts[0].verification.verdict is Verdict.FAIL
+    assert outcome.attempts[1].verification.verdict is Verdict.PASS
+    assert runner_calls == 2
+    # hints retrieved exactly once across retries
+    assert hint_calls == 1
+    # BOTH attempts saw the seeded hint — the persistent advice list is
+    # folded into attempt 2's variant just like attempt 1's. This is what
+    # makes retry learning coherent: the lesson reaches the retry, not just
+    # the first try.
+    assert len(seen_advice) == 2
+    assert seeded.text in seen_advice[0]
+    assert seeded.text in seen_advice[1]
+    # _applied was consumed exactly once (single task id, single pop) by
+    # observe at the end.
+    assert task.id not in loop._applied
+    # LearningLoop counters reflect the eventual PASS
+    assert seeded.helpful == 1
+    assert seeded.harmful == 0
+
+
+async def test_pinned_worker_sequential_issuer_preserves_earlier_real_evidence():
+    """Lock the denial-on-attempt-N>1 preservation branch. First token is
+    valid and the first real attempt runs and fails; the second issued
+    token is revoked and is denied before any runner call. The denial
+    does NOT suppress observer — real evidence from attempt 1 must flow
+    to the LearningLoop, which credits the seeded bullet as harmful
+    (since the task outcome is FAIL) and consumes `_applied`. Asserts:
+
+      * exactly ONE real Attempt (the second was denied pre-spawn)
+      * exactly TWO token issues (one per dispatch attempt)
+      * exactly ONE runner call (only attempt 1)
+      * hint retrieval called EXACTLY once (load is one-time)
+      * attempt 1's worker actually saw the seeded hint
+      * observer runs once (real evidence exists, denial does not mask it)
+      * the seeded bullet gets exactly one harmful mark from loop.observe
+      * `_applied` is empty after observe consumed it
+    """
+    from metaharness.correction import LearningLoop, Playbook
+
+    playbook = Playbook()
+    seeded = playbook.add("Pick exactly one of the provided labels.",
+                          task_type=TaskType.CLASSIFY)
+    loop = LearningLoop(playbook)
+    observer_calls: list = []
+    seen_advice: list[list[str]] = []
+    runner_calls = 0
+
+    class CountingIssuer(TokenIssuer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.issues = 0
+
+        def issue(self, subject, scopes, *, ttl_s=600.0, task_id=None, now=None):
+            at = now if now is not None else time.time()
+            self.issues += 1
+            if self.issues == 1:
+                # first token: valid, will pass the gate
+                return super().issue(
+                    subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now,
+                )
+            # second token: revoke it before returning so the executor's
+            # own re-check fails on revocation.
+            token = super().issue(
+                subject, scopes, ttl_s=ttl_s, task_id=task_id, now=now,
+            )
+            self.revoke(token.payload.token_id)
+            return token
+
+    def handler(task: Task) -> str:
+        nonlocal runner_calls
+        runner_calls += 1
+        return "wrong"  # always wrong; triggers retry; second attempt never runs
+
+    class SpyWorker(ScriptedWorker):
+        async def _execute(self, task: Task):
+            seen_advice.append(list(task.advice))
+            return await super()._execute(task)
+
+    def observer(outcome):
+        observer_calls.append(outcome)
+        loop.observe(outcome)
+
+    runner = SpyWorker("w", handler, tier=Tier.SMALL, model="small-model")
+    issuer = CountingIssuer()
+    task = classify_task(worker_id="w", max_attempts=3)
+
+    hint_calls = 0
+    original_hints = loop.hints_for
+
+    def counting_hints(t: Task) -> list[str]:
+        nonlocal hint_calls
+        hint_calls += 1
+        return original_hints(t)
+
+    outcome = await TaskExecutor(
+        Router({Tier.SMALL: runner}),
+        token_issuer=issuer,
+        playbook_hints=counting_hints,
+        observer=observer,
+    ).execute(task)
+
+    # outcome is FAIL (real attempt 1 failed; attempt 2 was denied pre-spawn)
+    assert outcome.final_verdict is Verdict.FAIL
+    # exactly ONE real Attempt: attempt 2 was denied before runner.run
+    assert len(outcome.attempts) == 1
+    assert outcome.attempts[0].verification.verdict is Verdict.FAIL
+    # two tokens issued, one runner call (attempt 2 never spawned)
+    assert issuer.issues == 2
+    assert runner_calls == 1
+    # hint retrieval happened exactly once: on the first successful gate
+    assert hint_calls == 1
+    assert len(seen_advice) == 1
+    # attempt 1's worker actually saw the seeded hint — this is the P1 fix
+    # check under retry pressure: even when a denial follows, the first
+    # attempt was causal with respect to the hint.
+    assert seeded.text in seen_advice[0]
+    # observer runs once: real evidence exists from attempt 1, the
+    # authorization-denied-N>1 branch preserves observation.
+    assert len(observer_calls) == 1
+    # the bullet gets exactly one harmful mark — the slow loop credits it
+    # against the FAIL outcome. This is the canonical poisoning check:
+    # if the denial preservation branch failed and observer was suppressed,
+    # harmful would be 0; if the gate leaked the hint AND the observer path
+    # was double-fired, harmful could be >1.
+    assert seeded.helpful == 0
+    assert seeded.harmful == 1
+    # _applied was consumed by observe (single task id, single pop)
+    assert task.id not in loop._applied
