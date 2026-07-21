@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="640" viewBox="0 0 980 640" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#854d0e"/>
+    </marker>
+    <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0d9488"/>
+    </marker>
+  </defs>
+  <rect width="980" height="640" fill="#ffffff"/>
+  <text x="24" y="36" font-size="20" font-weight="700" fill="#0f172a">selflearn — the knowledge loop</text>
+  <text x="24" y="56" font-size="12" fill="#64748b">Acquire → verify → gate → publish → retrieve → learn from verified outcomes · host-agnostic, plain files</text>
+
+  <!-- Acquisition row -->
+  <g font-size="12">
+    <rect x="24" y="84" width="168" height="92" rx="10" fill="#fefce8" stroke="#fde047"/>
+    <text x="40" y="108" font-weight="700" fill="#854d0e">Sources</text>
+    <text x="40" y="128" fill="#475569" font-size="11">web search · pages · PDFs</text>
+    <text x="40" y="144" fill="#475569" font-size="11">arXiv · YouTube lectures</text>
+    <text x="40" y="160" fill="#475569" font-size="11">seed importers (no model)</text>
+
+    <rect x="228" y="84" width="168" height="92" rx="10" fill="#fefce8" stroke="#fde047"/>
+    <text x="244" y="108" font-weight="700" fill="#854d0e">Acquire &amp; distill</text>
+    <text x="244" y="128" fill="#475569" font-size="11">plugin registry per source;</text>
+    <text x="244" y="144" fill="#475569" font-size="11">SchemaGuard output +</text>
+    <text x="244" y="160" fill="#475569" font-size="11">injection screen</text>
+
+    <rect x="432" y="84" width="168" height="92" rx="10" fill="#fefce8" stroke="#fde047"/>
+    <text x="448" y="108" font-weight="700" fill="#854d0e">Verify (external)</text>
+    <text x="448" y="128" fill="#475569" font-size="11">corroboration · citations</text>
+    <text x="448" y="144" fill="#475569" font-size="11">skill execution · judge —</text>
+    <text x="448" y="160" fill="#475569" font-size="11">claims vs sources</text>
+
+    <rect x="636" y="84" width="168" height="92" rx="10" fill="#fefce8" stroke="#fde047"/>
+    <text x="652" y="108" font-weight="700" fill="#854d0e">Gate (evalgen)</text>
+    <text x="652" y="128" fill="#475569" font-size="11">generated evals; enforced</text>
+    <text x="652" y="144" fill="#475569" font-size="11">author ≠ validator; second-</text>
+    <text x="652" y="160" fill="#475569" font-size="11">model probe validation</text>
+
+    <rect x="812" y="84" width="144" height="92" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="828" y="108" font-weight="700" fill="#065f46">Publish</text>
+    <text x="828" y="128" fill="#475569" font-size="11">eval-gated auto-publish,</text>
+    <text x="828" y="144" fill="#475569" font-size="11">or strict mode: human</text>
+    <text x="828" y="160" fill="#475569" font-size="11">approves held entries</text>
+  </g>
+  <g stroke="#854d0e" stroke-width="1.8" fill="none">
+    <line x1="192" y1="130" x2="228" y2="130" marker-end="url(#arr3)"/>
+    <line x1="396" y1="130" x2="432" y2="130" marker-end="url(#arr3)"/>
+    <line x1="600" y1="130" x2="636" y2="130" marker-end="url(#arr3)"/>
+    <line x1="804" y1="130" x2="812" y2="130" marker-end="url(#arr3)"/>
+  </g>
+
+  <!-- Store -->
+  <rect x="254" y="216" width="452" height="84" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="270" y="240" font-size="13" font-weight="700" fill="#0f172a">Knowledge store — plain files</text>
+  <text x="270" y="260" font-size="11" fill="#475569">Markdown entries + YAML frontmatter · packs / topics · JSON manifests</text>
+  <text x="270" y="278" font-size="11" fill="#475569">JSONL provenance · kinds: knowledge / workflow / skill · half-life decay</text>
+  <g stroke="#854d0e" stroke-width="1.8" fill="none">
+    <path d="M 884 176 L 884 258 L 710 258" marker-end="url(#arr3)"/>
+  </g>
+
+  <!-- Serving row -->
+  <g font-size="12">
+    <rect x="24" y="340" width="216" height="100" rx="10" fill="#ccfbf1" stroke="#5eead4"/>
+    <text x="40" y="364" font-weight="700" fill="#134e4a">Retrieve &amp; rank</text>
+    <text x="40" y="384" fill="#475569" font-size="11">semantic scorer; evidence-</text>
+    <text x="40" y="400" fill="#475569" font-size="11">decayed ranking; budget</text>
+    <text x="40" y="416" fill="#475569" font-size="11">"skip, don't bust"; degraded flag</text>
+
+    <rect x="276" y="340" width="216" height="100" rx="10" fill="#ccfbf1" stroke="#5eead4"/>
+    <text x="292" y="364" font-weight="700" fill="#134e4a">Inject into worker prompt</text>
+    <text x="292" y="384" fill="#475569" font-size="11">fenced untrusted-advisory block;</text>
+    <text x="292" y="400" fill="#475569" font-size="11">per-note url + locator citations;</text>
+    <text x="292" y="416" fill="#475569" font-size="11">cite-back applied_knowledge</text>
+
+    <rect x="528" y="340" width="216" height="100" rx="10" fill="#ccfbf1" stroke="#5eead4"/>
+    <text x="544" y="364" font-weight="700" fill="#134e4a">Task outcome (verified)</text>
+    <text x="544" y="384" fill="#475569" font-size="11">host verifies the task; outcome</text>
+    <text x="544" y="400" fill="#475569" font-size="11">credits injected + seeded entries;</text>
+    <text x="544" y="416" fill="#475569" font-size="11">failures retained (consumed)</text>
+
+    <rect x="780" y="340" width="176" height="100" rx="10" fill="#ccfbf1" stroke="#5eead4"/>
+    <text x="796" y="364" font-weight="700" fill="#134e4a">Learn</text>
+    <text x="796" y="384" fill="#475569" font-size="11">marks → deprecation;</text>
+    <text x="796" y="400" fill="#475569" font-size="11">gaps + EFE → proposals;</text>
+    <text x="796" y="416" fill="#475569" font-size="11">staleness · backoff · advisor</text>
+  </g>
+  <g stroke="#0d9488" stroke-width="1.8" fill="none">
+    <line x1="240" y1="390" x2="276" y2="390" marker-end="url(#arr4)"/>
+    <line x1="492" y1="390" x2="528" y2="390" marker-end="url(#arr4)"/>
+    <line x1="744" y1="390" x2="780" y2="390" marker-end="url(#arr4)"/>
+    <path d="M 380 300 L 380 318 L 132 318 L 132 340" marker-end="url(#arr4)"/>
+    <path d="M 868 340 L 868 318 L 620 318 L 620 300" marker-end="url(#arr4)"/>
+  </g>
+  <text x="140" y="330" font-size="10" fill="#0d9488">published entries</text>
+  <text x="628" y="330" font-size="10" fill="#0d9488">marks update the store</text>
+
+  <!-- Ports -->
+  <rect x="24" y="478" width="932" height="132" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="40" y="502" font-size="13" font-weight="700" fill="#3730a3">Host boundary — five small Protocols, zero harness imports</text>
+  <g font-size="11" fill="#312e81">
+    <rect x="40" y="516" width="168" height="42" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="124" y="534" text-anchor="middle" font-weight="600">ModelPort</text>
+    <text x="124" y="550" text-anchor="middle" fill="#6366f1">any OpenAI-compat chat</text>
+    <rect x="224" y="516" width="168" height="42" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="308" y="534" text-anchor="middle" font-weight="600">EmbeddingPort</text>
+    <text x="308" y="550" text-anchor="middle" fill="#6366f1">semantic retrieval</text>
+    <rect x="408" y="516" width="168" height="42" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="492" y="534" text-anchor="middle" font-weight="600">ExecutionPort</text>
+    <text x="492" y="550" text-anchor="middle" fill="#6366f1">skill checks, loud refusal</text>
+    <rect x="592" y="516" width="168" height="42" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="676" y="534" text-anchor="middle" font-weight="600">ProvenancePort</text>
+    <text x="676" y="550" text-anchor="middle" fill="#6366f1">journaled decisions</text>
+    <rect x="776" y="516" width="164" height="42" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="858" y="534" text-anchor="middle" font-weight="600">IdentityPort</text>
+    <text x="858" y="550" text-anchor="middle" fill="#6366f1">who approved what</text>
+    <text x="40" y="588" fill="#475569">Spawning, sandboxing, hooks, and tool discovery are deliberately host-delegated — selflearn is a harness component, not a competing harness.</text>
+  </g>
+</svg>

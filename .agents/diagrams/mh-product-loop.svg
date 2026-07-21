@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f46e5"/>
+    </marker>
+  </defs>
+  <rect width="980" height="620" fill="#ffffff"/>
+  <text x="24" y="36" font-size="20" font-weight="700" fill="#0f172a">The Product Loop &amp; the three learning planes</text>
+  <text x="24" y="56" font-size="12" fill="#64748b">Every capability must strengthen at least one stage without weakening the others (Project Charter)</text>
+
+  <!-- Loop: 6 stages, 2 rows of 3 -->
+  <g font-size="12">
+    <rect x="24" y="84" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="40" y="108" font-weight="700" fill="#3730a3">1 · Specify the goal</text>
+    <text x="40" y="128" fill="#475569" font-size="11">GoalFamilyProfile: acceptance</text>
+    <text x="40" y="144" fill="#475569" font-size="11">criteria, budgets, verifiers,</text>
+    <text x="40" y="160" fill="#475569" font-size="11">stopping conditions</text>
+
+    <rect x="264" y="84" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="280" y="108" font-weight="700" fill="#3730a3">2 · Generate &amp; recommend</text>
+    <text x="280" y="128" fill="#475569" font-size="11">Executable, inspectable harness</text>
+    <text x="280" y="144" fill="#475569" font-size="11">source: agents, prompts, tools,</text>
+    <text x="280" y="160" fill="#475569" font-size="11">evaluators, tests, packaging</text>
+
+    <rect x="504" y="84" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="520" y="108" font-weight="700" fill="#3730a3">3 · Rehearse &amp; evaluate</text>
+    <text x="520" y="128" fill="#475569" font-size="11">Frozen candidates over sampled</text>
+    <text x="520" y="144" fill="#475569" font-size="11">variants, held-out ID/OOD,</text>
+    <text x="520" y="160" fill="#475569" font-size="11">replay, guards, cost</text>
+
+    <rect x="504" y="204" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="520" y="228" font-weight="700" fill="#3730a3">4 · Manage, correct, evolve</text>
+    <text x="520" y="248" fill="#475569" font-size="11">Sensor/evaluator evidence drives</text>
+    <text x="520" y="264" fill="#475569" font-size="11">repair; H / E / W evolve as</text>
+    <text x="520" y="280" fill="#475569" font-size="11">separately versioned planes</text>
+
+    <rect x="264" y="204" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="280" y="228" font-weight="700" fill="#3730a3">5 · Solution templates</text>
+    <text x="280" y="248" fill="#475569" font-size="11">Distill verified evidence into</text>
+    <text x="280" y="264" fill="#475569" font-size="11">reusable SolutionTemplates;</text>
+    <text x="280" y="280" fill="#475569" font-size="11">re-evaluate before reuse</text>
+
+    <rect x="24" y="204" width="196" height="88" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="40" y="228" font-weight="700" fill="#3730a3">6 · Package &amp; operate</text>
+    <text x="40" y="248" fill="#475569" font-size="11">Reproducible, secret-free</text>
+    <text x="40" y="264" fill="#475569" font-size="11">HarnessReleaseBundle; deploy,</text>
+    <text x="40" y="280" fill="#475569" font-size="11">monitor, promote, roll back</text>
+  </g>
+  <g stroke="#4f46e5" stroke-width="1.8" fill="none">
+    <line x1="220" y1="128" x2="264" y2="128" marker-end="url(#arr2)"/>
+    <line x1="460" y1="128" x2="504" y2="128" marker-end="url(#arr2)"/>
+    <line x1="602" y1="172" x2="602" y2="204" marker-end="url(#arr2)"/>
+    <line x1="504" y1="248" x2="460" y2="248" marker-end="url(#arr2)"/>
+    <line x1="264" y1="248" x2="220" y2="248" marker-end="url(#arr2)"/>
+    <path d="M 122 204 L 122 188 L 122 172" marker-end="url(#arr2)"/>
+  </g>
+
+  <!-- H/E/W planes -->
+  <g font-size="12">
+    <rect x="24" y="330" width="676" height="120" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="40" y="354" font-weight="700" fill="#0f172a" font-size="13">Three separately versioned learning planes — change one axis at a time for attribution</text>
+    <rect x="40" y="368" width="204" height="66" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="52" y="390" font-weight="700" fill="#065f46">H — Harness</text>
+    <text x="52" y="408" fill="#475569" font-size="11">code, prompts, context, memory,</text>
+    <text x="52" y="424" fill="#475569" font-size="11">retrieval, tools, routing, topology</text>
+    <rect x="260" y="368" width="204" height="66" rx="8" fill="#fff7ed" stroke="#fed7aa"/>
+    <text x="272" y="390" font-weight="700" fill="#9a3412">E — Evaluators</text>
+    <text x="272" y="408" fill="#475569" font-size="11">evolve between epochs; can never</text>
+    <text x="272" y="424" fill="#475569" font-size="11">define or approve their own validity</text>
+    <rect x="480" y="368" width="204" height="66" rx="8" fill="#f0f9ff" stroke="#bae6fd"/>
+    <text x="492" y="390" font-weight="700" fill="#075985">W — Open weights</text>
+    <text x="492" y="408" fill="#475569" font-size="11">immutable checkpoints/adapters;</text>
+    <text x="492" y="424" fill="#475569" font-size="11">hosted/frontier weights never train</text>
+  </g>
+
+  <!-- Invariants -->
+  <rect x="724" y="84" width="232" height="366" rx="10" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="740" y="108" font-size="13" font-weight="700" fill="#991b1b">Non-negotiable invariants</text>
+  <g font-size="11" fill="#7f1d1d">
+    <text x="740" y="132">1 · Evidence before learning</text>
+    <text x="740" y="154">2 · Full-fidelity evaluation</text>
+    <text x="740" y="176">3 · Frozen comparisons</text>
+    <text x="740" y="198">4 · Evaluator non-self-approval</text>
+    <text x="740" y="220">5 · Determinism ≠ correctness</text>
+    <text x="740" y="242">6 · Best protected over latest</text>
+    <text x="740" y="264">7 · Bounded authority</text>
+    <text x="740" y="286">8 · Reversible operation</text>
+    <text x="740" y="308">9 · Honest termination</text>
+    <text x="740" y="340" fill="#b91c1c" font-size="10">Generated code is an immutable</text>
+    <text x="740" y="355" fill="#b91c1c" font-size="10">candidate, not authority: it cannot</text>
+    <text x="740" y="370" fill="#b91c1c" font-size="10">touch its evaluator, permissions,</text>
+    <text x="740" y="385" fill="#b91c1c" font-size="10">secrets, promotion, or deployment.</text>
+    <text x="740" y="408" fill="#b91c1c" font-size="10">Promotion &amp; deployment stay</text>
+    <text x="740" y="423" fill="#b91c1c" font-size="10">human-gated, exact-rollback,</text>
+    <text x="740" y="438" fill="#b91c1c" font-size="10">outside candidate authority.</text>
+  </g>
+
+  <!-- Footer -->
+  <rect x="24" y="478" width="932" height="110" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="40" y="504" font-size="13" font-weight="700" fill="#334155">Portfolio modes — "self-contained" = owning the improvement loop, not hosting every model</text>
+  <g font-size="11" fill="#475569">
+    <text x="40" y="528"><tspan font-weight="700" fill="#334155">hybrid:</tspan> frontier/hosted + open-weight models collaborate in different roles with versioned routing, fallbacks, budgets.</text>
+    <text x="40" y="550"><tspan font-weight="700" fill="#334155">open-only:</tspan> every member is an open-weight snapshot; the release can run fully local/offline.</text>
+    <text x="40" y="572">Hosted model changes (routing, prompts, params) are H changes; only open-weight members evolve as W.</text>
+  </g>
+</svg>

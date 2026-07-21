@@ -2,10 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 49
+Revision: 64
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
+| TASK-20260719-014 | Enforce and attest coding-worker execution boundaries, serialize shared workspaces, and gate dispatch with scoped capability tokens | review | codex:charltons-mbp.home.lan:meta18-20260719 | `src/metaharness/harness/coding.py`; `src/metaharness/harness/subscription.py`; `src/metaharness/harness/isolation.py`; `src/metaharness/core/executor.py`; `src/metaharness/identity/tokens.py`; `src/metaharness/web/state.py`; `tests/test_coding.py`; `tests/test_executor.py`; `tests/test_identity.py`; `docs/architecture.md` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
 | TASK-20260714-003 | Red-team the frozen context contracts with disjoint invalid-input, authority, determinism, and memory-skill fixtures | done | claude:charltons-mbp.home.lan:meta5-20260715 |  |
@@ -13,3 +14,4 @@ Revision: 49
 | TASK-20260714-010 | Add the transactional remote claim gateway, Linear projection adapter, remote MCP facade, fencing, and cross-host race/recovery tests | done | codex:charltons-mbp.home.lan:codex-meta2-20260715 |  |
 | TASK-20260719-012 | Domain-readiness gates and high-signal evaluation applied to standalone selflearn specialists | done | codex:charltons-mbp.home.lan:meta12-20260719 |  |
 | TASK-20260719-013 | Promote the shadow ContextEnvelope to the single live prompt assembler: both worker families consume typed envelope sections, trust rules and redaction enforced on sent bytes, per-attempt manifest journaled as the authoritative what-model-saw record | done | claude:charltons-mbp.home.lan:meta19-20260719 |  |
+| TASK-20260719-015 | Apply the 10 pre-audited selflearn learning-module consistency findings (Linear META-24): EFE staleness-boost inversion, coverage-evidence branches, baseline validity drift, dead high_signal property, untested min_validation_gain gate, and 5 doc/test-drift items — each behavioral fix with a citing test | done | claude:charltons-mbp.home.lan:meta24-20260719 |  |
