@@ -1,3 +1,179 @@
+# Session Handoff — meta-harness (2026-07-19, session 42: META-18 approved, awaiting coordinator integration)
+
+## State: META-18 implementation and mandatory review complete; frozen in Review
+
+- **META-18 / `TASK-20260719-014`** implements the coding-worker execution
+  boundary at frozen head **`9472741d0186b730aa4628b9ee38a6da73c5161a`**
+  (base `e5347a62ae266090fa9d531f86172f3a5c2f4a5a`) on branch
+  `dev/meta-18-worker-execution-boundary` in worktree
+  `/private/tmp/meta-harness-meta-18`.
+- Workplan is honestly frozen at revision **64**, status **Review**. The review
+  freeze records the exact branch/head above. Linear **META-18** is also
+  **Review** and blocks META-21. No coordinator integration or acceptance has
+  been claimed.
+- Multiagent execution used three bounded scouts/reviewers, native
+  MiniMax-M3 builder rounds, and the mandatory independent Pi review through
+  **NeuralWatt GLM-5.2** in read-only mode. Fresh frozen-diff verdict:
+  **APPROVE; P0 0, P1 0, no new substantive findings**.
+- Final independent report:
+  `/private/tmp/meta-harness-meta-18/.review-store/meta18-glm-5.2-review-9472741.txt`.
+  It is intentionally untracked so the reviewed commit remains immutable.
+  The prior review artifact is committed at
+  `.review-store/meta18-glm-5.2-review-102dfca.txt`.
+- Final orchestrator evidence: executor/correction **55 passed**; focused
+  identity/executor/coding **110 passed**; regression **159 passed**; full
+  suite **1322 passed, 2 xfailed**; workplan suite **115 passed, 0 failed**;
+  `git diff --check e5347a62..9472741` clean.
+- Product result: capability tokens now gate dispatch fail-closed with exact
+  task/subject/scope/revocation checks; shared workspaces use resolved-path,
+  process-local plus `flock` exclusive leases; every adapter emits an honest
+  pre-spawn `ExecutionBoundary`; denied zero-attempt dispatches cannot poison
+  learning evidence, while later denial preserves prior real-attempt evidence.
+- The branch is local-only as of handoff (`git ls-remote --heads origin
+  dev/meta-18-worker-execution-boundary` returned no ref). The primary checkout
+  has unrelated dirty/untracked user state; preserve it during integration.
+
+### Coordinator next steps
+
+1. Publish or otherwise integrate frozen head `9472741d` without changing its
+   reviewed tree; record the resulting descendant integration commit.
+2. As a distinct `coordinator:*` actor, run `workplan integrate` from expected
+   revision **64** with that integration commit. This is the only valid
+   Review → Verifying transition; the implementing owner cannot self-integrate.
+3. Move Linear META-18 to **Verifying** with the integration receipt, rerun the
+   definition's acceptance commands at the integration commit, then use the
+   coordinator acceptance receipt to advance workplan and Linear to **Done**.
+4. Release the META-18 owned paths only through successful `workplan accept`;
+   META-21 remains blocked until then.
+
+---
+
+# Session Handoff — meta-harness (2026-07-19, session 41: META-24 shipped, accepted, Done)
+
+## State: META-24 complete across repo, GitHub, Linear, and workplan; no card in flight from this seat
+
+- **PR #45 merged by the user** at `884a034d30c9db1edaab682964cb3b76ee32de8a`;
+  primary `main` fast-forwarded from `e5347a6` (dirty user files preserved).
+  Tree identity verified: merge tree == reviewed-head tree (`fce52060…`).
+- Acceptance commands re-run at the integrated commit in the worktree venv:
+  focused 46 passed; selflearn 224/1 skipped; root 1230/1/2 xfailed;
+  `git diff --check` clean. Workplan `integrate` rev **59**, `accept` rev
+  **60**, paths released. Receipt `.workplan/meta24-acceptance.json`
+  (`sha256:17ebbe10…2a73d9a`). Linear META-24 **Done** with evidence at every
+  transition. Ownership doc: META-24 removed from the blocking set (selflearn
+  branches should now base on `884a034`+).
+- Episodic memory: todo `…-015442-…` retired via revision
+  (`20260719-115245-resolved-…-2bed`); milestone episode
+  `20260719-115257-meta-24-…-539f` stored.
+- Cleanup candidates (optional, not performed): worktree
+  `/private/tmp/meta-harness-meta-24` (detached at `884a034`, branch merged;
+  venv reusable for the selflearn lane), remote+local branch
+  `dev/meta-24-selflearn-learning-consistency`.
+
+## Build record (kept for reference)
+
+- **META-24 / `TASK-20260719-015`** (10 selflearn learning-module consistency
+  fixes) ran in user-approved **direct-fix mode** (no multi-seat panel; the
+  user-reviewed merged PR is the independent gate — frozen in
+  `.agents/meta24-definition.json`, hash `sha256:1d157d4e…f276a826`).
+- Worktree `/private/tmp/meta-harness-meta-24`, branch
+  `dev/meta-24-selflearn-learning-consistency`, base `e5347a6`, head
+  **`6f877f2`** (single commit, all 10 findings). PR:
+  <https://github.com/lantisprime/meta-harness/pull/45>. CI run
+  29685501482 **pass**.
+- Workplan: ready→claim→start→**submit** at revisions 55/56/57/**58**,
+  owner `claude:charltons-mbp.home.lan:meta24-20260719`. Linear META-24 In
+  Progress with evidence comments at each step; path-ownership doc updated
+  (META-24 added to the blocking set).
+- Evidence: selflearn suite **224 passed / 1 skipped** (was 220; +4 citing
+  tests); root suite **1230/1/2 unchanged** — root `testpaths = ["tests"]`
+  never collects `selflearn/tests`, the two baselines are independent.
+  `git diff --check` clean.
+- Key fix: EFE failure-count boost now restricted to coverage/quality kinds
+  (`gaps.py`) — staleness age-in-days was read as a failure count, giving
+  every staleness signal the max 2× boost and inverting quality>staleness.
+  Also: coverage-evidence branches, `_baseline_issue` (+`BASELINE_FILE`
+  import), dead `high_signal` deleted, `min_validation_gain` test, doc/
+  `__all__` drift (6–9), honest rename `test_suggestions_efe_ranked`.
+- NOTE: the `min_validation_gain` and baseline-reason tests live in
+  `tests/test_learning.py` (owned) rather than `test_domain_readiness.py`
+  (NOT owned — deliberately untouched to respect path reservations).
+
+### Next steps (all of the above close-out is DONE)
+
+1. GitHub issue #29 file-or-close decision (still the only item with no
+   Linear card — user decision).
+2. META-18 still in flight externally (`TASK-20260719-014`, in_progress) —
+   its blocking set (incl. `docs/architecture.md`) still applies; META-21/22
+   remain unclaimable.
+3. Conflict-free candidates: selflearn lane META-13..17, META-25
+   (knowledge-packs), META-23/META-20 (path-disjoint, coordinate on design).
+4. Optional cleanup: META-24 worktree/branch (above) + stale session-39
+   worktrees/sockets.
+
+---
+
+# Session Handoff — meta-harness (2026-07-19, session 40: Linear backlog filed + team documentation)
+
+## State: no product code changed; all deliverables live in Linear. META-18 is being worked by ANOTHER session.
+
+### Coordination facts (load-bearing)
+
+- **META-18 is claimed externally.** Its workplan card `TASK-20260719-014` exists
+  at board revision **50** (status backlog in state.json, added by that session).
+  Owned paths: `src/metaharness/harness/{coding,subscription,isolation}.py`,
+  `core/executor.py`, `identity/tokens.py`, `web/state.py`,
+  `tests/test_{coding,executor,identity}.py`, **`docs/architecture.md`**.
+  Do not touch those paths (including doc-scorecard edits) from this seat.
+- Conflict-free lanes while META-18 runs: selflearn lane (META-24, META-13..17),
+  knowledge-packs (META-25), META-23/META-20 path-disjoint (META-20 caveat:
+  architecture.md is owned by 014). Do NOT claim META-21 (gated on 18) or
+  META-22 (targets identity/tokens.py). All of this is written up in the Linear
+  doc "Concurrent work protocol: path-ownership map" — update its blocking-set
+  section when cards claim/release.
+
+### Filed in Linear this session
+
+- **META-24** (Medium) — the 10 selflearn learning-module consistency findings,
+  full file:line detail migrated from episodic todo
+  `20260719-015442-todo-apply-selflearn-learning-module-con-be70` (todo is now
+  tracked; episode can be retired when META-24 closes). Top item: EFE staleness
+  boost inverts quality>staleness ranking (`gaps.py:103-122`).
+- **META-25** (Low) — pillar-7 probe generator for schillings-mindsets pack.
+- **META-26** (Low) — documentation hub; anchors the diagram SVG assets and is
+  the standing doc-maintenance card.
+
+### Team documentation created (all Linear docs, Meta-Harness team)
+
+1. "New here? Start with this — Meta-Harness" (front door)
+2. "Meta-Harness — Principles & Overall Design" — with 3 hand-authored SVG
+   diagrams embedded (system overview v2, product loop + H/E/W, selflearn loop)
+3. "Onboarding — Humans"
+4. "Onboarding — Agents"
+5. "Concurrent work protocol: path-ownership map" (created earlier same session)
+
+Team **Overview page populated** via browser: description (255-char cap) + 6
+pinned resources (5 docs in reading order + GitHub repo link).
+
+Diagram mechanics: assets uploaded via Linear MCP prepare_attachment_upload →
+curl PUT → finalize, attached to META-26; docs embed the assetUrls. The
+architecture diagram is **v2** (v1 had arrows crossing band titles; v1
+attachment row deleted). SVG sources saved durably at
+`.agents/diagrams/mh-{architecture,product-loop,selflearn-loop}.svg` (untracked)
+— edit these and re-upload (new assetUrl + save_document repoint) to revise.
+
+### Open items for next session
+
+- **Start META-24** (recommended next card; ask the user whether to run the full
+  quality process or fix directly — the scope is small and pre-audited).
+- **GitHub issue #29** ("Run agents & MCP tool selection self-guiding", pre-charter
+  era) is the ONLY pending item with no Linear card — user decision: file or close.
+- Optional cleanup: stale worktrees/sockets per session-39 list.
+- Repo state: working tree clean at `e5347a6` except untracked `.agents/diagrams/`
+  (intentional, keep).
+
+---
+
 # Session Handoff — meta-harness (2026-07-19, session 39: META-19 shipped)
 
 ## State: META-19 accepted, merged, and Done; no card in flight

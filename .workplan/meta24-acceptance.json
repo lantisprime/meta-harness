@@ -1,0 +1,23 @@
+{
+ "schemaVersion": 1,
+ "verdict": "pass",
+ "evaluator": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+ "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+ "integrationCommit": "884a034d30c9db1edaab682964cb3b76ee32de8a",
+ "commands": [
+  "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests/test_learning.py selflearn/tests/test_advisor.py",
+  "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests",
+  "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q",
+  "git diff --check"
+ ],
+ "evidenceRefs": [
+  "github:lantisprime/meta-harness#45@884a034d30c9db1edaab682964cb3b76ee32de8a",
+  "github-actions:29685501482",
+  "tree-identity:merge-commit-tree==reviewed-head-tree@fce52060170f79aefc2b8681ed61ba9aa04e1b2a",
+  "acceptance-run@884a034:focused-46;selflearn-224/1skip;root-1230/1/2xf;diff-clean",
+  "pre-merge-run@6f877f2:focused-60(incl-domain-readiness);selflearn-224/1skip;root-1230/1/2xf",
+  "process:direct-fix-mode-user-approved-20260719;independent-gate=user-merged-PR-45",
+  "linear:META-24-claim+delivery+ci-evidence-comments"
+ ],
+ "receiptHash": "sha256:17ebbe103d974ab8d4468493b1cfb92081cfee5b7c51a345b629d9cfb2a73d9a"
+}

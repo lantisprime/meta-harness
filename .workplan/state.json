@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 49,
+  "revision": 64,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -1527,6 +1527,419 @@
         "revisionFrom": 48,
         "revisionTo": 49,
         "at": "2026-07-19T10:46:24.656Z"
+      }
+    },
+    {
+      "id": "TASK-20260719-014",
+      "title": "Enforce and attest coding-worker execution boundaries, serialize shared workspaces, and gate dispatch with scoped capability tokens",
+      "status": "review",
+      "owner": "codex:charltons-mbp.home.lan:meta18-20260719",
+      "paths": [
+        "src/metaharness/harness/coding.py",
+        "src/metaharness/harness/subscription.py",
+        "src/metaharness/harness/isolation.py",
+        "src/metaharness/core/executor.py",
+        "src/metaharness/identity/tokens.py",
+        "src/metaharness/web/state.py",
+        "tests/test_coding.py",
+        "tests/test_executor.py",
+        "tests/test_identity.py",
+        "docs/architecture.md"
+      ],
+      "priority": 1,
+      "trace": "Linear META-18; charter stages 3-4; bounded authority; generated code executes only after explicit isolation and pre-dispatch authorization; H/E/W frozen",
+      "evidence": [
+        "Linear:META-18",
+        "docs/architecture.md:6.2",
+        "PR44:bcad4c2"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Codex lane",
+        "start",
+        "first checkpoint: failing authorization and workspace-conflict tests"
+      ],
+      "definition": {
+        "sourceRevision": "git:e5347a62ae266090fa9d531f86172f3a5c2f4a5a;Linear:META-18@2026-07-19T05:12:47.145Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-scorecard-sha256:97e454a8d074827ec726232fdd01d06dd70d01759521e7f979967db358744198",
+        "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+        "worktreePath": "/private/tmp/meta-harness-meta-18",
+        "branch": "dev/meta-18-worker-execution-boundary",
+        "baseCommit": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "currentHead": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex implementation card for Linear META-18. Establish an explicit, machine-readable execution-boundary contract for every coding CLI adapter without pretending the post-hoc verifier sandbox protects generation: Codex CODE_EDIT uses its enforced native workspace-write mode; subscription Codex remains native read-only; subscription Claude remains plan mode with Read/Glob/Grep; Pi, OpenCode, and edit-capable Claude are explicitly classified as operator-trusted CLI boundaries with no harness filesystem jail. Emit the selected boundary before spawn and document the per-adapter guarantees and limitations. Add a cross-process exclusive lease keyed by the resolved workspace path so concurrent workers cannot mutate or inspect one shared checkout while an attempt is active; separate explicitly supplied git worktrees remain supported, but the harness does not auto-create branches or worktrees. Activate scoped capability tokens at the TaskExecutor pre-dispatch boundary: mint and validate a short-lived token bound to worker, task, task:execute, tier, and task type before attempt assignment/start events and before runner.run; invalid, expired, revoked, wrong-subject, wrong-task, or wrong-scope authorization must fail closed with no worker call, no capability evidence, and reasoned provenance/event evidence. Preserve the existing post-hoc OS-sandboxed verifier, result authenticity checks, routing, budgets, context assembly, human approvals, and adapter behavior outside these explicit boundaries.",
+        "stopCondition": "Stop and fail closed on any evaluator, merge, promotion, deployment, credential, or runtime-authority grant; H/E/W drift; owned-path expansion; an authorization failure that still invokes a runner or emits attempt.started; a token not bound to the chosen worker and task; a shared-workspace collision that permits concurrent execution; a claim implementation that auto-creates, deletes, resets, or switches git worktrees; documentation that calls operator-trusted Pi/OpenCode/Claude execution sandboxed; credential removal or network denial that breaks authenticated CLI use; weakening the protected verifier sandbox or result-signature checks; failing acceptance commands; or unresolved independent-review P0/P1 findings.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Authorization validity is deterministic signature, expiry, revocation, subject, task, and scope validation. Workspace exclusivity is tested with real overlapping attempts and a cross-process lock probe. Adapter-boundary claims are checked against exact argv and emitted evidence; operator-trusted adapters remain honestly labeled. Coordinator integration requires frozen focused/full test evidence plus a read-only Pi/NeuralWatt GLM-5.2 frozen-diff review with no unresolved P0/P1 findings. Human promotion and deployment authority remain unchanged.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Invalid-input tests prove an invalid scoped dispatch token produces zero runner calls and no attempt.started event; overlapping workers targeting one resolved workspace yield one winner and one reasoned workspace_claim denial while distinct worktrees remain independent; every adapter reports an honest execution-boundary classification matching its argv; focused tests pass.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 50,
+          "revisionTo": 51,
+          "at": "2026-07-19T11:00:17.787Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 51,
+          "revisionTo": 52,
+          "at": "2026-07-19T11:23:42.662Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 52,
+          "revisionTo": 53,
+          "at": "2026-07-19T11:23:59.230Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 60,
+          "revisionTo": 61,
+          "at": "2026-07-19T12:42:50.040Z",
+          "evidence": {
+            "branch": "dev/meta-18-worker-execution-boundary",
+            "head": "102dfca0db6d8314ef4e97cf254c38995dd7f843"
+          }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 61,
+          "revisionTo": 62,
+          "at": "2026-07-19T14:07:33.547Z",
+          "evidence": {
+            "reason": "Accepted frozen-review P2-1 required correction and fresh immutable review head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 62,
+          "revisionTo": 63,
+          "at": "2026-07-19T14:07:41.316Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Accepted frozen-review P2-1 required correction and fresh immutable review head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta18-20260719",
+          "revisionFrom": 63,
+          "revisionTo": 64,
+          "at": "2026-07-19T14:07:47.643Z",
+          "evidence": {
+            "branch": "dev/meta-18-worker-execution-boundary",
+            "head": "9472741d0186b730aa4628b9ee38a6da73c5161a"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:meta18-20260719",
+        "definitionHash": "sha256:1d30fc1968d7d26af028f035aef97e922d13e8b6e803be7e3b2db866ef3bfa9d",
+        "sourceRevision": "git:e5347a62ae266090fa9d531f86172f3a5c2f4a5a;Linear:META-18@2026-07-19T05:12:47.145Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-scorecard-sha256:97e454a8d074827ec726232fdd01d06dd70d01759521e7f979967db358744198",
+        "worktreePath": "/private/tmp/meta-harness-meta-18",
+        "branch": "dev/meta-18-worker-execution-boundary",
+        "baseCommit": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "currentHead": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "paths": [
+          "src/metaharness/harness/coding.py",
+          "src/metaharness/harness/subscription.py",
+          "src/metaharness/harness/isolation.py",
+          "src/metaharness/core/executor.py",
+          "src/metaharness/identity/tokens.py",
+          "src/metaharness/web/state.py",
+          "tests/test_coding.py",
+          "tests/test_executor.py",
+          "tests/test_identity.py",
+          "docs/architecture.md"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex implementation card for Linear META-18. Establish an explicit, machine-readable execution-boundary contract for every coding CLI adapter without pretending the post-hoc verifier sandbox protects generation: Codex CODE_EDIT uses its enforced native workspace-write mode; subscription Codex remains native read-only; subscription Claude remains plan mode with Read/Glob/Grep; Pi, OpenCode, and edit-capable Claude are explicitly classified as operator-trusted CLI boundaries with no harness filesystem jail. Emit the selected boundary before spawn and document the per-adapter guarantees and limitations. Add a cross-process exclusive lease keyed by the resolved workspace path so concurrent workers cannot mutate or inspect one shared checkout while an attempt is active; separate explicitly supplied git worktrees remain supported, but the harness does not auto-create branches or worktrees. Activate scoped capability tokens at the TaskExecutor pre-dispatch boundary: mint and validate a short-lived token bound to worker, task, task:execute, tier, and task type before attempt assignment/start events and before runner.run; invalid, expired, revoked, wrong-subject, wrong-task, or wrong-scope authorization must fail closed with no worker call, no capability evidence, and reasoned provenance/event evidence. Preserve the existing post-hoc OS-sandboxed verifier, result authenticity checks, routing, budgets, context assembly, human approvals, and adapter behavior outside these explicit boundaries.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_identity.py tests/test_executor.py tests/test_coding.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_web.py tests/test_workflows.py tests/test_optimization.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Invalid-input tests prove an invalid scoped dispatch token produces zero runner calls and no attempt.started event; overlapping workers targeting one resolved workspace yield one winner and one reasoned workspace_claim denial while distinct worktrees remain independent; every adapter reports an honest execution-boundary classification matching its argv; focused tests pass.",
+        "revisionFrom": 51,
+        "revisionTo": 52,
+        "at": "2026-07-19T11:23:42.661Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-18-worker-execution-boundary",
+        "head": "9472741d0186b730aa4628b9ee38a6da73c5161a",
+        "revisionFrom": 63,
+        "revisionTo": 64,
+        "at": "2026-07-19T14:07:47.643Z"
+      }
+    },
+    {
+      "id": "TASK-20260719-015",
+      "title": "Apply the 10 pre-audited selflearn learning-module consistency findings (Linear META-24): EFE staleness-boost inversion, coverage-evidence branches, baseline validity drift, dead high_signal property, untested min_validation_gain gate, and 5 doc/test-drift items — each behavioral fix with a citing test",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:meta24-20260719",
+      "paths": [],
+      "priority": 3,
+      "trace": "https://linear.app/cha-personal/issue/META-24/selflearn-apply-learning-module-consistency-audit-findings",
+      "definition": {
+        "sourceRevision": "git:e5347a62ae266090fa9d531f86172f3a5c2f4a5a;Linear:META-24@2026-07-19T10:56:38.903Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c",
+        "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+        "worktreePath": "/private/tmp/meta-harness-meta-24",
+        "branch": "dev/meta-24-selflearn-learning-consistency",
+        "baseCommit": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "currentHead": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded direct-fix card owned by the Claude lane applying exactly the 10 pre-audited selflearn learning-module consistency findings from Linear META-24 (episodic todo 20260719-015442). Behavioral: (1) fix expected_free_energy_value so staleness evidence age-in-days is never read as a failure count, restoring the documented quality>staleness ranking in Learner.suggestions(), with a staleness-EFE test; (2) fix gap_signals coverage-evidence branches (unreachable not-in-coverage branch; covered-but-nothing-retrieved mislabel); (3) _valid_baseline imports BASELINE_FILE from regression.py and reports an accurate reason when the baseline exists but injected is not True; (4) delete or unify the dead EvaluationCriterion.high_signal property; (5) add a test for the min_validation_gain eligibility gate. Doc/test drift: (6) advisor.py module docstring matches emitted priorities; (7) learning/__init__.py docstring matches the exported API; (8) marks.py header credits injected + seeded_by plan seeds; (9) remove private _parse_iso from marks.py __all__; (10) make test_suggestions_efe_ranked_and_readonly honest about suggestions() not being read-only (rename or assert real behavior). Each behavioral fix lands with a citing test. No other selflearn behavior changes; items listed as verified-clean in META-24 are not re-audited.",
+        "stopCondition": "Stop and fail closed on: any edit outside the owned paths (in particular any src/metaharness/ path — META-18/TASK-20260719-014 owns the execution-environment scope, including docs/architecture.md); any grant of evaluator, merge, promotion, deployment, credential, or self-approval authority; H/E/W drift; any behavior change beyond the 10 enumerated findings; owned-path expansion; re-auditing or modifying the verified-clean areas (split-sealing, per-item regression veto, frozen-evaluator identity, GAP_KINDS/ACTIONS mapping, half-life plumbing, doctor parse_state_data).",
+        "evaluatorAuthority": "Direct-fix mode user-approved 2026-07-19 (small, pre-audited scope): the full multi-seat quality process is waived. The implementing seat still cannot self-accept: coordinator acceptance requires immutable focused and full test receipts at the reviewed head, a clean git diff --check, and the user-reviewed merged PR as the independent gate before Done.",
+        "acceptanceCommands": [
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests/test_learning.py selflearn/tests/test_advisor.py",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "All 10 findings applied with citing tests; focused learning/advisor suites green; full selflearn suite green; full repo suite green (1230 passed / 1 skipped / 2 xfailed baseline, plus new tests); branch pushed and PR open.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 54,
+          "revisionTo": 55,
+          "at": "2026-07-19T11:28:54.982Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 55,
+          "revisionTo": 56,
+          "at": "2026-07-19T11:28:55.054Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 56,
+          "revisionTo": 57,
+          "at": "2026-07-19T11:28:55.128Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 57,
+          "revisionTo": 58,
+          "at": "2026-07-19T11:40:56.152Z",
+          "evidence": {
+            "branch": "dev/meta-24-selflearn-learning-consistency",
+            "head": "6f877f22d42c59093ba02285d19a1c4c7f4ab6ea"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 58,
+          "revisionTo": 59,
+          "at": "2026-07-19T11:51:20.462Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-24-selflearn-learning-consistency",
+            "reviewHead": "6f877f22d42c59093ba02285d19a1c4c7f4ab6ea",
+            "integrationCommit": "884a034d30c9db1edaab682964cb3b76ee32de8a"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+          "revisionFrom": 59,
+          "revisionTo": 60,
+          "at": "2026-07-19T11:51:40.228Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+            "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+            "integrationCommit": "884a034d30c9db1edaab682964cb3b76ee32de8a",
+            "commands": [
+              "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests/test_learning.py selflearn/tests/test_advisor.py",
+              "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests",
+              "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "github:lantisprime/meta-harness#45@884a034d30c9db1edaab682964cb3b76ee32de8a",
+              "github-actions:29685501482",
+              "tree-identity:merge-commit-tree==reviewed-head-tree@fce52060170f79aefc2b8681ed61ba9aa04e1b2a",
+              "acceptance-run@884a034:focused-46;selflearn-224/1skip;root-1230/1/2xf;diff-clean",
+              "pre-merge-run@6f877f2:focused-60(incl-domain-readiness);selflearn-224/1skip;root-1230/1/2xf",
+              "process:direct-fix-mode-user-approved-20260719;independent-gate=user-merged-PR-45",
+              "linear:META-24-claim+delivery+ci-evidence-comments"
+            ],
+            "receiptHash": "sha256:17ebbe103d974ab8d4468493b1cfb92081cfee5b7c51a345b629d9cfb2a73d9a"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta24-20260719",
+        "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+        "sourceRevision": "git:e5347a62ae266090fa9d531f86172f3a5c2f4a5a;Linear:META-24@2026-07-19T10:56:38.903Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c",
+        "worktreePath": "/private/tmp/meta-harness-meta-24",
+        "branch": "dev/meta-24-selflearn-learning-consistency",
+        "baseCommit": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "currentHead": "e5347a62ae266090fa9d531f86172f3a5c2f4a5a",
+        "paths": [
+          "selflearn/src/selflearn/learning/gaps.py",
+          "selflearn/src/selflearn/learning/improvement.py",
+          "selflearn/src/selflearn/learning/marks.py",
+          "selflearn/src/selflearn/learning/__init__.py",
+          "selflearn/src/selflearn/advisor.py",
+          "selflearn/tests/test_learning.py",
+          "selflearn/tests/test_advisor.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded direct-fix card owned by the Claude lane applying exactly the 10 pre-audited selflearn learning-module consistency findings from Linear META-24 (episodic todo 20260719-015442). Behavioral: (1) fix expected_free_energy_value so staleness evidence age-in-days is never read as a failure count, restoring the documented quality>staleness ranking in Learner.suggestions(), with a staleness-EFE test; (2) fix gap_signals coverage-evidence branches (unreachable not-in-coverage branch; covered-but-nothing-retrieved mislabel); (3) _valid_baseline imports BASELINE_FILE from regression.py and reports an accurate reason when the baseline exists but injected is not True; (4) delete or unify the dead EvaluationCriterion.high_signal property; (5) add a test for the min_validation_gain eligibility gate. Doc/test drift: (6) advisor.py module docstring matches emitted priorities; (7) learning/__init__.py docstring matches the exported API; (8) marks.py header credits injected + seeded_by plan seeds; (9) remove private _parse_iso from marks.py __all__; (10) make test_suggestions_efe_ranked_and_readonly honest about suggestions() not being read-only (rename or assert real behavior). Each behavioral fix lands with a citing test. No other selflearn behavior changes; items listed as verified-clean in META-24 are not re-audited.",
+        "acceptanceCommands": [
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests/test_learning.py selflearn/tests/test_advisor.py",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "All 10 findings applied with citing tests; focused learning/advisor suites green; full selflearn suite green; full repo suite green (1230 passed / 1 skipped / 2 xfailed baseline, plus new tests); branch pushed and PR open.",
+        "revisionFrom": 55,
+        "revisionTo": 56,
+        "at": "2026-07-19T11:28:55.053Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-24-selflearn-learning-consistency",
+        "head": "6f877f22d42c59093ba02285d19a1c4c7f4ab6ea",
+        "revisionFrom": 57,
+        "revisionTo": 58,
+        "at": "2026-07-19T11:40:56.152Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+        "reviewBranch": "dev/meta-24-selflearn-learning-consistency",
+        "reviewHead": "6f877f22d42c59093ba02285d19a1c4c7f4ab6ea",
+        "integrationCommit": "884a034d30c9db1edaab682964cb3b76ee32de8a",
+        "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+        "revisionFrom": 58,
+        "revisionTo": 59,
+        "at": "2026-07-19T11:51:20.462Z"
+      },
+      "releasedPaths": [
+        "selflearn/src/selflearn/learning/gaps.py",
+        "selflearn/src/selflearn/learning/improvement.py",
+        "selflearn/src/selflearn/learning/marks.py",
+        "selflearn/src/selflearn/learning/__init__.py",
+        "selflearn/src/selflearn/advisor.py",
+        "selflearn/tests/test_learning.py",
+        "selflearn/tests/test_advisor.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+        "definitionHash": "sha256:1d157d4ef0cea624dd3ae2100c8102a9e2df99a679180fa8c9a2531af276a826",
+        "integrationCommit": "884a034d30c9db1edaab682964cb3b76ee32de8a",
+        "commands": [
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests/test_learning.py selflearn/tests/test_advisor.py",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q selflearn/tests",
+          "/private/tmp/meta-harness-meta-24/.venv/bin/pytest -q",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "github:lantisprime/meta-harness#45@884a034d30c9db1edaab682964cb3b76ee32de8a",
+          "github-actions:29685501482",
+          "tree-identity:merge-commit-tree==reviewed-head-tree@fce52060170f79aefc2b8681ed61ba9aa04e1b2a",
+          "acceptance-run@884a034:focused-46;selflearn-224/1skip;root-1230/1/2xf;diff-clean",
+          "pre-merge-run@6f877f2:focused-60(incl-domain-readiness);selflearn-224/1skip;root-1230/1/2xf",
+          "process:direct-fix-mode-user-approved-20260719;independent-gate=user-merged-PR-45",
+          "linear:META-24-claim+delivery+ci-evidence-comments"
+        ],
+        "receiptHash": "sha256:17ebbe103d974ab8d4468493b1cfb92081cfee5b7c51a345b629d9cfb2a73d9a",
+        "actor": "coordinator:charltons-mbp.home.lan:meta24-20260719",
+        "releasedPaths": [
+          "selflearn/src/selflearn/learning/gaps.py",
+          "selflearn/src/selflearn/learning/improvement.py",
+          "selflearn/src/selflearn/learning/marks.py",
+          "selflearn/src/selflearn/learning/__init__.py",
+          "selflearn/src/selflearn/advisor.py",
+          "selflearn/tests/test_learning.py",
+          "selflearn/tests/test_advisor.py"
+        ],
+        "revisionFrom": 59,
+        "revisionTo": 60,
+        "at": "2026-07-19T11:51:40.228Z"
       }
     }
   ]
