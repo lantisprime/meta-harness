@@ -1,3 +1,188 @@
+# Session Handoff — meta-harness (2026-07-22, session 47: META-7 SHIPPED — merged, accepted, Done)
+
+## State: META-7 complete across repo, GitHub, Linear, and workplan; no card in flight
+
+- **PR #52 merged** (user-authorized) as
+  **`0a710a0c436e8ea8e4d6ce79348190b73ad78ae3`**; review head `c6b25ed` is its
+  second parent. CI run 29920843628 / job 88925653872 passed. Primary `main`
+  fast-forwarded to the merge commit.
+- Workplan `TASK-20260714-005`: submit 77→**78** (owner seat), integrate
+  78→**79**, accept 79→**80** under distinct actor
+  `coordinator:charltons-mbp.home.lan:meta7-closeout-20260722`. All 12
+  reserved paths released. Receipt `.workplan/meta7-acceptance.json`,
+  receiptHash `sha256:17bc0ae528b9a52486ecdc0822f64dc9fe75e84c2ff3526661733c1cecc7fdd8`.
+- Coordinator acceptance rerun at the exact merge commit: discovery **365**,
+  regression **245**, full **1697 passed / 2 xfailed**, workplan **115/115**,
+  `git diff --check` clean.
+- Linear **META-7 Done** with evidence at every transition
+  (submission/review-gate/integration/acceptance). Follow-up **META-27**
+  (torn-final-journal-write recovery, from gate P2-1) filed in Backlog.
+
+- Implementation commit **`c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b`** on
+  `dev/meta-7-discovery-kernel` (base `b13a2fe`), pushed; **PR #52** open.
+  Exactly the 12 reserved files, 12,506 insertions. Worktree
+  `/private/tmp/meta-harness-meta-7` intact.
+- Canonical card `TASK-20260714-005` submitted **77 → 78** by owner
+  `claude:charltons-mbp.home.lan:meta7-herdr-20260722`. Linear **META-7 is in
+  Review** with evidence comments (submission + gate verdict + dispositions).
+- Mandatory AGENTS.md gate: **Pi / NeuralWatt GLM-5.2 APPROVE — P0 0, P1 0,
+  P2 1, P3 4** on frozen diff `b13a2fe...c6b25ed`. Artifact
+  `.review-store/meta7-glm-gate-review-c6b25ed.txt`, sha256
+  `2a574d156f7080c529bfa1a9d3a1b77c642b586e301394c4aace7f651bb45ce1`.
+  P2-1 (torn-final-journal-write recovery) DEFERRED → filed as **META-27**
+  (Backlog, Low). P3s = documented accepted limitations.
+- Acceptance evidence at `c6b25ed` (all five frozen commands): discovery 365;
+  regression slice 245; full suite **1697 passed, 2 xfailed**; workplan
+  115/115; `git diff --check` clean.
+- Session-46 blocking P1s were resolved through FIVE builder fix rounds
+  (briefs 8–12, `.review-store/meta7-precommit-fix-brief-{8..12}.md`) executed
+  by a persistent Claude Sonnet 5 subagent builder, panel-reviewed by
+  kimi-k2.7-code + GLM-5.2 (herdr pi seats, private session, torn down) +
+  codex read-only one-shots + MiniMax-M3 behavioral probes (6/6 then 4/4
+  PASS). Key structural outcomes: 13-row producer/evidence table driving
+  terminal replay (module comment, code written 1:1 from it), round-currency +
+  contradiction guards, issuance-verified scope provenance
+  (`make_issuance_verifier`), durable inherited changed-path boundaries with
+  staged-index re-check, poison-on-failed-recovery, receipt-before-mutation.
+  All panel artifacts under `.review-store/meta7-{kimi,glm,codex,minimax}-*`.
+- OpenAI codex note: its final prose gets eaten by OpenAI's cyber filter even
+  with neutral briefs — demand a terse neutral verdict TABLE (works) or mine
+  the transcript for probe lines.
+
+### Next steps
+
+1. Coordinator qualifies the next backlog card into Linear Ready before any
+   seat claims (Ready lane was empty at handoff; candidates include META-8
+   scheduling policy — now unblocked by META-7 — plus the selflearn lane and
+   META-25/26/27).
+2. Cleanup candidates (optional, not performed): worktree
+   `/private/tmp/meta-harness-meta-7` (branch merged), remote+local branch
+   `dev/meta-7-discovery-kernel`, `.review-store/meta7-precommit-fix-brief-*`
+   and raw panel captures (KEEP the gate artifact
+   `meta7-glm-gate-review-c6b25ed.txt` per AGENTS.md), probe dirs
+   `/private/tmp/meta7-probes-{8,9}`.
+3. Milestone episode:
+   `20260722-124603-meta-7-discovery-kernel-implemented-glm--4ede` (pre-merge
+   snapshot; closeout state is in this handoff).
+
+---
+
+# Session Handoff — meta-harness (2026-07-22, session 46: META-7 in progress, blocked before review freeze)
+
+## State: META-7 remains In Progress with an uncommitted candidate and unresolved P1 findings
+
+- Canonical card **`TASK-20260714-005` / Linear `META-7`** remains honestly
+  **In Progress** at atomic workplan revision **77**. Owner:
+  `claude:charltons-mbp.home.lan:meta7-herdr-20260722`; definition hash
+  `sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30`.
+  Do not submit, integrate, accept, or move Linear to Review yet.
+- Feature worktree: `/private/tmp/meta-harness-meta-7`; branch
+  `dev/meta-7-discovery-kernel`; base/current HEAD
+  `b13a2fecb53b7372b5d46a0b94254e820034ef45`. There is **no implementation
+  commit and no remote branch**. Current uncommitted binary-diff SHA-256:
+  `299deb1160489b3a56a03b586fc9c0148266405d1b652d4735bc977ff49accf6`.
+- Exactly the 12 reserved files are intent-to-add/modified: six new
+  `src/metaharness/discovery/` modules and six discovery test modules. No
+  existing live prompt, evaluator, deployment, memory, E/W, scheduler, or
+  policy file is changed. This advances charter product-loop stages 2–4 as an
+  H-only isolated discovery MVP while preserving evaluator non-self-approval,
+  bounded authority, full-fidelity evidence, reversible lineage, and honest
+  termination.
+- Orchestration used the private Herdr session `drv-mh-meta7-0224` with the
+  builder `meta7-builder` on Claude Sonnet 5, high effort, plus built-in
+  architecture and correctness review seats. The primary Codex
+  seat remained orchestrator and made no product/test edits. The Herdr session
+  is intentionally torn down at this handoff; recreate a new private session
+  rather than touching any sibling/default session.
+- Milestone episode:
+  `20260722-060716-meta-7-handoff-at-workplan-revision-77-w-2856`.
+
+### Implemented and verified so far
+
+- The candidate contains frozen/self-hashed discovery models, exact-parent
+  lineage workspaces and recovery, append-only scoped knowledge, role-specific
+  context manifests, and a bounded asynchronous supervisor with durable
+  intent/outcome journaling, restart/timeout recovery, poison-on-ambiguous-
+  append behavior, and exactly-one terminal receipts.
+- Several review rounds already fixed: EOF submit recovery idempotence,
+  stop/semaphore races, evaluator charging, semantic replay checks, lineage
+  identity/ancestry/high-water validation, knowledge authority/supersession,
+  role-source binding, journal append poisoning, repeated `INTERRUPTED`
+  recovery, non-resetting campaign/attempt deadlines, single-read anchors,
+  finite wall-clock validation, live/recovery rollback checks, empty recovery,
+  and repeated resumed-crash restart accounting.
+- Current-state evidence from the last independent scope review: discovery
+  suite **266 passed**; context/memory regression slice **245 passed**;
+  `git diff --check` clean. Builder evidence also has supervisor **92 passed**
+  and workplan **115/115 passed**. The complete repository suite has **not**
+  been rerun after the final state-machine edits; older full-suite passes are
+  not acceptance evidence for the current diff.
+
+### Blocking findings to route to the next builder
+
+1. **Lineage changed-path boundary (P1):** `LineageWorkspaceManager` creates a
+   full repository worktree and checkpoints with unrestricted `git add -A`
+   without enforcing the campaign's declared changed-path boundary
+   (`lineage.py` around lines 67, 161, 229). Validate the exact changed paths
+   before staging or committing; fail before mutation.
+2. **Knowledge-scope provenance (P1):** knowledge requesters and cross-lineage
+   context receipts trust caller-provided identity/lineage/island strings
+   (`knowledge.py` around 104/215/394; `contexts.py` around 72/152/219).
+   Require independently issued scope provenance or keep cross-scope reads
+   unavailable in this MVP.
+3. **Journal evidence contract (P1):** `json.loads` accepts duplicate keys, and
+   replay does not yet fully bind terminal outcome/resource timing to immutable
+   campaign/attempt deadlines. Independent reproduction accepted a rehashed
+   `COMPLETED` terminal at wall 20 with deadline 10 and resource wall 0.
+4. **Mutation-before-validation (P1):** lineage checkpoint/child commit can
+   stage/commit before attempt/receipt inputs validate; knowledge append can
+   publish query-visible state before injected clock/ID receipt construction
+   validates. Precompute and validate every public input and receipt before
+   external or visible mutation.
+5. **Own-journal terminal replay (P1, latest coordinator probe):** after a
+   launched attempt is down past `max_wall_seconds=10`, live recovery emits
+   truthful `TIMED_OUT` with `wall_seconds=20`, but fresh replay rejects
+   `terminal from AttemptState.INTERRUPTED`. Fix terminal precursor validation
+   semantically and allow truthful over-budget wall evidence without clamping.
+   Exact unprocessed brief:
+   `.review-store/meta7-precommit-fix-brief-7.md` in the primary checkout.
+6. P2 follow-ups: validate event and operational clock ports and validate
+   adapter outcome types/statuses. These do not override the P1 stop gate.
+
+### Resume sequence
+
+1. Re-read `docs/PROJECT_CHARTER.md`, this section, the card at revision 77,
+   and the authoritative tiered orchestration playbook. Preserve the existing
+   worktree and all unrelated main-checkout state, especially untracked
+   `.codex/`.
+2. Start a new uniquely named private Herdr session and send the P1 findings
+   to a single builder owning only the 12 reserved paths. Builders do not
+   commit. Add invalid-input/observable repro tests before fixes.
+3. Run a fresh provider-diverse read-only review of the stable candidate and
+   disposition every finding. Any P0/P1 keeps the card In Progress.
+4. Run the exact five acceptance commands frozen in
+   `.workplan/state.json`. Inspect the final diff and reserved paths. Only then
+   stage the 12 intended files and create the implementation commit.
+5. Submit atomically from expected revision **77** to **78** using the exact
+   feature HEAD, then move Linear META-7 to Review with evidence.
+6. Run the mandatory immutable-diff review exactly as project `AGENTS.md`
+   requires: Pi / NeuralWatt GLM-5.2, read-only, base/head named, file-and-line
+   P0–P3 findings, output preserved verbatim under `.review-store/`. The
+   project-specific command overrides the generic playbook Pi recipe. Any
+   P0/P1 requires a new commit and fresh review.
+7. After approval, publish a PR and watch CI. Integration/acceptance must use a
+   distinct coordinator actor; do not self-approve or release paths early.
+
+### Primary checkout state to preserve
+
+- Modified generated control files: `.workplan/state.json`, `WORKPLAN.md`.
+- Untracked `.codex/` is user state and must remain excluded.
+- Untracked `.review-store/meta7-*brief*.md` and `meta7-playbook.md` are
+  temporary control artifacts. Preserve them for resumption; remove all but
+  the eventual mandatory Pi review artifact before closeout.
+
+---
+
 # Session Handoff — meta-harness (2026-07-22, session 45: META-23 fully handed off)
 
 ## State: META-23 is complete across GitHub, Linear, and the atomic workplan

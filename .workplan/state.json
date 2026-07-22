@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 73,
+  "revision": 80,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2305,6 +2305,259 @@
         "revisionFrom": 72,
         "revisionTo": 73,
         "at": "2026-07-22T01:36:58.512Z"
+      }
+    },
+    {
+      "id": "TASK-20260714-005",
+      "title": "Implement the isolated discovery supervisor, lineage recovery, typed knowledge hub, and role-specific context manifests",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:meta7-herdr-20260722",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-7; charter stages 2-4; H-only discovery MVP; E/W and protected evaluator frozen; bounded authority and reversible lineage",
+      "dependencies": [
+        "TASK-20260714-002",
+        "TASK-20260714-003"
+      ],
+      "evidence": [
+        "Linear:META-7",
+        "baseline:225-passed",
+        "arch-scout:meta7_arch_scout",
+        "security-scout:meta7_security_scout"
+      ],
+      "next": [
+        "qualify Ready",
+        "atomic Claude claim",
+        "Herdr builder",
+        "frozen-diff Pi/GLM review",
+        "coordinator acceptance"
+      ],
+      "definition": {
+        "sourceRevision": "git:b13a2fecb53b7372b5d46a0b94254e820034ef45;Linear:META-7;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4;context-plan-sha256:6922f7512b1110b0bd15ce40a5eb611dbadb7c7fa7e09cb1ba472b1a480167e2;baseline:225-passed",
+        "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+        "worktreePath": "/private/tmp/meta-harness-meta-7",
+        "branch": "dev/meta-7-discovery-kernel",
+        "baseCommit": "b13a2fecb53b7372b5d46a0b94254e820034ef45",
+        "currentHead": "b13a2fecb53b7372b5d46a0b94254e820034ef45",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded H-only MVP in a new metaharness.discovery package. Implement frozen self-hashed campaign/lifecycle/terminal contracts; an exact-parent LineageWorkspaceManager that creates isolated Git worktrees, checkpoints immutable child commits, and recovers or quarantines ambiguous state without destructive cleanup; an append-only typed DiscoveryKnowledgeHub with private/lineage/island/campaign/reviewed-project visibility, untrusted candidate defaults, progressive disclosure, and use receipts; role-specific context manifests for fresh explorers, direct-lineage optimizers, and compact schedulers; and an asynchronous CampaignSupervisor with injected worker and opaque proxy-evaluator ports, bounded FIFO concurrency/restarts/timeouts, durable intent/outcome journaling, idempotent resume, and exactly one terminal receipt per attempt. Reuse frozen context/scope/hash contracts and existing honest workspace-boundary primitives. H changes only inside the owned discovery package and tests; E and W remain frozen. No live prompt wiring or existing product-file changes.",
+        "stopCondition": "Stop and fail closed on any need to edit outside owned paths; access to protected evaluator cases or internals; proxy/protected evaluator identity conflation; evaluator, promotion, merge, deployment, memory-activation, weight-training, permission-expansion, heartbeat, population-policy, SearchPolicyDSL, island-migration, or multi-parent behavior; any destructive deletion or overwrite of an unowned, dirty, symlinked, ambiguous, or active workspace; shell-interpolated Git refs or path traversal; journal corruption or recovery that cannot be replayed idempotently; cross-project/campaign/lineage knowledge leakage; agent-authored content gaining instruction, verified-fact, active-memory, or reviewed-project authority; E/W drift; unreceipted terminal path; nondeterministic hashes/views for identical inputs; failing acceptance commands; or unresolved independent-review P0/P1 findings.",
+        "evaluatorAuthority": "Candidate workers receive only an opaque proxy-evaluator port over immutable checkpoint references. Protected evaluator definitions, cases, promotion state, deployment pointers, active memory, and E/W mutation remain outside worker and discovery-kernel authority. Pi/NeuralWatt GLM-5.2 reviews the frozen diff read-only; a distinct coordinator verifies and accepts the integrated commit. No component may self-approve.",
+        "acceptanceCommands": [
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py tests/adversarial/test_context_determinism.py tests/test_coding.py tests/test_workflows.py tests/test_memory.py tests/test_memory_broker.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check b13a2fecb53b7372b5d46a0b94254e820034ef45"
+        ],
+        "nextCheckpoint": "The owned discovery package and disjoint tests prove exact-parent isolated lineages, immutable checkpoints, fail-closed recovery, bounded crash/timeout/restart/resume, append-only scoped knowledge with no authority gain, and deterministic explorer/optimizer/scheduler context manifests without changing live prompts or protected evaluator access.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta7-qualify-20260722",
+          "revisionFrom": 74,
+          "revisionTo": 75,
+          "at": "2026-07-22T02:23:20.465Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta7-herdr-20260722",
+          "revisionFrom": 75,
+          "revisionTo": 76,
+          "at": "2026-07-22T02:23:55.559Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta7-herdr-20260722",
+          "revisionFrom": 76,
+          "revisionTo": 77,
+          "at": "2026-07-22T02:23:55.741Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta7-herdr-20260722",
+          "revisionFrom": 77,
+          "revisionTo": 78,
+          "at": "2026-07-22T12:33:32.152Z",
+          "evidence": {
+            "branch": "dev/meta-7-discovery-kernel",
+            "head": "c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+          "revisionFrom": 78,
+          "revisionTo": 79,
+          "at": "2026-07-22T12:47:21.506Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-7-discovery-kernel",
+            "reviewHead": "c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+            "integrationCommit": "0a710a0c436e8ea8e4d6ce79348190b73ad78ae3"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+          "revisionFrom": 79,
+          "revisionTo": 80,
+          "at": "2026-07-22T12:53:45.338Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+            "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+            "integrationCommit": "0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+            "commands": [
+              "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+              "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py tests/adversarial/test_context_determinism.py tests/test_coding.py tests/test_workflows.py tests/test_memory.py tests/test_memory_broker.py",
+              "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check b13a2fecb53b7372b5d46a0b94254e820034ef45"
+            ],
+            "evidenceRefs": [
+              "git:integration:0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+              "git:review-head:c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+              "github:pull/52:merged",
+              "github-actions:run/29920843628:job/88925653872:pass",
+              "pytest:focused-discovery:365-passed",
+              "pytest:regressions:245-passed",
+              "pytest:full:1697-passed:2-xfailed",
+              "node-test:workplan:115-passed",
+              "git-diff-check:clean",
+              "review:.review-store/meta7-glm-gate-review-c6b25ed.txt:sha256:2a574d156f7080c529bfa1a9d3a1b77c642b586e301394c4aace7f651bb45ce1:glm-5.2-approve-no-p0-p1",
+              "frozen-diff:sha256:abab9a365669c8002c84de418cadfd2ce06050d7fddf8efde05338fb4a8075a0"
+            ],
+            "receiptHash": "sha256:17bc0ae528b9a52486ecdc0822f64dc9fe75e84c2ff3526661733c1cecc7fdd8"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta7-herdr-20260722",
+        "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+        "sourceRevision": "git:b13a2fecb53b7372b5d46a0b94254e820034ef45;Linear:META-7;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;delivery-plan-sha256:2cc6b28eb7694f82526cf002ac71c51b6fde5a82d879286d1df55b4005eb77a4;context-plan-sha256:6922f7512b1110b0bd15ce40a5eb611dbadb7c7fa7e09cb1ba472b1a480167e2;baseline:225-passed",
+        "worktreePath": "/private/tmp/meta-harness-meta-7",
+        "branch": "dev/meta-7-discovery-kernel",
+        "baseCommit": "b13a2fecb53b7372b5d46a0b94254e820034ef45",
+        "currentHead": "b13a2fecb53b7372b5d46a0b94254e820034ef45",
+        "paths": [
+          "src/metaharness/discovery",
+          "tests/test_discovery_models.py",
+          "tests/test_discovery_lineage.py",
+          "tests/test_discovery_knowledge.py",
+          "tests/test_discovery_contexts.py",
+          "tests/test_discovery_supervisor.py",
+          "tests/adversarial/test_discovery_boundaries.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded H-only MVP in a new metaharness.discovery package. Implement frozen self-hashed campaign/lifecycle/terminal contracts; an exact-parent LineageWorkspaceManager that creates isolated Git worktrees, checkpoints immutable child commits, and recovers or quarantines ambiguous state without destructive cleanup; an append-only typed DiscoveryKnowledgeHub with private/lineage/island/campaign/reviewed-project visibility, untrusted candidate defaults, progressive disclosure, and use receipts; role-specific context manifests for fresh explorers, direct-lineage optimizers, and compact schedulers; and an asynchronous CampaignSupervisor with injected worker and opaque proxy-evaluator ports, bounded FIFO concurrency/restarts/timeouts, durable intent/outcome journaling, idempotent resume, and exactly one terminal receipt per attempt. Reuse frozen context/scope/hash contracts and existing honest workspace-boundary primitives. H changes only inside the owned discovery package and tests; E and W remain frozen. No live prompt wiring or existing product-file changes.",
+        "acceptanceCommands": [
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py tests/adversarial/test_context_determinism.py tests/test_coding.py tests/test_workflows.py tests/test_memory.py tests/test_memory_broker.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check b13a2fecb53b7372b5d46a0b94254e820034ef45"
+        ],
+        "nextCheckpoint": "The owned discovery package and disjoint tests prove exact-parent isolated lineages, immutable checkpoints, fail-closed recovery, bounded crash/timeout/restart/resume, append-only scoped knowledge with no authority gain, and deterministic explorer/optimizer/scheduler context manifests without changing live prompts or protected evaluator access.",
+        "revisionFrom": 75,
+        "revisionTo": 76,
+        "at": "2026-07-22T02:23:55.559Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-7-discovery-kernel",
+        "head": "c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+        "revisionFrom": 77,
+        "revisionTo": 78,
+        "at": "2026-07-22T12:33:32.152Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+        "reviewBranch": "dev/meta-7-discovery-kernel",
+        "reviewHead": "c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+        "integrationCommit": "0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+        "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+        "revisionFrom": 78,
+        "revisionTo": 79,
+        "at": "2026-07-22T12:47:21.506Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/discovery",
+        "tests/test_discovery_models.py",
+        "tests/test_discovery_lineage.py",
+        "tests/test_discovery_knowledge.py",
+        "tests/test_discovery_contexts.py",
+        "tests/test_discovery_supervisor.py",
+        "tests/adversarial/test_discovery_boundaries.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+        "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+        "integrationCommit": "0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+        "commands": [
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py tests/adversarial/test_context_determinism.py tests/test_coding.py tests/test_workflows.py tests/test_memory.py tests/test_memory_broker.py",
+          "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check b13a2fecb53b7372b5d46a0b94254e820034ef45"
+        ],
+        "evidenceRefs": [
+          "git:integration:0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+          "git:review-head:c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+          "github:pull/52:merged",
+          "github-actions:run/29920843628:job/88925653872:pass",
+          "pytest:focused-discovery:365-passed",
+          "pytest:regressions:245-passed",
+          "pytest:full:1697-passed:2-xfailed",
+          "node-test:workplan:115-passed",
+          "git-diff-check:clean",
+          "review:.review-store/meta7-glm-gate-review-c6b25ed.txt:sha256:2a574d156f7080c529bfa1a9d3a1b77c642b586e301394c4aace7f651bb45ce1:glm-5.2-approve-no-p0-p1",
+          "frozen-diff:sha256:abab9a365669c8002c84de418cadfd2ce06050d7fddf8efde05338fb4a8075a0"
+        ],
+        "receiptHash": "sha256:17bc0ae528b9a52486ecdc0822f64dc9fe75e84c2ff3526661733c1cecc7fdd8",
+        "actor": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+        "releasedPaths": [
+          "src/metaharness/discovery",
+          "tests/test_discovery_models.py",
+          "tests/test_discovery_lineage.py",
+          "tests/test_discovery_knowledge.py",
+          "tests/test_discovery_contexts.py",
+          "tests/test_discovery_supervisor.py",
+          "tests/adversarial/test_discovery_boundaries.py"
+        ],
+        "revisionFrom": 79,
+        "revisionTo": 80,
+        "at": "2026-07-22T12:53:45.338Z"
       }
     }
   ]
