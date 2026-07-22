@@ -37,6 +37,39 @@ class ToolSpec:
     annotations: dict[str, Any] = field(default_factory=dict)  # MCP safety hints
 
 
+@dataclass(frozen=True, init=False)
+class ToolSchemaRecord:
+    """Immutable, deterministic per-tool schema provenance: the exact wire schema
+    plus its registry origin (builtin or mcp:<server>) and dialect-safe name.
+
+    The wire schema is the same dictionary that openai_schemas() returns, so
+    callers may continue to consume that legacy API while new provenance-aware
+    paths attach source identity without changing the provider payload.
+
+    The schema payload is stored as an insertion-order JSON string so the record
+    is genuinely immutable: mutating a dict returned by ``schema`` never affects
+    the record or any later registry output.
+    """
+    name: str
+    wire_name: str
+    source: str
+    _schema_json: str = field(init=False, repr=False)
+
+    def __init__(self, name: str, wire_name: str, source: str, schema: dict[str, Any]) -> None:
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "wire_name", wire_name)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(
+            self, "_schema_json",
+            json.dumps(schema, ensure_ascii=False, separators=(",", ":")),
+        )
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        """Return a fresh copy of the exact wire schema dict."""
+        return json.loads(self._schema_json)
+
+
 class ToolError(Exception):
     """A tool failed; the message is worker-visible data, never instructions."""
 
@@ -129,23 +162,51 @@ class ToolRegistry:
 
     # -------------------------------------------------------------- schemas
 
+    def _schema_for(self, tool: ToolSpec) -> dict[str, Any]:
+        """The exact wire schema dictionary for one registered tool."""
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name.replace(".", "__"),  # dialect-safe name
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            },
+        }
+
     def openai_schemas(self, names: list[str]) -> list[dict[str, Any]]:
         """OpenAI function-calling schemas, deterministic order & serialization
-        (sorted by name; sorted keys downstream keeps the prefix byte-stable)."""
+        (sorted by name; sorted keys downstream keeps the prefix byte-stable).
+
+        This is the legacy wire-only API; it deliberately discards provenance so
+        existing callers and the provider request surface stay unchanged.
+        """
         schemas = []
         for name in sorted(set(names)):
             tool = self._tools.get(name)
             if tool is None:
                 continue  # a plan may reference a tool that has since unloaded
-            schemas.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name.replace(".", "__"),  # dialect-safe name
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                },
-            })
+            schemas.append(self._schema_for(tool))
         return schemas
+
+    def schema_records(self, names: list[str]) -> list[ToolSchemaRecord]:
+        """Provenance-aware schemas: exact wire schema plus origin identity.
+
+        Deterministic (sorted by name, deduplicated) and immutable, so the
+        manifest stable identity and provider `tools` list are byte-stable.
+        """
+        records: list[ToolSchemaRecord] = []
+        for name in sorted(set(names)):
+            tool = self._tools.get(name)
+            if tool is None:
+                continue
+            wire_name = tool.name.replace(".", "__")
+            records.append(ToolSchemaRecord(
+                name=tool.name,
+                wire_name=wire_name,
+                source=tool.source,
+                schema=self._schema_for(tool),
+            ))
+        return records
 
     def resolve_call_name(self, wire_name: str) -> Optional[str]:
         """Map a dialect-safe wire name (dots escaped) back to the registry."""

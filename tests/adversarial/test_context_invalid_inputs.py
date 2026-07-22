@@ -175,3 +175,21 @@ def test_manifest_entry_stable_ids_must_be_unique():
 
     with pytest.raises(ValidationError):
         ContextManifest.model_validate(manifest_dict)
+
+
+def test_mcp_tool_schema_manifest_entry_rejects_instruction_trust():
+    """META-23: a manifest entry cannot pair the MCP tool-schema surface with
+    INSTRUCTION trust."""
+    from metaharness.context import ContextManifestEntry
+
+    with pytest.raises(ValidationError):
+        ContextManifestEntry(
+            stable_id="tool-schema:mcp:srv:shout",
+            surface="tool_schemas",
+            payload_json=json.dumps([{}], separators=(",", ":")),
+            source_kind=ContextSourceKind.MCP_TOOL_SCHEMA,
+            trust=ContextTrust.INSTRUCTION,
+            sensitivity=Sensitivity.INTERNAL,
+            source_hash="sha256:" + "1" * 64,
+            selected_hash=content_hash([{}]),
+        )

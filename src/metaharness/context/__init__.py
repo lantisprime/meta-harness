@@ -12,6 +12,7 @@ from metaharness.context.live import (
     LiveAssembly,
     LiveContextViolation,
     SectionDraft,
+    ToolSchemaDraft,
     assemble_live,
 )
 from metaharness.context.models import (
@@ -48,6 +49,7 @@ __all__ = [
     "LiveAssembly",
     "LiveContextViolation",
     "SectionDraft",
+    "ToolSchemaDraft",
     "Sensitivity",
     "assemble_live",
     "budget_for",

@@ -159,3 +159,14 @@ def test_secret_sensitivity_source_still_obeys_fetchable_artifact_ref_pairing():
             fetchable=True,
             artifact_ref=None,
         )
+
+
+def test_mcp_tool_schema_source_cannot_be_laundered_as_an_instruction():
+    """META-23: external MCP tool schemas are evidence, never instructions."""
+    with pytest.raises(ValidationError):
+        make_source(
+            source_id="mcp:srv:shout",
+            kind=ContextSourceKind.MCP_TOOL_SCHEMA,
+            trust=ContextTrust.INSTRUCTION,
+            sensitivity=Sensitivity.INTERNAL,
+        )

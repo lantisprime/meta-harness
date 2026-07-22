@@ -6,6 +6,7 @@ from metaharness.tools.registry import (
     DEFAULT_SUBSET_CAP,
     ToolError,
     ToolRegistry,
+    ToolSchemaRecord,
     ToolSpec,
     digest_text,
 )
@@ -13,6 +14,7 @@ from metaharness.tools.registry import (
 __all__ = [
     "ToolRegistry",
     "ToolSpec",
+    "ToolSchemaRecord",
     "ToolError",
     "digest_text",
     "DEFAULT_SUBSET_CAP",
