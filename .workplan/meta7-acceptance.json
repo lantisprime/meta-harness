@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta7-closeout-20260722",
+  "definitionHash": "sha256:ba89950d495c063a49e34c07a5fcf58726a28c687e11dbd24bc52f01aa17ae30",
+  "integrationCommit": "0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+    "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py tests/adversarial/test_context_determinism.py tests/test_coding.py tests/test_workflows.py tests/test_memory.py tests/test_memory_broker.py",
+    "PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check b13a2fecb53b7372b5d46a0b94254e820034ef45"
+  ],
+  "evidenceRefs": [
+    "git:integration:0a710a0c436e8ea8e4d6ce79348190b73ad78ae3",
+    "git:review-head:c6b25ed28950a36ae9db30a6fdbf0ec25d7beb9b",
+    "github:pull/52:merged",
+    "github-actions:run/29920843628:job/88925653872:pass",
+    "pytest:focused-discovery:365-passed",
+    "pytest:regressions:245-passed",
+    "pytest:full:1697-passed:2-xfailed",
+    "node-test:workplan:115-passed",
+    "git-diff-check:clean",
+    "review:.review-store/meta7-glm-gate-review-c6b25ed.txt:sha256:2a574d156f7080c529bfa1a9d3a1b77c642b586e301394c4aace7f651bb45ce1:glm-5.2-approve-no-p0-p1",
+    "frozen-diff:sha256:abab9a365669c8002c84de418cadfd2ce06050d7fddf8efde05338fb4a8075a0"
+  ],
+  "receiptHash": "sha256:17bc0ae528b9a52486ecdc0822f64dc9fe75e84c2ff3526661733c1cecc7fdd8"
+}

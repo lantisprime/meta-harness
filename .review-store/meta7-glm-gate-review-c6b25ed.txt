@@ -1,0 +1,90 @@
+I have completed an in-depth review of all six source modules and all six test modules at the head-commit state. Here is the frozen-diff second-opinion review.
+
+---
+
+# Independent Second-Opinion Review — META-7 Discovery Kernel
+
+**Reviewer:** Pi / NeuralWatt GLM-5.2 (read-only)
+**Frozen commits:** base `b13a2fec` → head `c6b25ed` (branch `dev/meta-7-discovery-kernel`)
+**Card:** TASK-20260714-005 / Linear META-7
+**Verdict:** **APPROVE**
+
+**There are no P0 or P1 findings.** The single P2 is fail-closed and charter-compliant (an operability/durability follow-up, not an integration blocker). All P3 observations are either explicitly-documented, accepted limitations or within the stated in-process-attacker threat model.
+
+---
+
+## Review scope & tooling note (transparency)
+
+The harness read-only permission gate blocked all `git` invocations and most `bash` commands. Consequently:
+
+- I reviewed the **head-commit file state** of all 12 in-scope files. For *new* files, the full file content *is* the diff, so this is equivalent to reviewing the immutable delta for those 12 files.
+- I could **not** run `git diff b13a2fe..c6b25ed` directly. To address the charter invariant "no existing product file changed," I verified the **import graph**: no file under `src/metaharness/**` outside `discovery/` imports `metaharness.discovery` (confirmed via grep), and the discovery modules import **only pre-existing public exports** of `metaharness.context` (`ContextTrust`, `Sensitivity`, `content_hash`, `ContextSourceKind`, `ContextSourceRef`, `ContextVersionBindings`, `FrozenModel`, `SHA256_PATTERN`, `_contains_traversal_segment`) — all already present in `src/metaharness/context/__init__.py` and `models.py`. The test helpers (`FakeIssuer`, `make_manifest`, `make_budgets`, `make_versions`) are self-contained in the new test files. This is strong evidence the change is additive-only; I could not obtain byte-level git confirmation.
+- I could **not** independently re-run pytest (bash blocked); I accept the stated acceptance evidence (365/245/1697+2xfailed/115) as presented, with review artifacts under `.review-store/meta7-*-{8,9,10,11,12}*`.
+
+The code review itself — the actual deliverable — is complete and unaffected.
+
+---
+
+## Charter-invariant verification (all hold)
+
+| Invariant | Evidence (file:line) | Status |
+|---|---|---|
+| Bounded authority (no promote/deploy/eval-write/mem-activate/weight-train/perm-expand constructible) | `models.py` `DiscoveryBoundary._validate` (~L100-115) hard-rejects all six flags; knowledge `append` rejects INSTRUCTION/VERIFIED_FACT (L431-436); supervisor has no authority-minting op | ✅ |
+| Evaluator non-self-approval | `models.py` manifest rejects `proxy_evaluator_ref == versions.evaluator_version` (L236-241); supervisor only ever invokes the injected proxy port; terminal receipts label evidence `proxy-only:` (`supervisor.py:1566,1596,1626…`) | ✅ |
+| Full-fidelity evidence (honest over-budget wall times never clamped) | `supervisor.py` `_finalize_terminal` computes `wall_seconds = max(0.0, now - first_launch)` (no budget clamp); replay cross-check deliberately "NOT a `<= max_wall_seconds` clamp" — only rejects DISHONEST timing mismatch | ✅ |
+| Reversible lineage (durable receipts truth; quarantine, never guess/delete) | `lineage.py` durable `DiscoveryLineageReceipt` is source of truth; `recover()` quarantines dirty/foreign/symlinked/ambiguous/missing/tampered worktrees (`_detect_worktree_anomaly`); `_apply_receipt` enforces immutable identity fields + exact-parent ancestry | ✅ |
+| Honest termination (closest-protected-result + unresolved-gap on every non-omitted terminal; proxy-only explicitly labeled) | `models.py` `DiscoveryTerminalReceipt._validate`; all 12 `_finalize_terminal` call sites supply `closest_protected_result` + `unresolved_gap` (or `omission_reason`) | ✅ |
+| Fail-closed before external/query-visible mutation | `create_lineage` validates id_source/tree_hash before `git worktree add` (L343-353, L372); `_commit_worktree` pre-validates before staging; knowledge `append` builds receipt before mutating `_artifacts` (L472-481); `_emit` validates before journal append | ✅ |
+| E and W frozen; H-only MVP | `ContextVersionBindings` frozen; no weight-training or evaluator-write path anywhere in discovery | ✅ |
+| No existing product file changed | Additive import-wiring confirmed; no pre-existing src/test file references discovery (git byte-diff unverifiable per tool note) | ✅ (strong circumstantial) |
+
+---
+
+## Ordered findings
+
+### P0 — none
+### P1 — none
+
+### P2-1  Torn final journal write blocks all recovery (fail-closed, but unrecoverable without manual surgery)
+**File:** `src/metaharness/discovery/supervisor.py:118-122` (`DiscoveryJournal.append`) and `:144-154` (`read_all`)
+**Severity:** P2 — **PLAUSIBLE**
+**Scenario:** `append` writes JSON + `"\n"`, `flush()`, then `os.fsync()` (`L121-122`). A **power-loss / kernel-panic between the kernel write and `fsync` completion** can leave a *partial* final line on disk (torn sector). On restart, `read_all` (`L145-150`) parses line-by-line and raises `JournalError` on the first `JSONDecodeError`. Because every line is validated (no torn-tail tolerance), a single torn final record — for an event that was **never durably committed** (fsync never acked) — poisons `recover()` for *all* subsequent restarts, even though every *prior* complete line is intact and the in-flight event's atomicity model permits it to be discarded/re-derived via the existing OMITTED/interruption synthesis.
+**Charter posture:** Fail-closed (never guesses/truncates; consistent with "fail-closed validation before any… mutation" and invariant 8's immutability of prior records — they remain intact). It is an *operability* gap, not a correctness/authority violation, and does not violate any invariant as written.
+**Recommendation (follow-up, non-blocking):** add torn-tail tolerance — length-prefixed records or a per-line checksum, with truncation of a single torn *final* line (safe by construction: a torn write = fsync never acked = never durably committed). Keep the strict reject for torn/corrupt *interior* lines. Especially relevant given the supervisor's raison d'être is crash recovery.
+
+### P3-1  Knowledge evidence-receipt provenance is validate-at-append only; receipts carry `campaign_id` but no `project_id`
+**File:** `src/metaharness/discovery/knowledge.py:66-82` (`_revalidate_evidence_receipt`), `append` cross-campaign check `:484-490`
+**Severity:** P3 — **PLAUSIBLE** (within documented residual)
+**Scenario:** `append(source_evidence_receipts=[…])` validates each receipt is a closed discovery-receipt type with a self-consistent hash and matching `campaign_id`, but does not verify the cited `receipt_id` corresponds to a real durable record, and evidence receipts carry no `project_id`, so a fabricated self-hashed receipt claiming the same `campaign_id` as a different project's campaign is not structurally excluded.
+**Charter posture:** Within the explicitly-documented in-process-attacker residual ("issuance verifiers prove issuance, not cryptographic non-repudiation"; "no caller can widen scope by mere self-assertion"). The cited receipt is *not stored* (only its `receipt_id` recorded), so an auditor cross-references the durable lineage/journal log; scope-visibility itself remains issuance-gated. Acceptable for the MVP.
+
+### P3-2  Composer identity params are caller-asserted bare strings (pending verified-assignment derivation)
+**File:** `src/metaharness/discovery/contexts.py:18-32` (KNOWN LIMITATION), `compose_explorer_context` `:309`, `compose_optimizer_context` `:328`
+**Severity:** P3 — **CONFIRMED** (documented `ACCEPT-WITH-MOD`)
+**Scenario:** Both composers accept bare `project_id`/`campaign_id`/`lineage_id`/`parent_lineage_id`, so a caller can mis-label "I am lineage X" without independent proof. Residual is a *mis-labeled* manifest, not a *widened* one: any cross-lineage receipts produced are issuance-verified via `cross_lineage_receipt` (`:260`), and the optimizer's lineage-scoped-kind checks bind sources to the *claimed* lineage/parent. The module docstring itself recommends a dedicated follow-up (signature rework + ~30 tests). Acceptable per brief-9 disposition.
+
+### P3-3  `make_issuance_verifier` proves issuance, not non-repudiation
+**File:** `src/metaharness/discovery/supervisor.py:532-553` (`issued_assignment`, `make_issuance_verifier`)
+**Severity:** P3 — **CONFIRMED** (documented known limitation)
+**Scenario:** The verifier returns True iff `issued.assignment_hash == candidate.assignment_hash` against the supervisor's in-memory `_issued_assignments` (populated only once the accepted `ATTEMPT_SUBMIT_OUTCOME` is durable — `:634-636`, `:1538`). An in-process attacker with direct access to the supervisor's internals or the model constructors can forge a matching assignment.
+**Charter posture:** Explicitly the documented residual threat model ("not 'no code in this process can ever lie'"). The closed-type + self-hash + same-campaign checks remain meaningful defenses. Acceptable.
+
+### P3-4  `_commit_worktree` cannot un-create a git commit on post-commit validation failure
+**File:** `src/metaharness/discovery/lineage.py:417-419` (post-commit `git status` clean-check raising)
+**Severity:** P3 — **CONFIRMED** (documented known limitation, assessed acceptable)
+**Scenario:** If `git status --porcelain` is non-empty immediately after `git commit` (e.g., a concurrent actor created a file between the staged-index recheck in `_stage_changes` and the commit), the manager raises *after* the commit landed, leaving a git commit with no durable `DiscoveryLineageReceipt`. In-memory `state.head_commit` is not advanced, so the next op rejects via the moved-HEAD check; `recover()` quarantines the lineage via the HEAD-mismatch anomaly detection.
+**Charter posture:** Fail-closed (durable git state preserved and detected as an anomaly → quarantine; never guessed/deleted). Documented and acceptable.
+
+---
+
+## Assessment of test evidence (as presented)
+
+Coverage is commensurate with the invariants: ~114 supervisor test functions including round-currency clearing at `ATTEMPT_LAUNCH_INTENT`, the contradiction guard (rule 3), receipt-binding (rule 5), forged-in-budget-terminal rejection (`test_forged_in_budget_completed_terminal_past_deadline_rejected`, `:2959`; `test_forged_failed_terminal_from_resolved_interrupted_with_restart_capacity_remaining_rejected`, `:3175`), wall-clock rollback (7 tests incl. live + replay + monotonic-cap backstop), all 13 terminal-flavor round-trips, exactly-one-terminal, atomic evaluation reservation, poisoned-on-append-failure → fresh-instance recovery (×5), and duplicate-key JSON rejection (`:2942,2949`). The lineage suite covers boundary inheritance/widening, staged-index TOCTOU, pre-mutation id_source/tree_hash validation, and stale-`model_copy` rejection. The integration adversarial suite covers bounded-authority end-to-end, proxy-only honest termination, and a tamper sweep over real-run receipts. This is consistent with the five prior pre-commit panel rounds and the stated green suites.
+
+---
+
+## Verdict
+
+**APPROVE.** No P0 or P1 findings. The discovery kernel enforces every charter invariant under review: bounded authority with no constructible promotion/deploy/evaluator-write/memory-activation/weight-training/permission-expansion; evaluator non-self-approval via a non-conflated, independently-injected proxy evaluator with proxy-only-labeled terminal evidence; full-fidelity (uncapped) wall-time evidence; reversible lineage with quarantine-first recovery and exact-parent commits; honest termination on every terminal path; fail-closed validation before any external or query-visible mutation; and E/W frozen. The single P2 (torn-final-write journal recovery) is fail-closed and charter-compliant — it is a recommended durability follow-up, not a blocker. All P3 items are documented, accepted limitations within the stated threat model.
+
+No edits were made; this review is read-only.
