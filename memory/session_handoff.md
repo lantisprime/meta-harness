@@ -1,3 +1,48 @@
+# Session Handoff — meta-harness (2026-07-22, session 44: META-23 shipped, accepted, Done)
+
+## State: META-23 product delivery is merged; canonical closeout records await merge
+
+- **PR #49** merged as **`9dc8f61f1e6afe023fec285a3bd19a4aa35d4852`**.
+  Its reviewed implementation head is
+  **`55c35a978e8aa214d1d3dcf9115bc1b133fdcd09`**; final PR head
+  **`4b05e42606dabdb141f4086965d626f14ba4309c`** and the merge commit have
+  the same tree (`81c9a54f6ea5b7ed65fa17477a6d03c757b41708`).
+- META-23 adds honest per-tool schema provenance without changing provider
+  tool bytes: local policy schemas remain `TOOL_POLICY_SCHEMA` / `INSTRUCTION`,
+  while MCP-origin schemas are `MCP_TOOL_SCHEMA` / `UNTRUSTED_EVIDENCE`.
+  Typed validation rejects laundering MCP schemas into instruction trust.
+- Pi / NeuralWatt **GLM-5.2** reviewed the immutable base/head diff read-only
+  and returned PASS: P0 0, P1 0, P2 0. Artifact
+  `.review-store/meta23-glm-5.2-review.txt` has SHA256
+  `b9924d936e25e543910918da6a965f9403b914edaacd499f13d3d79a93841ec1`.
+  Two P3 notes were deferred with evidence: manual noncanonical
+  `ToolSchemaDraft.wire_name`, and pre-existing legacy aggregate raw-hash
+  semantics. Neither affects the supported production registry path or grants
+  authority.
+- Coordinator acceptance at the exact merge commit: focused provenance and
+  adversarial tests **71 passed**; worker/event regressions **27 passed**;
+  full suite **1332 passed, 2 xfailed**; workplan suite **115 passed**;
+  `git diff --check` clean. GitHub Actions run **29883074266**, job
+  **88807876996**, also passed.
+- Canonical `TASK-20260722-016` transitioned Review → Verifying at revision
+  **72**, then Verifying → Done at revision **73** under the distinct
+  coordinator actor. Receipt `.workplan/meta23-acceptance.json` hashes to
+  `sha256:abd80ebc3d3c9ae22a289788c0f613fb8d3748972e2e4edd01cc7d9f9deac3ba`;
+  all owned paths are released.
+- Milestone episode:
+  `20260722-013817-meta-23-shipped-honest-per-tool-mcp-sche-eec9`.
+- Linear META-23 remains **Verifying** until this canonical closeout-records
+  branch lands on `main`. The primary checkout's untracked `.codex/` content
+  remains excluded.
+
+### Next step
+
+1. Merge the META-23 closeout-records PR.
+2. Move Linear META-23 to Done with product PR, acceptance receipt, closeout
+   merge, and test evidence.
+
+---
+
 # Session Handoff — meta-harness (2026-07-21, session 43: META-18 shipped, accepted, Done)
 
 ## State: META-18 delivery complete; no workplan card remains in flight

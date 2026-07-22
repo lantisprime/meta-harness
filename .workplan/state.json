@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 66,
+  "revision": 73,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2032,6 +2032,279 @@
         "revisionFrom": 59,
         "revisionTo": 60,
         "at": "2026-07-19T11:51:40.228Z"
+      }
+    },
+    {
+      "id": "TASK-20260722-016",
+      "title": "Attest per-tool MCP schema provenance without granting instruction trust",
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:meta23-20260722",
+      "paths": [],
+      "priority": 1,
+      "trace": "Linear META-23; charter stage 2; bounded authority and full-fidelity per-tool provenance; H change with E/W frozen",
+      "evidence": [
+        "Linear:META-23",
+        "Linear:META-19",
+        "deferred:META-23-mcp-schema-provenance"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Codex lane",
+        "start",
+        "first checkpoint: failing mixed-origin manifest tests"
+      ],
+      "definition": {
+        "sourceRevision": "git:4f96f3b4f197b101b35fec07bacb25bd737478a7;Linear:META-23@2026-07-21T23:51:04.942Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-sha256:dc412e0fafb23d7575df01b72a01bba2b4c1b41e06060d463d433db17d91b57d",
+        "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+        "worktreePath": "/private/tmp/meta-harness-meta-23",
+        "branch": "dev/meta-23-tool-schema-provenance",
+        "baseCommit": "4f96f3b4f197b101b35fec07bacb25bd737478a7",
+        "currentHead": "4f96f3b4f197b101b35fec07bacb25bd737478a7",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex-lane implementation card for Linear META-23. Preserve ToolSpec's exact local or mcp:<server> origin through deterministic OpenAI schema rendering into the live context manifest. Add a provenance-aware schema record/draft path without changing the existing openai_schemas() return contract or the provider-facing tools payload. Emit one manifest entry per transmitted tool schema so mixed local and MCP schemas retain separate source kind, exact stable source identity, trust, redaction, hashes, and receipts; reconstruction must remain byte-identical to the transmitted schema list. Local caller-authored policy schemas remain TOOL_POLICY_SCHEMA/INSTRUCTION. MCP schemas are a dedicated external/MCP source kind with UNTRUSTED_EVIDENCE, and typed model validation forbids laundering that source kind to INSTRUCTION. Preserve deterministic ordering/deduplication, schema redaction, aggregate wire-byte budgeting, tool execution, tool-round behavior, manifest hashing, historical manifest validation, and all routing/evaluator/deployment authority outside this H-plane provenance correction. E and W remain frozen.",
+        "stopCondition": "Stop and fail closed on any provider tools-payload change, MCP load/call regression, schema order or deduplication drift, manifest reconstruction divergence, loss of exact MCP server/tool identity, MCP schema attested as INSTRUCTION, source-controlled trust, provenance metadata entering provider bytes or budget counts, secret leakage, historical manifest-hash incompatibility, unrelated context/memory behavior change, evaluator/merge/promotion/deployment/credential/runtime authority grant, owned-path expansion, failing acceptance command, or unresolved independent-review P0/P1 finding.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Deterministic tests must prove exact wire compatibility, mixed-origin per-tool reconstruction, MCP trust non-escalation, redaction, budget parity, round-to-round provenance, and invalid-input rejection. The Codex orchestrator inspects the exact diff and test evidence. A distinct coordinator may integrate only after a read-only Pi/NeuralWatt GLM-5.2 review of the immutable base/head diff reports no unresolved P0/P1 findings. Human promotion and deployment authority remain unchanged.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_tools.py tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_local_worker.py tests/test_run_events.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Failing tests first prove a mixed builtin/MCP registry preserves the exact deterministic provider schema list while its live manifest emits separate per-tool entries with TOOL_POLICY_SCHEMA/INSTRUCTION for builtin and MCP_TOOL_SCHEMA/UNTRUSTED_EVIDENCE for MCP; reconstruction equals sent bytes; forged MCP INSTRUCTION provenance is rejected before a model call.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 67,
+          "revisionTo": 68,
+          "at": "2026-07-22T00:00:38.535Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 68,
+          "revisionTo": 69,
+          "at": "2026-07-22T00:00:43.011Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 69,
+          "revisionTo": 70,
+          "at": "2026-07-22T00:00:49.694Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 70,
+          "revisionTo": 71,
+          "at": "2026-07-22T01:14:40.138Z",
+          "evidence": {
+            "branch": "dev/meta-23-tool-schema-provenance",
+            "head": "55c35a978e8aa214d1d3dcf9115bc1b133fdcd09"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 71,
+          "revisionTo": 72,
+          "at": "2026-07-22T01:28:47.703Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-23-tool-schema-provenance",
+            "reviewHead": "55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+            "integrationCommit": "9dc8f61f1e6afe023fec285a3bd19a4aa35d4852"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+          "revisionFrom": 72,
+          "revisionTo": 73,
+          "at": "2026-07-22T01:36:58.512Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+            "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+            "integrationCommit": "9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+            "commands": [
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_tools.py tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_local_worker.py tests/test_run_events.py",
+              "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+              "node --test scripts/workplan.test.mjs",
+              "git diff --check"
+            ],
+            "evidenceRefs": [
+              "git:integration:9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+              "git:review-head:55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+              "git:tree:81c9a54f6ea5b7ed65fa17477a6d03c757b41708=pr-head:4b05e42606dabdb141f4086965d626f14ba4309c",
+              "github:pull/49:merged",
+              "github-actions:run/29883074266:job/88807876996:pass",
+              "pytest:focused:71-passed",
+              "pytest:regressions:27-passed",
+              "pytest:full:1332-passed:2-xfailed",
+              "node-test:workplan:115-passed",
+              "git-diff-check:clean",
+              "review:.review-store/meta23-glm-5.2-review.txt:sha256:b9924d936e25e543910918da6a965f9403b914edaacd499f13d3d79a93841ec1:glm-5.2-pass-no-p0-p1",
+              "frozen-diff:sha256:e11bf690ce64bfae7298f4c21f5d5b83de781d9e9b84ef0a8c84ce9e1cb01d90"
+            ],
+            "receiptHash": "sha256:abd80ebc3d3c9ae22a289788c0f613fb8d3748972e2e4edd01cc7d9f9deac3ba"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:meta23-20260722",
+        "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+        "sourceRevision": "git:4f96f3b4f197b101b35fec07bacb25bd737478a7;Linear:META-23@2026-07-21T23:51:04.942Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-sha256:dc412e0fafb23d7575df01b72a01bba2b4c1b41e06060d463d433db17d91b57d",
+        "worktreePath": "/private/tmp/meta-harness-meta-23",
+        "branch": "dev/meta-23-tool-schema-provenance",
+        "baseCommit": "4f96f3b4f197b101b35fec07bacb25bd737478a7",
+        "currentHead": "4f96f3b4f197b101b35fec07bacb25bd737478a7",
+        "paths": [
+          ".agents/meta23-definition.json",
+          ".agents/meta23-build-spec.md",
+          ".review-store/meta23-glm-5.2-review.txt",
+          "src/metaharness/tools/registry.py",
+          "src/metaharness/tools/mcp.py",
+          "src/metaharness/tools/__init__.py",
+          "src/metaharness/context/models.py",
+          "src/metaharness/context/live.py",
+          "src/metaharness/context/__init__.py",
+          "src/metaharness/harness/local.py",
+          "tests/test_tools.py",
+          "tests/test_context.py",
+          "tests/adversarial/test_context_authority.py",
+          "tests/adversarial/test_context_invalid_inputs.py",
+          "docs/architecture.md"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded Codex-lane implementation card for Linear META-23. Preserve ToolSpec's exact local or mcp:<server> origin through deterministic OpenAI schema rendering into the live context manifest. Add a provenance-aware schema record/draft path without changing the existing openai_schemas() return contract or the provider-facing tools payload. Emit one manifest entry per transmitted tool schema so mixed local and MCP schemas retain separate source kind, exact stable source identity, trust, redaction, hashes, and receipts; reconstruction must remain byte-identical to the transmitted schema list. Local caller-authored policy schemas remain TOOL_POLICY_SCHEMA/INSTRUCTION. MCP schemas are a dedicated external/MCP source kind with UNTRUSTED_EVIDENCE, and typed model validation forbids laundering that source kind to INSTRUCTION. Preserve deterministic ordering/deduplication, schema redaction, aggregate wire-byte budgeting, tool execution, tool-round behavior, manifest hashing, historical manifest validation, and all routing/evaluator/deployment authority outside this H-plane provenance correction. E and W remain frozen.",
+        "acceptanceCommands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_tools.py tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_local_worker.py tests/test_run_events.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "nextCheckpoint": "Failing tests first prove a mixed builtin/MCP registry preserves the exact deterministic provider schema list while its live manifest emits separate per-tool entries with TOOL_POLICY_SCHEMA/INSTRUCTION for builtin and MCP_TOOL_SCHEMA/UNTRUSTED_EVIDENCE for MCP; reconstruction equals sent bytes; forged MCP INSTRUCTION provenance is rejected before a model call.",
+        "revisionFrom": 68,
+        "revisionTo": 69,
+        "at": "2026-07-22T00:00:43.010Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-23-tool-schema-provenance",
+        "head": "55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+        "revisionFrom": 70,
+        "revisionTo": 71,
+        "at": "2026-07-22T01:14:40.138Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+        "reviewBranch": "dev/meta-23-tool-schema-provenance",
+        "reviewHead": "55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+        "integrationCommit": "9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+        "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+        "revisionFrom": 71,
+        "revisionTo": 72,
+        "at": "2026-07-22T01:28:47.703Z"
+      },
+      "releasedPaths": [
+        ".agents/meta23-definition.json",
+        ".agents/meta23-build-spec.md",
+        ".review-store/meta23-glm-5.2-review.txt",
+        "src/metaharness/tools/registry.py",
+        "src/metaharness/tools/mcp.py",
+        "src/metaharness/tools/__init__.py",
+        "src/metaharness/context/models.py",
+        "src/metaharness/context/live.py",
+        "src/metaharness/context/__init__.py",
+        "src/metaharness/harness/local.py",
+        "tests/test_tools.py",
+        "tests/test_context.py",
+        "tests/adversarial/test_context_authority.py",
+        "tests/adversarial/test_context_invalid_inputs.py",
+        "docs/architecture.md"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+        "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+        "integrationCommit": "9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+        "commands": [
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_tools.py tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_local_worker.py tests/test_run_events.py",
+          "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+          "node --test scripts/workplan.test.mjs",
+          "git diff --check"
+        ],
+        "evidenceRefs": [
+          "git:integration:9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+          "git:review-head:55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+          "git:tree:81c9a54f6ea5b7ed65fa17477a6d03c757b41708=pr-head:4b05e42606dabdb141f4086965d626f14ba4309c",
+          "github:pull/49:merged",
+          "github-actions:run/29883074266:job/88807876996:pass",
+          "pytest:focused:71-passed",
+          "pytest:regressions:27-passed",
+          "pytest:full:1332-passed:2-xfailed",
+          "node-test:workplan:115-passed",
+          "git-diff-check:clean",
+          "review:.review-store/meta23-glm-5.2-review.txt:sha256:b9924d936e25e543910918da6a965f9403b914edaacd499f13d3d79a93841ec1:glm-5.2-pass-no-p0-p1",
+          "frozen-diff:sha256:e11bf690ce64bfae7298f4c21f5d5b83de781d9e9b84ef0a8c84ce9e1cb01d90"
+        ],
+        "receiptHash": "sha256:abd80ebc3d3c9ae22a289788c0f613fb8d3748972e2e4edd01cc7d9f9deac3ba",
+        "actor": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+        "releasedPaths": [
+          ".agents/meta23-definition.json",
+          ".agents/meta23-build-spec.md",
+          ".review-store/meta23-glm-5.2-review.txt",
+          "src/metaharness/tools/registry.py",
+          "src/metaharness/tools/mcp.py",
+          "src/metaharness/tools/__init__.py",
+          "src/metaharness/context/models.py",
+          "src/metaharness/context/live.py",
+          "src/metaharness/context/__init__.py",
+          "src/metaharness/harness/local.py",
+          "tests/test_tools.py",
+          "tests/test_context.py",
+          "tests/adversarial/test_context_authority.py",
+          "tests/adversarial/test_context_invalid_inputs.py",
+          "docs/architecture.md"
+        ],
+        "revisionFrom": 72,
+        "revisionTo": 73,
+        "at": "2026-07-22T01:36:58.512Z"
       }
     }
   ]
