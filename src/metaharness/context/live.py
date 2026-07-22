@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from metaharness.context.assembly import (
     _make_envelope,
@@ -110,6 +110,32 @@ class SectionDraft(FrozenModel):
     tool_calls: Optional[list[dict[str, Any]]] = None
 
 
+class ToolSchemaDraft(FrozenModel):
+    """Provenance-aware input for one tool schema (META-23).
+
+    Trust is derived from `source` (`builtin` -> INSTRUCTION, `mcp:<server>` ->
+    UNTRUSTED_EVIDENCE), never from MCP-controlled description, schema, or
+    annotations. This path is separate from `SectionDraft` so ordinary
+    `TOOL_SCHEMAS` section drafts retain their fail-closed INSTRUCTION
+    requirement.
+    """
+
+    name: str = Field(min_length=1)
+    wire_name: str = Field(min_length=1)
+    source: str = Field(min_length=1)  # "builtin" | "mcp:<server>"
+    schema_dict: dict[str, Any]
+
+    @model_validator(mode="after")
+    def validate_wire_name_matches_function(self) -> "ToolSchemaDraft":
+        function_name = (self.schema_dict.get("function") or {}).get("name")
+        if function_name != self.wire_name:
+            raise ValueError(
+                f"wire_name {self.wire_name!r} must match "
+                f"schema_dict.function.name {function_name!r}"
+            )
+        return self
+
+
 class LiveAssembly(BaseModel):
     """Every transport surface for one assembly, all redacted, plus provenance.
 
@@ -124,6 +150,28 @@ class LiveAssembly(BaseModel):
     system_prompt: str
     envelope: ContextEnvelope
     manifest: ContextManifest
+
+
+def _tool_schema_stable_id(draft: ToolSchemaDraft) -> str:
+    """Stable, deterministic manifest identity that includes exact origin."""
+    if draft.source == "builtin":
+        return f"tool-schema:builtin:{draft.name}"
+    if draft.source.startswith("mcp:"):
+        return f"tool-schema:{draft.source}:{draft.name}"
+    # Unknown sources still get a deterministic identity; the trust mapping
+    # below will fail closed rather than guess.
+    return f"tool-schema:{draft.source}:{draft.name}"
+
+
+def _tool_schema_source_trust(source: str) -> tuple[ContextSourceKind, ContextTrust]:
+    """Map registry source identity to context source kind and trust."""
+    if source == "builtin":
+        return ContextSourceKind.TOOL_POLICY_SCHEMA, ContextTrust.INSTRUCTION
+    if source.startswith("mcp:"):
+        return ContextSourceKind.MCP_TOOL_SCHEMA, ContextTrust.UNTRUSTED_EVIDENCE
+    raise LiveContextViolation(
+        f"unsupported tool schema source {source!r}; provenance cannot be derived"
+    )
 
 
 def _mergeable(role: str, draft: SectionDraft) -> bool:
@@ -171,6 +219,7 @@ def assemble_live(
     tier: Tier,
     redaction_values: Iterable[str] = (),
     tool_schemas: Optional[list[dict[str, Any]]] = None,
+    tool_schema_drafts: Optional[list[ToolSchemaDraft]] = None,
     policy_version: str = "context-live-v1",
     memory_snapshot_version: Optional[str] = None,
     evaluator_version: str = "not-bound:live",
@@ -247,6 +296,14 @@ def assemble_live(
         {value for value in redaction_values if value},
         key=lambda value: (-len(value), value),
     ))
+
+    # -- a1. tool-schema input exclusivity ------------------------------------
+    if tool_schemas is not None and tool_schema_drafts is not None:
+        raise LiveContextViolation(
+            "tool_schemas and tool_schema_drafts are mutually exclusive; "
+            "provenance-aware schemas must not be silently reinterpreted as "
+            "raw caller-authored policy"
+        )
 
     # -- b. redaction on live content (before fitting) + c. per-section fit ----
     section_budgets = allocate_section_budgets(
@@ -369,10 +426,15 @@ def assemble_live(
     system_prompt = "\n\n".join(item["final"] for item in system_items)
     system_prompt_pre = "\n\n".join(item["pre"] for item in system_items)
 
+    schema_payload: list[dict[str, Any]] = []
+    if tool_schemas is not None:
+        schema_payload = [dict(schema) for schema in tool_schemas]
+    elif tool_schema_drafts is not None:
+        schema_payload = [dict(draft.schema_dict) for draft in tool_schema_drafts]
+
     redacted_schemas: list[dict[str, Any]] = []
     tool_schema_tokens = 0
-    if tool_schemas:
-        schema_payload = [dict(schema) for schema in tool_schemas]
+    if schema_payload:
         redacted_schemas, scount = _redact(schema_payload, redaction_tuple)
         redaction_count += scount
         tool_schema_tokens = estimate_tokens(canonical_json(redacted_schemas))
@@ -485,7 +547,45 @@ def assemble_live(
                 reason=_receipt_reason(members, action),
             ))
 
-        if tool_schemas:
+        if tool_schema_drafts is not None:
+            # META-23: one manifest entry per transmitted tool, with origin
+            # identity, source kind, and trust derived from the registry.
+            seen_schema_ids: set[str] = set()
+            for draft, redacted_schema in zip(tool_schema_drafts, redacted_schemas, strict=True):
+                stable_id = _tool_schema_stable_id(draft)
+                if stable_id in seen_schema_ids:
+                    raise LiveContextViolation(
+                        f"duplicate tool schema stable_id {stable_id!r}"
+                    )
+                seen_schema_ids.add(stable_id)
+                source_kind, trust = _tool_schema_source_trust(draft.source)
+                raw_schema = dict(draft.schema_dict)
+                source_hash_value = content_hash([raw_schema])
+                selected_hash_value = content_hash([redacted_schema])
+                selected_payload_tokens = estimate_tokens(
+                    canonical_json([redacted_schema])
+                )
+                entries.append(ContextManifestEntry(
+                    stable_id=stable_id,
+                    surface="tool_schemas",
+                    payload_json=canonical_json([redacted_schema]),
+                    source_kind=source_kind,
+                    trust=trust,
+                    sensitivity=Sensitivity.INTERNAL,
+                    source_hash=source_hash_value,
+                    selected_hash=selected_hash_value,
+                    redacted=source_hash_value != selected_hash_value,
+                ))
+                receipts.append(CompressionReceipt(
+                    stable_id=stable_id,
+                    action=CompressionAction.NONE,
+                    before_hash=selected_hash_value,
+                    after_hash=selected_hash_value,
+                    original_tokens=selected_payload_tokens,
+                    final_tokens=selected_payload_tokens,
+                    reason="tool schema transported within allocated budget",
+                ))
+        elif tool_schemas:
             schema_json = canonical_json(redacted_schemas)
             before = content_hash([dict(schema) for schema in tool_schemas])
             after = content_hash(redacted_schemas)

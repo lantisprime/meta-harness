@@ -45,6 +45,7 @@ class ContextSourceKind(str, Enum):
     PROCEDURAL_MEMORY = "procedural_memory"
     POPULATION_FINDING = "population_finding"
     TOOL_POLICY_SCHEMA = "tool_policy_schema"
+    MCP_TOOL_SCHEMA = "mcp_tool_schema"
     EVALUATOR_RECEIPT = "evaluator_receipt"
     RESPONSE_CONTRACT = "response_contract"
 
@@ -171,6 +172,15 @@ class ContextSourceRef(FrozenModel):
         ):
             raise ValueError(
                 "evaluator_receipt sources are evidence and may never "
+                "carry INSTRUCTION trust (no self-promotion to instruction "
+                "authority)"
+            )
+        if (
+            self.kind is ContextSourceKind.MCP_TOOL_SCHEMA
+            and self.trust is ContextTrust.INSTRUCTION
+        ):
+            raise ValueError(
+                "mcp_tool_schema sources are external evidence and may never "
                 "carry INSTRUCTION trust (no self-promotion to instruction "
                 "authority)"
             )
@@ -336,6 +346,18 @@ class ContextManifestEntry(FrozenModel):
             raise ValueError("tool_schemas payload must be an object array")
         if self.selected_hash != content_hash(payload):
             raise ValueError("selected_hash must attest payload_json")
+        return self
+
+    @model_validator(mode="after")
+    def validate_mcp_tool_schema_trust(self) -> "ContextManifestEntry":
+        if (
+            self.source_kind is ContextSourceKind.MCP_TOOL_SCHEMA
+            and self.trust is ContextTrust.INSTRUCTION
+        ):
+            raise ValueError(
+                "mcp_tool_schema manifest entries are external evidence and may never "
+                "carry INSTRUCTION trust (no self-promotion to instruction authority)"
+            )
         return self
 
 

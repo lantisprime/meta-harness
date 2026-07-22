@@ -220,10 +220,31 @@ class OpenAICompatWorker(BaseRunner):
         self.timeout_s = timeout_s
         self._client = client
 
-    def _tool_schemas(self, task: Task) -> list[dict[str, Any]]:
+    def _tool_schemas(self, task: Task) -> list[Any]:
+        """Return either provenance-aware drafts or legacy raw schemas.
+
+        Registries that expose ``schema_records`` get the META-23 typed path;
+        legacy registries that only expose ``openai_schemas`` stay on the raw
+        ``tool_schemas=`` path. We never fabricate provenance for schemas of
+        unknown origin.
+        """
         if not task.tools or self.tool_registry is None:
             return []
-        return self.tool_registry.openai_schemas(task.tools)
+        registry = self.tool_registry
+        if hasattr(registry, "schema_records"):
+            from metaharness.context import ToolSchemaDraft
+
+            records = registry.schema_records(task.tools)
+            return [
+                ToolSchemaDraft(
+                    name=record.name,
+                    wire_name=record.wire_name,
+                    source=record.source,
+                    schema_dict=record.schema,
+                )
+                for record in records
+            ]
+        return registry.openai_schemas(task.tools)
 
     def _body(self, task: Task, messages: list[dict[str, Any]],
               tool_schemas: list[dict[str, Any]]) -> dict[str, Any]:
@@ -277,7 +298,14 @@ class OpenAICompatWorker(BaseRunner):
             # redaction_values scrubs the same value from prompt CONTENT only.
             headers["Authorization"] = f"Bearer {self.api_key}"
         drafts = _build_drafts(task, self.system_prompt)
-        tool_schemas = self._tool_schemas(task)
+        tool_schema_input = self._tool_schemas(task)
+        if tool_schema_input and isinstance(tool_schema_input[0], dict):
+            tool_schemas: Optional[list[dict[str, Any]]] = tool_schema_input
+            tool_schema_drafts: Optional[list[Any]] = None
+        else:
+            tool_schemas = None
+            tool_schema_drafts = tool_schema_input or None
+        has_tool_schemas = bool(tool_schemas or tool_schema_drafts)
         prompt_budget = budget_for(self.tier, self.context_budget)
         tool_calls_made: list[dict[str, Any]] = []
         tokens_in = tokens_out = 0
@@ -296,7 +324,8 @@ class OpenAICompatWorker(BaseRunner):
                     model_id=self.model,
                     harness_version="metaharness:0.1.0",
                     tier=self.tier,
-                    tool_schemas=tool_schemas or None,
+                    tool_schemas=tool_schemas,
+                    tool_schema_drafts=tool_schema_drafts,
                     redaction_values=[self.api_key] if self.api_key else (),
                 )
                 messages = assembly.messages
@@ -336,7 +365,7 @@ class OpenAICompatWorker(BaseRunner):
                 tokens_out += int(usage.get("completion_tokens", 0))
                 message = data["choices"][0]["message"]
                 calls = message.get("tool_calls") or []
-                if not calls or not tool_schemas or _round == self.max_tool_rounds:
+                if not calls or not has_tool_schemas or _round == self.max_tool_rounds:
                     break
                 # tool round: append the assistant turn and each observation as
                 # NEW drafts, then re-run assemble_live next iteration. Assistant

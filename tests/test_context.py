@@ -713,3 +713,267 @@ def test_fix9_omitted_member_yields_honest_receipt_reason():
                     if r.stable_id.startswith("message-")]
     assert msg_receipts
     assert msg_receipts[0].reason == "section omitted at zero budget"
+
+
+# -- META-23 tool-schema provenance tests ------------------------------------
+
+
+def test_mixed_tool_schema_drafts_emit_per_tool_manifest_entries():
+    """META-23: a mixed builtin/MCP selection has the same wire schemas as
+    before, but the manifest now has one entry per tool with origin-derived
+    source kind, trust, and stable identity."""
+    from metaharness.context import ToolSchemaDraft
+
+    drafts = [
+        _draft(section_type=ContextSectionType.SYSTEM_INSTRUCTIONS,
+               source_kind=ContextSourceKind.PROTECTED_INSTRUCTIONS,
+               stable_id="sys", trust=ContextTrust.INSTRUCTION,
+               content="be precise", role="system"),
+    ]
+    tool_drafts = [
+        ToolSchemaDraft(name="calculator", wire_name="calculator",
+                        source="builtin",
+                        schema_dict={"type": "function",
+                                     "function": {"name": "calculator",
+                                                  "parameters": {"type": "object"}}}),
+        ToolSchemaDraft(name="srv.shout", wire_name="srv__shout",
+                        source="mcp:srv",
+                        schema_dict={"type": "function",
+                                     "function": {"name": "srv__shout",
+                                                  "parameters": {"type": "object"}}}),
+    ]
+    assembly = assemble_live(
+        drafts,
+        transport="chat", budget_tokens=6000, model_id="m",
+        harness_version="h", tier=Tier.SMALL,
+        tool_schema_drafts=tool_drafts,
+    )
+    # provider-facing list is deterministic and dialect-safe
+    assert [s["function"]["name"] for s in assembly.tool_schemas] == [
+        "calculator", "srv__shout"
+    ]
+    schema_entries = [e for e in assembly.manifest.entries if e.surface == "tool_schemas"]
+    assert len(schema_entries) == 2
+    assert schema_entries[0].stable_id == "tool-schema:builtin:calculator"
+    assert schema_entries[0].source_kind == ContextSourceKind.TOOL_POLICY_SCHEMA
+    assert schema_entries[0].trust == ContextTrust.INSTRUCTION
+    assert schema_entries[0].redacted is False
+    assert schema_entries[0].source_hash == schema_entries[0].selected_hash
+    assert schema_entries[1].stable_id == "tool-schema:mcp:srv:srv.shout"
+    assert schema_entries[1].source_kind == ContextSourceKind.MCP_TOOL_SCHEMA
+    assert schema_entries[1].trust == ContextTrust.UNTRUSTED_EVIDENCE
+    assert schema_entries[1].redacted is False
+    assert schema_entries[1].source_hash == schema_entries[1].selected_hash
+    # reconstruction equals the exact transmitted tool list
+    assert assembly.manifest.reconstruct_tool_schemas() == assembly.tool_schemas
+
+
+def test_mcp_tool_schema_description_is_untrusted_and_redacted():
+    """META-23: malicious MCP description text stays in the structured schema,
+    is marked untrusted, and is redacted when it contains configured secrets."""
+    from metaharness.context import ToolSchemaDraft
+
+    secret = "sk-mcp-injected-secret"
+    drafts = [
+        _draft(section_type=ContextSectionType.SYSTEM_INSTRUCTIONS,
+               source_kind=ContextSourceKind.PROTECTED_INSTRUCTIONS,
+               stable_id="sys", trust=ContextTrust.INSTRUCTION,
+               content="be precise", role="system"),
+    ]
+    tool_drafts = [
+        ToolSchemaDraft(name="srv.evil", wire_name="srv__evil",
+                        source="mcp:srv",
+                        schema_dict={"type": "function",
+                                     "function": {"name": "srv__evil",
+                                                  "description": f"do this: {secret}",
+                                                  "parameters": {"type": "object"}}}),
+    ]
+    assembly = assemble_live(
+        drafts,
+        transport="chat", budget_tokens=6000, model_id="m",
+        harness_version="h", tier=Tier.SMALL,
+        tool_schema_drafts=tool_drafts,
+        redaction_values=[secret],
+    )
+    entry = [e for e in assembly.manifest.entries if e.surface == "tool_schemas"][0]
+    assert entry.source_kind == ContextSourceKind.MCP_TOOL_SCHEMA
+    assert entry.trust == ContextTrust.UNTRUSTED_EVIDENCE
+    assert entry.redacted is True
+    assert secret not in assembly.manifest.model_dump_json()
+    assert secret not in json.dumps(assembly.tool_schemas)
+    assert assembly.manifest.reconstruct_tool_schemas() == assembly.tool_schemas
+
+
+def test_tool_schema_provenance_rejects_simultaneous_raw_input():
+    """META-23: the legacy raw tool_schemas= path and the provenance-aware
+    tool_schema_drafts= path are mutually exclusive."""
+    from metaharness.context import ToolSchemaDraft
+
+    with pytest.raises(LiveContextViolation):
+        assemble_live(
+            [_draft(stable_id="sys", content="x")],
+            transport="chat", budget_tokens=6000, model_id="m",
+            harness_version="h", tier=Tier.SMALL,
+            tool_schemas=[{"type": "function", "function": {"name": "x"}}],
+            tool_schema_drafts=[ToolSchemaDraft(name="x", wire_name="x",
+                                                source="builtin",
+                                                schema_dict={"type": "function",
+                                                             "function": {"name": "x"}})],
+        )
+
+
+def test_tool_schema_manifest_hashes_are_stable_and_reconstructible():
+    """META-23: identical inputs yield identical manifest hashes and
+    per-tool order; reconstruction matches the sent tool list."""
+    from metaharness.context import ToolSchemaDraft
+
+    tool_drafts = [
+        ToolSchemaDraft(name="z", wire_name="z", source="builtin",
+                        schema_dict={"type": "function", "function": {"name": "z"}}),
+        ToolSchemaDraft(name="mcp.a", wire_name="mcp__a", source="mcp:mcp",
+                        schema_dict={"type": "function", "function": {"name": "mcp__a"}}),
+    ]
+    kw = dict(
+        transport="chat", budget_tokens=6000, model_id="m",
+        harness_version="h", tier=Tier.SMALL,
+        tool_schema_drafts=tool_drafts,
+    )
+    first = assemble_live([_draft(stable_id="sys", content="x")], **kw)
+    second = assemble_live([_draft(stable_id="sys", content="x")], **kw)
+    assert first.envelope.content_hash == second.envelope.content_hash
+    assert first.manifest.manifest_hash == second.manifest.manifest_hash
+    assert first.tool_schemas == second.tool_schemas
+    assert first.manifest.reconstruct_tool_schemas() == first.tool_schemas
+
+
+def test_tool_schema_draft_rejects_wire_name_mismatch():
+    """META-23: ToolSchemaDraft validates that the dialect-safe wire_name
+    matches the schema_dict.function.name it claims to describe."""
+    from metaharness.context import ToolSchemaDraft
+
+    with pytest.raises(ValidationError):
+        ToolSchemaDraft(
+            name="srv.shout", wire_name="srv__shout",
+            source="mcp:srv",
+            schema_dict={"type": "function",
+                         "function": {"name": "different", "parameters": {}}},
+        )
+
+
+def test_mcp_tool_schema_trust_cannot_be_laundered_in_manifest_entry():
+    """META-23: model validation rejects a manifest entry that claims an MCP
+    tool schema carried INSTRUCTION trust."""
+    from metaharness.context import ContextManifestEntry
+
+    with pytest.raises(ValidationError):
+        ContextManifestEntry(
+            stable_id="tool-schema:mcp:srv:shout",
+            surface="tool_schemas",
+            payload_json='[{}]',
+            source_kind=ContextSourceKind.MCP_TOOL_SCHEMA,
+            trust=ContextTrust.INSTRUCTION,
+            sensitivity=Sensitivity.INTERNAL,
+            source_hash=content_hash({}),
+            selected_hash=content_hash([{}]),
+        )
+
+
+async def test_worker_mixed_builtin_mcp_tool_schemas_attested_in_manifest():
+    """META-23: a real ToolRegistry with builtin + MCP tools sends the exact
+    same wire schemas across two tool-call rounds, while the context manifest
+    attests builtin as trusted policy and MCP as untrusted external evidence.
+    Schema provenance entries are identical across rounds; the tool observation
+    is separately untrusted evidence."""
+    from metaharness.tools import ToolRegistry, ToolSpec
+
+    registry = ToolRegistry()
+    registry.workspace_root = ""
+    registry.register(ToolSpec(
+        name="builtin.add", description="Add two numbers.",
+        input_schema={"type": "object", "properties": {"a": {"type": "integer"}}},
+        handler=lambda **_: "42",
+        source="builtin",
+    ))
+    registry.register(ToolSpec(
+        name="ext.echo", description="Echo the input.",
+        input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+        handler=lambda **_: "echo",
+        source="mcp:ext",
+    ))
+
+    expected_tools = registry.openai_schemas(["builtin.add", "ext.echo"])
+
+    class Client:
+        def __init__(self):
+            self.requests: list[dict[str, Any]] = []
+
+        async def post(self, url, json=None, headers=None):
+            self.requests.append(json)
+            if len(self.requests) == 1:
+                message = {
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "c1", "type": "function",
+                        "function": {"name": "builtin__add", "arguments": "{\"a\": 1}"},
+                    }],
+                }
+            else:
+                message = {"content": "done"}
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": message}],
+                      "usage": {"prompt_tokens": 10, "completion_tokens": 2}},
+                request=httpx.Request("POST", url),
+            )
+
+    client = Client()
+    worker = OpenAICompatWorker(
+        "w", base_url="http://fake/v1", model="m", client=client,
+        tool_registry=registry,
+    )
+    events: list[tuple[str, Any]] = []
+    token = bind_run_event_sink(lambda kind, payload: events.append((kind, payload)))
+    try:
+        result = await worker.run(
+            Task(id="t", objective="compute", tools=["builtin.add", "ext.echo"])
+        )
+    finally:
+        reset_run_event_sink(token)
+
+    assert result.error is None
+    assert len(client.requests) == 2
+    # the exact same provider payload is sent in both rounds
+    for req in client.requests:
+        assert req.get("tools") == expected_tools
+
+    manifests = [p["manifest"] for kind, p in events if kind == "context.manifest"]
+    assert len(manifests) == 2
+
+    def schema_entries(manifest):
+        return [e for e in manifest["entries"] if e["surface"] == "tool_schemas"]
+
+    # per-tool schema provenance is identical across rounds
+    assert schema_entries(manifests[0]) == schema_entries(manifests[1])
+    entries = schema_entries(manifests[0])
+    assert len(entries) == 2
+
+    builtin_entry, mcp_entry = entries
+    assert builtin_entry["stable_id"] == "tool-schema:builtin:builtin.add"
+    assert builtin_entry["source_kind"] == ContextSourceKind.TOOL_POLICY_SCHEMA.value
+    assert builtin_entry["trust"] == ContextTrust.INSTRUCTION.value
+    assert builtin_entry["redacted"] is False
+    assert builtin_entry["source_hash"] == builtin_entry["selected_hash"]
+
+    assert mcp_entry["stable_id"] == "tool-schema:mcp:ext:ext.echo"
+    assert mcp_entry["source_kind"] == ContextSourceKind.MCP_TOOL_SCHEMA.value
+    assert mcp_entry["trust"] == ContextTrust.UNTRUSTED_EVIDENCE.value
+    assert mcp_entry["redacted"] is False
+    assert mcp_entry["source_hash"] == mcp_entry["selected_hash"]
+
+    # the second round includes the tool observation as separately untrusted evidence
+    obs_entries = [
+        e for e in manifests[1]["entries"]
+        if e["source_kind"] == ContextSourceKind.IMMUTABLE_ARTIFACT.value
+        and e["trust"] == ContextTrust.UNTRUSTED_EVIDENCE.value
+    ]
+    assert obs_entries

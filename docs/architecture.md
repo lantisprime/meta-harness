@@ -201,6 +201,8 @@ The `ExecutionBoundary` model is selected BEFORE argv/spawn and its JSON represe
 
 The **verifier** boundary is unchanged and remains the strongest evidence path: a v2-signed workspace root selects code for execution in a network-denied OS sandbox with bounded time/output. The workspace lease and capability tokens protect the *generation* path; the OS sandbox protects the *verifier* path — two distinct boundaries, each honestly labeled.
 
+**Tool schema provenance (META-23).** When a `ToolRegistry` exposes provenance records, the live assembler emits one manifest entry per transmitted tool: builtin/local tools are attested as `TOOL_POLICY_SCHEMA / INSTRUCTION`, while externally mirrored MCP tools are attested as `MCP_TOOL_SCHEMA / UNTRUSTED_EVIDENCE`. Legacy caller-authored raw schemas retain their aggregate compatibility entry. The model-visible schema is unchanged except configured-secret redaction, and provenance neither sanitizes nor grants authority to MCP-provided schemas.
+
 ## 5. Build Phases
 
 1. Core types, budgets, tracing. *(done)*

@@ -55,6 +55,34 @@ def test_openai_schemas_deterministic_and_dialect_safe(registry):
     assert registry.resolve_call_name("srv__remote_tool") == "srv.remote_tool"
 
 
+def test_schema_records_preserve_origin_and_wire_schema(registry):
+    """META-23: provenance-aware records keep the exact source identity while
+    openai_schemas() retains its legacy wire-only return shape."""
+    registry.register(ToolSpec("srv.remote_tool", "an mcp tool",
+                               {"type": "object", "properties": {"x": {"type": "string"}}},
+                               lambda: "x", source="mcp:srv"))
+    records = registry.schema_records(["srv.remote_tool", "grep", "grep", "ghost"])
+    assert len(records) == 2
+    assert records[0].name == "grep" and records[0].source == "builtin"
+    assert records[0].wire_name == "grep"
+    assert records[1].name == "srv.remote_tool" and records[1].source == "mcp:srv"
+    assert records[1].wire_name == "srv__remote_tool"
+    # openai_schemas still returns the same deterministic wire dictionaries
+    assert registry.openai_schemas(["srv.remote_tool", "grep"]) == [r.schema for r in records]
+    # insertion-order JSON serialization is identical (byte-stable provider payload)
+    def _ijson(value):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    assert _ijson(records[0].schema) == _ijson(registry.openai_schemas(["grep"])[0])
+    # frozen dataclass: mutation is rejected without requiring the record to be hashable
+    with pytest.raises(AttributeError):
+        records[0].name = "mutated"
+    # genuinely immutable: mutating a returned schema dict does not affect later reads
+    returned = records[1].schema
+    returned["function"]["name"] = "mutated"
+    assert records[1].schema["function"]["name"] == "srv__remote_tool"
+    assert registry.openai_schemas(["srv.remote_tool"])[0]["function"]["name"] == "srv__remote_tool"
+
+
 async def test_call_prunes_and_reports_errors_as_data(registry):
     result = await registry.call("calculator", {"expression": "6*7"})
     assert result == "42"
