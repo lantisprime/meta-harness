@@ -1,6 +1,6 @@
-# Session Handoff — meta-harness (2026-07-22, session 44: META-23 shipped, accepted, Done)
+# Session Handoff — meta-harness (2026-07-22, session 45: META-23 fully handed off)
 
-## State: META-23 product delivery is merged; canonical closeout records await merge
+## State: META-23 is complete across GitHub, Linear, and the atomic workplan
 
 - **PR #49** merged as **`9dc8f61f1e6afe023fec285a3bd19a4aa35d4852`**.
   Its reviewed implementation head is
@@ -29,17 +29,25 @@
   coordinator actor. Receipt `.workplan/meta23-acceptance.json` hashes to
   `sha256:abd80ebc3d3c9ae22a289788c0f613fb8d3748972e2e4edd01cc7d9f9deac3ba`;
   all owned paths are released.
+- Canonical closeout **PR #50** merged as
+  **`6a2ea40cb7ed52cdff89516e819c89e6ab38cb4c`** after GitHub Actions run
+  **29883748398**, job **88809919341**, passed. Linear **META-23** is Done
+  with product, review, integration, acceptance, and closeout evidence.
+- `workplan sync` revalidated revision **73** byte-identically: no lifecycle
+  transition or generated-file edit was required, and no workplan card is in
+  flight. The Linear Ready lane is currently empty; the coordinator must
+  qualify the next card before a coding seat can claim it.
 - Milestone episode:
   `20260722-013817-meta-23-shipped-honest-per-tool-mcp-sche-eec9`.
-- Linear META-23 remains **Verifying** until this canonical closeout-records
-  branch lands on `main`. The primary checkout's untracked `.codex/` content
-  remains excluded.
+- The task-specific META-23 build and verification worktrees were removed, and
+  private Herdr session `drv-mh-meta23-2201` was stopped and deleted without
+  touching sibling sessions. The primary checkout's untracked `.codex/`
+  content remains excluded.
 
 ### Next step
 
-1. Merge the META-23 closeout-records PR.
-2. Move Linear META-23 to Done with product PR, acceptance receipt, closeout
-   merge, and test evidence.
+1. The coordinator qualifies a backlog card into Linear Ready.
+2. The next eligible seat atomically claims that Ready card before editing.
 
 ---
 
