@@ -2,7 +2,7 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 66
+Revision: 73
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
@@ -15,3 +15,4 @@ Revision: 66
 | TASK-20260719-013 | Promote the shadow ContextEnvelope to the single live prompt assembler: both worker families consume typed envelope sections, trust rules and redaction enforced on sent bytes, per-attempt manifest journaled as the authoritative what-model-saw record | done | claude:charltons-mbp.home.lan:meta19-20260719 |  |
 | TASK-20260719-014 | Enforce and attest coding-worker execution boundaries, serialize shared workspaces, and gate dispatch with scoped capability tokens | done | codex:charltons-mbp.home.lan:meta18-20260719 |  |
 | TASK-20260719-015 | Apply the 10 pre-audited selflearn learning-module consistency findings (Linear META-24): EFE staleness-boost inversion, coverage-evidence branches, baseline validity drift, dead high_signal property, untested min_validation_gain gate, and 5 doc/test-drift items — each behavioral fix with a citing test | done | claude:charltons-mbp.home.lan:meta24-20260719 |  |
+| TASK-20260722-016 | Attest per-tool MCP schema provenance without granting instruction trust | done | codex:charltons-mbp.home.lan:meta23-20260722 |  |

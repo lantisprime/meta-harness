@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta23-20260722",
+  "definitionHash": "sha256:e9fd1fbc96514961a95838d4ec0e54892efb2c8a896d0a0633cebe373f36075f",
+  "integrationCommit": "9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+  "commands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_tools.py tests/test_context.py tests/adversarial/test_context_authority.py tests/adversarial/test_context_invalid_inputs.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q tests/test_local_worker.py tests/test_run_events.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check"
+  ],
+  "evidenceRefs": [
+    "git:integration:9dc8f61f1e6afe023fec285a3bd19a4aa35d4852",
+    "git:review-head:55c35a978e8aa214d1d3dcf9115bc1b133fdcd09",
+    "git:tree:81c9a54f6ea5b7ed65fa17477a6d03c757b41708=pr-head:4b05e42606dabdb141f4086965d626f14ba4309c",
+    "github:pull/49:merged",
+    "github-actions:run/29883074266:job/88807876996:pass",
+    "pytest:focused:71-passed",
+    "pytest:regressions:27-passed",
+    "pytest:full:1332-passed:2-xfailed",
+    "node-test:workplan:115-passed",
+    "git-diff-check:clean",
+    "review:.review-store/meta23-glm-5.2-review.txt:sha256:b9924d936e25e543910918da6a965f9403b914edaacd499f13d3d79a93841ec1:glm-5.2-pass-no-p0-p1",
+    "frozen-diff:sha256:e11bf690ce64bfae7298f4c21f5d5b83de781d9e9b84ef0a8c84ce9e1cb01d90"
+  ],
+  "receiptHash": "sha256:abd80ebc3d3c9ae22a289788c0f613fb8d3748972e2e4edd01cc7d9f9deac3ba"
+}
