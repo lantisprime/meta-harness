@@ -1,0 +1,46 @@
+I have completed a thorough review. Note on methodology: the sandbox blocked all `git` invocations and `.git` access, so I could not execute a literal `git diff 4f96f3b..55c35a9`. I reviewed the HEAD worktree (commit `55c35a9`) directly, cross-referenced against the META-23 build spec / definition, the falsifiable test assertions, and the prior META-19 contracts. The provided test evidence is consistent with the code I inspected; I could not re-run pytest (python/pytest are also blocked in this sandbox).
+
+---
+
+## Verdict: PASS
+
+No P0 or P1 findings. The META-23 provenance correction satisfies the acceptance criteria and charter invariants; E and W are untouched. I traced each falsifiable claim end-to-end in HEAD code and tests.
+
+### Charter-invariant and acceptance-criteria confirmation (with evidence)
+
+- **Exact deterministic deduplicated provider list preserved:** `openai_schemas()` (registry.py:204-214) unchanged; `schema_records()` (registry.py:216-230) uses the same `sorted(set(names))` order/dedup and the same `_schema_for` (registry.py:191-199) wire dict, so `record.schema == openai_schemas(...)[i]`. Test `test_schema_records_preserve_origin_and_wire_schema` (tests/test_tools.py:58-90) asserts byte-stable serialization `==`.
+- **builtin↔TOOL_POLICY_SCHEMA/INSTRUCTION; mcp↔MCP_TOOL_SCHEMA/UNTRUSTED_EVIDENCE:** `_tool_schema_source_trust` (live.py:166-173) is origin-derived and fails closed for unknown sources; `_tool_schema_stable_id` (live.py:155-163) embeds `builtin` / `mcp:<server>` + name; duplicate stable_ids rejected (live.py:556-560). `load_mcp_tools` tags `source=f"mcp:{name}"` (mcp.py:138,158-167).
+- **Reject MCP_TOOL_SCHEMA+INSTRUCTION:** enforced in `ContextSourceRef.validate_identity_and_fetch` (models.py:180-186) and `ContextManifestEntry.validate_mcp_tool_schema_trust` (models.py:352-361). Covered by adversarial tests (test_context_authority.py:165-172; test_context_invalid_inputs.py:181-193) and test_context.py:864-878.
+- **One manifest entry per provenance-aware tool, one-element-list payload:** live.py:550-586; `reconstruct_tool_schemas()` (models.py:424-426) flattens to the sent list. Tests assert `manifest.reconstruct_tool_schemas() == assembly.tool_schemas` (test_context.py:767,799,847).
+- **No provenance metadata in provider bytes / aggregate budget only:** `LiveAssembly.tool_schemas = redacted_schemas` (live.py:659); provider body `body["tools"] = tool_schemas` from `assembly.tool_schemas` (local.py:259,350). `tool_schema_tokens = estimate_tokens(canonical_json(redacted_schemas))` (live.py:438-440) — aggregate wire bytes only; no `source`/origin fields on transmitted schemas.
+- **Redaction of schemas:** `_redact(schema_payload, ...)` (live.py:434-435); per-tool `selected_hash` over redacted payload, `source_hash` over raw, `redacted` flag from the diff. `test_mcp_tool_schema_description_is_untrusted_and_redacted` asserts the secret is absent from `model_dump_json()` and `tool_schemas` (test_context.py:771-800).
+- **Legacy raw `tool_schemas=` preserved as caller-authored INSTRUCTION; mutual exclusivity:** live.py:301-306 (reject both), live.py:588-614 (single aggregate TOOL_POLICY_SCHEMA/INSTRUCTION entry). Covered by test_context.py:808-820 and determinism/redaction tests (tests/adversarial/test_context_determinism.py:62,70; test_context.py:232-252).
+- **Round-to-round provenance identity; tool observations separately untrusted:** local.py:355-390 re-runs `assemble_live` with unchanged `tool_schemas/tool_schema_drafts`, appending observations as `UNTRUSTED_EVIDENCE` `PRIOR_OUTPUTS`. `test_worker_mixed_builtin_mcp_tool_schemas_attested_in_manifest` asserts identical provider `tools` and identical per-tool schema entries across both rounds (test_context.py:882-979).
+- **Historical manifest-hash compatibility:** no new fields on `ContextManifest`/`ContextManifestEntry` (only an additive enum value `MCP_TOOL_SCHEMA` at models.py:48 and an additive `model_validator` at models.py:352-361, neither of which changes serialization of existing values). `manifest_hash` material is unchanged in field set.
+- **Bounded authority / H-plane only:** touched files are tools/*, context/*, harness/local.py, tests, docs/architecture.md. No evaluator, deployment, promotion, credential, or runtime authority added; no selflearn/E/W path touched. EXTRA: `extra_body` still rejects `messages`/`tools` override (local.py:75-81). Architecture doc honestly states provenance "neither sanitizes nor grants authority to MCP-provided schemas" (architecture.md:204).
+
+### P0 findings
+None.
+
+### P1 findings
+None.
+
+### P2 findings
+None.
+
+### P3 findings
+
+**P3-1 — `ToolSchemaDraft` does not enforce `wire_name == name.replace(".", "__")`.**
+- Evidence: `ToolSchemaDraft.validate_wire_name_matches_function` (src/metaharness/context/live.py:131-140) checks only `schema_dict.function.name == wire_name`. The registry invariant `wire_name = tool.name.replace(".", "__")` (src/metaharness/tools/registry.py:193,223) is not re-asserted on the draft. `stable_id` is built from `draft.name` (live.py:155-163) while the provider schema advertises `draft.wire_name`/`function.name`.
+- Failure scenario: A hand-constructed `ToolSchemaDraft(name="a.b", wire_name="zzz", schema_dict={"function":{"name":"zzz",...}})` passes validation. The model calls `"zzz"`; `ToolRegistry.resolve_call_name("zzz")` (registry.py:189-194) returns None, so `ToolRegistry.call` raises `ToolError("unknown tool 'zzz'")` — loud, not silent. Unreachable via the production path (local.py:228-242 → `schema_records`, which always sets wire_name=name.replace(".","__")). No trust/authority/divergence/redaction/determinism impact.
+- Recommended disposition: DEFER (or ACCEPT-WITH-MOD: add `wire_name == name.replace(".", "__")` to the validator to fail-fast). Does not block integration.
+
+**P3-2 — `source_hash` semantics differ between per-tool and legacy-aggregate tool_schemas entries.**
+- Evidence: per-tool path sets `source_hash_value = content_hash([raw_schema])` (src/metaharness/context/live.py:562-565), attesting the pre-redaction original; legacy-aggregate path sets `before = content_hash([dict(s) for s in tool_schemas])` then `source_hash = after = content_hash(redacted_schemas)` (live.py:590-592), attesting the redacted payload. Both set `selected_hash` to the redacted payload and `redacted = (before != after)` correctly; `ContextManifestEntry.validate_payload` (models.py:341-351) only pins `selected_hash == content_hash(payload)`, so both are model-valid.
+- Failure scenario: an audit reader comparing `source_hash` to `selected_hash` to detect schema redaction gets a meaningful signal from per-tool entries (raw≠redacted when redacted) but always-equal / no signal from the legacy aggregate entry even when redaction occurred. No trust escalation, no redaction-coverage defect (the `redacted` flag and `selected_hash`/payload are correct in both), no reconstruction divergence (`reconstruct_tool_schemas` consumes `payload_json`, not `source_hash`).
+- Caveat: I could not run `git diff` (sandbox blocked git), so I cannot confirm whether the legacy `source_hash=after` is pre-existing (META-19) or modified by META-23; build-spec point 7 requires the legacy raw path be "preserved," so if preserved this is a pre-META-23 consistency note rather than a META-23 regression.
+- Recommended disposition: DEFER (or ACCEPT-WITH-MOD: set legacy `source_hash = before` for uniform audit semantics). Does not block integration.
+
+---
+
+**Integration gate status:** No unresolved P0 or P1. The change may advance from Review per the Pi/NeuralWatt GLM-5.2 gate; coordinator retains integration/verification/acceptance authority. The two P3 items are non-blocking and may be deferred or addressed in a follow-up.
