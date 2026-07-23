@@ -212,7 +212,23 @@ class ExecutorRuntime:
             raise RuntimeCompError(
                 f"Executor path {active.path!r} escapes store root")
 
-        if not exec_path_resolved.exists():
+        # exists() must be guarded too. On CPython < 3.13 Path.exists() only
+        # swallows ENOENT/ENOTDIR/EBADF/ELOOP and re-raises everything else --
+        # notably EACCES/EPERM/EIO, reachable on a contained path whose final
+        # component is stat-denied, since resolve(strict=False) need not stat
+        # the tail. This package supports >=3.10, so an unguarded call would
+        # let a raw OSError escape run() unjournalled on 3.10-3.12 even though
+        # 3.13+ (where exists() delegates to os.path.exists) swallows it.
+        try:
+            missing = not exec_path_resolved.exists()
+        except OSError as exc:
+            self._journal_refusal(entry_id, "executor.path-unreadable",
+                                 f"cannot stat executor path {active.path!r}: {exc}",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Cannot read executor path {active.path!r}") from exc
+
+        if missing:
             raise RuntimeCompError(f"Executor source missing: {active.path}")
 
         # UnicodeDecodeError is a ValueError, not an OSError, so it needs

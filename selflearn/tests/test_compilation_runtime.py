@@ -1278,6 +1278,70 @@ def test_runtime_unreadable_contained_path_is_journalled():
         assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
 
 
+def test_runtime_stat_failure_is_journalled(monkeypatch):
+    """An OSError from the existence check must be journalled and normalized.
+
+    Citing test for the gate P1 on bd9b79d. On CPython < 3.13 ``Path.exists()``
+    swallows only ENOENT/ENOTDIR/EBADF/ELOOP and re-raises the rest, so an
+    EACCES on a contained path escaped ``run()`` raw and unjournalled. This
+    package supports >=3.10, so the guard is required even though 3.13+
+    delegates to ``os.path.exists`` and swallows it -- which is exactly why
+    this test injects the error rather than relying on interpreter behaviour.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            path=f"{pack}/executors/wf-001/deadbeef.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        real_exists = Path.exists
+
+        def _refuse_exists(self, *args, **kwargs):
+            # Only the executor's own stat is denied; the store and registry
+            # keep working, so the failure lands on the guarded call and not
+            # somewhere earlier in run(). Matched by filename because the
+            # guarded call uses the *resolved* path, which on macOS differs
+            # from the constructed one (/var -> /private/var).
+            if self.name == "deadbeef.py":
+                raise PermissionError(13, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "exists", _refuse_exists)
+
+        with pytest.raises(RuntimeCompError, match="Cannot read executor path"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
 def test_runtime_undecodable_source_is_journalled():
     """An executor file that cannot be decoded fails closed, not raw.
 
