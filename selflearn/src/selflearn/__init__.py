@@ -78,6 +78,27 @@ from selflearn.retrieval import (
 )
 from selflearn.specialist import SpecialistSpec, load_spec, save_spec
 from selflearn.store import PackStore, StoredEntry, StoreError
+from selflearn.compilation import (
+    ApprovalRecord,
+    ExecutorCandidate,
+    ExecutorRecord,
+    ExecutorRegistry,
+    ExecutorRuntime,
+    ExecutorSpec,
+    IndependentTestSuite,
+    RunResult,
+    CrossValidationReceipt,
+    CrossValidationGate,
+    WorkflowCompiler,
+    WorkflowTestAuthor,
+    CompilerError,
+    GateError,
+    RegistryError,
+    RuntimeCompError,
+    TestAuthorError,
+    canonical_procedure_hash,
+    content_hash,
+)
 
 __version__ = "0.1.0"
 
@@ -103,5 +124,25 @@ __all__ = [
     "AcquisitionReport", "approve_entry", "run_acquisition",
     "CorroborationRule", "VerificationError", "VerificationReport", "Verifier",
     "EvalGen", "QualificationResult", "qualify_model",
+    # Compilation exports
+    "ApprovalRecord",
+    "ExecutorCandidate",
+    "ExecutorRecord",
+    "ExecutorRegistry",
+    "ExecutorRuntime",
+    "ExecutorSpec",
+    "IndependentTestSuite",
+    "RunResult",
+    "CrossValidationReceipt",
+    "CrossValidationGate",
+    "WorkflowCompiler",
+    "WorkflowTestAuthor",
+    "CompilerError",
+    "GateError",
+    "RegistryError",
+    "RuntimeCompError",
+    "TestAuthorError",
+    "canonical_procedure_hash",
+    "content_hash",
     "__version__",
 ]

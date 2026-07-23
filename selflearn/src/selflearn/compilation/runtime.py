@@ -1,0 +1,262 @@
+"""Executor runtime: runs compiled workflow executors in a restricted sandbox.
+
+This module provides the runtime environment for executing generated executors
+with a strict whitelist of builtins.
+"""
+from __future__ import annotations
+
+import builtins
+import json
+
+# Whitelist of safe builtins per D3 — NO eval exec compile open input __import__
+# globals locals vars setattr delattr breakpoint exit quit help memoryview.
+SAFE_BUILTINS = {
+    # Types
+    "bool", "int", "float", "str", "bytes", "list", "dict", "tuple", "set",
+    "frozenset", "type", "range", "slice", "complex", "object",
+    # Exceptions
+    "BaseException", "Exception", "StopIteration", "StopAsyncIteration",
+    "ArithmeticError", "LookupError", "ValueError", "TypeError", "KeyError",
+    "OSError", "RuntimeError", "SyntaxError", "IndentationError", "IndexError",
+    # Constants
+    "True", "False", "None",
+    # Functional helpers
+    "abs", "all", "any", "bin", "callable", "chr", "divmod", "enumerate",
+    "filter", "getattr", "hasattr", "hash", "hex", "id", "isinstance",
+    "issubclass", "iter", "len", "map", "max", "min", "next", "oct", "ord",
+    "pow", "repr", "reversed", "round", "sorted", "staticmethod", "sum",
+    "super", "tuple", "zip", "__build_class__",
+}
+
+
+def _make_restricted_globals(extra_globals: dict | None = None) -> dict:
+    """Create a restricted globals dict for sandboxed exec.
+
+    The whitelist is D3-minimal: generated executors need none of the removed
+    dangerous entries (eval, exec, compile, open, input, __import__, globals,
+    locals, vars, setattr, delattr, breakpoint, exit, quit, help, memoryview).
+    json is injected directly into the globals (not builtins) so generated
+    code never needs to import it and __import__ is never exposed.
+    """
+    import json as _json  # injected; generated code uses json directly
+    safe = {name: getattr(builtins, name) for name in SAFE_BUILTINS
+            if hasattr(builtins, name)}
+
+    # Inject json directly into globals — generated code uses it without import
+    # This avoids needing __import__ in the builtins whitelist.
+    result = {"__builtins__": safe, "json": _json}
+
+    # Add required Python names for module execution
+    result["__name__"] = "__main__"
+    result["__doc__"] = None
+
+    # Add any extra globals
+    if extra_globals:
+        result.update(extra_globals)
+
+    return result
+
+
+# Runtime errors
+class RuntimeCompError(RuntimeError):
+    """Runtime compilation error - named to avoid collision with builtin."""
+    pass
+
+
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from selflearn.compilation.models import (
+    ExecutorRecord,
+    canonical_procedure_hash,
+)
+from selflearn.compilation.registry import ExecutorRegistry
+from selflearn.contracts import TaskOutcome
+from selflearn.ports import ProvenancePort
+from selflearn.store.packstore import PackStore
+
+
+@dataclass(frozen=True)
+class RunResult:
+    """Result of running an executor."""
+    status: str  # "completed" | "failed" | "awaiting_approval"
+    completed_steps: tuple[str, ...]
+    outcomes: tuple[TaskOutcome, ...]
+    at_step: str = ""  # For awaiting_approval status
+
+
+class ExecutorRuntime:
+    """Runtime for executing compiled workflow executors."""
+
+    def __init__(self, registry: ExecutorRegistry, store: PackStore,
+                 provenance: ProvenancePort, clock: callable):
+        self.registry = registry
+        self.store = store
+        self.provenance = provenance
+        self.clock = clock
+
+    def run(self, entry_id: str, *, task_id: str, topic: str,
+            task_type: str, step_handler: Callable, now: str) -> RunResult:
+        """Run an active executor for an entry.
+
+        Args:
+            entry_id: The entry to run
+            task_id: The task ID for outcomes
+            topic: The topic for outcomes
+            task_type: The task type
+            step_handler: Callable(step_id, step_data) -> dict
+            now: ISO timestamp
+
+        Returns:
+            RunResult with status, completed steps, and outcomes
+
+        Raises:
+            RuntimeCompError: If no active executor or drift detected
+        """
+        # Activation enforcement: must have ACTIVE record
+        active = self.registry.active_for(entry_id)
+        if active is None:
+            raise RuntimeCompError(
+                f"No active executor for entry {entry_id}")
+
+        # Drift check: spec_hash must match current procedure
+        entry = self.store.get(entry_id)
+        current_hash = canonical_procedure_hash(entry.cand.procedure)
+        if active.spec_hash != current_hash:
+            self._journal_refusal(entry_id, "executor.stale-spec",
+                                 f"active spec {active.spec_hash} != current {current_hash}")
+            raise RuntimeCompError(
+                f"Executor for {entry_id} is stale (spec hash mismatch)")
+
+        # Load and verify executor source
+        from pathlib import Path
+        exec_path = Path(self.store.root) / active.path
+        if not exec_path.exists():
+            raise RuntimeCompError(f"Executor source missing: {active.path}")
+
+        source = exec_path.read_text()
+        import hashlib
+        actual_hash = hashlib.sha256(source.encode()).hexdigest()
+        if actual_hash != active.executor_hash:
+            self._journal_refusal(entry_id, "executor.tampered",
+                                 f"hash mismatch: {actual_hash} != {active.executor_hash}")
+            raise RuntimeCompError(
+                f"Executor for {entry_id} has been tampered with")
+
+        # Journal run start
+        self.provenance.append({
+            "kind": "runtime.start",
+            "entry_id": entry_id,
+            "spec_hash": active.spec_hash,
+            "actor": "executor-runtime",
+            "timestamp": now,
+        })
+
+        # Execute in restricted sandbox
+        globals_ns = _make_restricted_globals()
+        exec(source, globals_ns)
+
+        # Resolve exception classes ONCE after exec (FIX-6)
+        ApprovalRequired = globals_ns.get("ApprovalRequired")
+        if ApprovalRequired is None or not isinstance(ApprovalRequired, type) \
+                or not issubclass(ApprovalRequired, Exception):
+            raise RuntimeCompError("invalid executor: ApprovalRequired not found or not an Exception class")
+        StepCheckFailed = globals_ns.get("StepCheckFailed")
+        if StepCheckFailed is None or not isinstance(StepCheckFailed, type) \
+                or not issubclass(StepCheckFailed, Exception):
+            raise RuntimeCompError("invalid executor: StepCheckFailed not found or not an Exception class")
+
+        completed = []
+        outcomes = ()
+        at_step = ""
+        status = "failed"
+
+        try:
+            # FIX-6: step_handler is passed directly; generated code uses
+            # module-level _COMPLETED (survives exception) to record completed steps.
+            result = globals_ns["run"](step_handler)
+            completed = list(globals_ns.get("_COMPLETED", []))
+
+            # Success outcome
+            outcomes = (TaskOutcome(
+                task_id=task_id,
+                task_type=task_type,
+                topic=topic,
+                verdict="pass",
+                injected=(entry_id,),
+            ),)
+
+            status = "completed"
+
+        except ApprovalRequired as e:
+            # FIX-2: ApprovalRequired is NOT a failure outcome
+            # No TaskOutcome is produced; awaiting human approval produces no evidence
+            # FIX-6: _COMPLETED survives exception; read it from globals_ns
+            at_step = getattr(e, "step_id", "unknown")
+            completed = list(globals_ns.get("_COMPLETED", []))
+            outcomes = ()
+            status = "awaiting_approval"
+
+            # Journal approval stop
+            self.provenance.append({
+                "kind": "runtime.approval-stop",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "at_step": at_step,
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
+
+        except StepCheckFailed as e:
+            failing_step = getattr(e, "step_id", "unknown")
+            completed = list(globals_ns.get("_COMPLETED", []))
+            outcomes = (TaskOutcome(
+                task_id=task_id,
+                task_type=task_type,
+                topic=topic,
+                verdict="fail",
+                injected=(entry_id,),
+                implicated=(entry_id,),
+                step_id=failing_step,
+                failure_mode="executor-step-check",
+            ),)
+            status = "failed"
+
+        except Exception as e:
+            outcomes = (TaskOutcome(
+                task_id=task_id,
+                task_type=task_type,
+                topic=topic,
+                verdict="fail",
+                injected=(entry_id,),
+                implicated=(entry_id,),
+                failure_mode="executor-error",
+            ),)
+            status = "failed"
+
+        # Journal run finish
+        self.provenance.append({
+            "kind": "runtime.finish",
+            "entry_id": entry_id,
+            "spec_hash": active.spec_hash,
+            "status": status,
+            "actor": "executor-runtime",
+            "timestamp": now,
+        })
+
+        return RunResult(
+            status=status,
+            completed_steps=tuple(completed),
+            outcomes=outcomes,
+            at_step=at_step,
+        )
+
+    def _journal_refusal(self, entry_id: str, kind: str, reason: str) -> None:
+        """Journal a runtime refusal."""
+        self.provenance.append({
+            "kind": kind,
+            "entry_id": entry_id,
+            "actor": "executor-runtime",
+            "reason": reason,
+            "timestamp": self.clock().isoformat(),
+        })

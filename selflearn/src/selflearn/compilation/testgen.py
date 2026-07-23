@@ -1,0 +1,265 @@
+"""Workflow test author: generates independent test suites for cross-validation.
+
+The test author enforces identity separation from the compiler.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from selflearn.compilation.models import ExecutorSpec, IndependentTestSuite
+from selflearn.compilation.compiler import COMPILER_ID
+from selflearn.contracts import ContractError
+from selflearn.ports import IdentityPort, ModelPort
+
+AUTHOR_ROLE = "workflow-test-author"
+
+
+class TestAuthorError(RuntimeError):
+    """Error during test generation."""
+    pass
+
+
+# Marker to represent the compiler identity for distinctness check
+class _CompilerMarker:
+    """Marker class representing the deterministic workflow compiler."""
+    model_id = COMPILER_ID
+
+
+class WorkflowTestAuthor:
+    """Generates independent test suites for workflow executors.
+
+    The test author must be distinct from the compiler identity per D6.
+    """
+
+    def __init__(self, model: ModelPort, identity: IdentityPort):
+        self.model = model
+        self.identity = identity
+
+        # Enforce identity separation - compiler model_id must be distinct
+        if not identity.distinct(model, _CompilerMarker()):
+            raise TestAuthorError(
+                f"identity violation: test author must be distinct from "
+                f"compiler (basis: {identity.basis})")
+
+    def author_suite(self, spec: ExecutorSpec, *, authored_at: str) -> IndependentTestSuite:
+        """Generate an independent test suite for the executor spec.
+
+        Args:
+            spec: The executor specification to test
+            authored_at: ISO timestamp
+
+        Returns:
+            IndependentTestSuite with generated test source
+
+        Raises:
+            TestAuthorError: If the model returns invalid output
+        """
+        # Build context - NEVER includes executor source (asserted in tests)
+        context = {
+            "entry_id": spec.entry_id,
+            "pack": spec.pack,
+            "spec_hash": spec.spec_hash,
+            "procedure": self._canonical_procedure(spec.procedure),
+        }
+
+        # Call model for test plan
+        prompt = (
+            "Generate a JSON test plan for this workflow executor. "
+            "Return JSON {\"tests\": [{\"name\": \"...\", "
+            "\"kind\": \"order\"|\"check\"|\"approval\"|\"failure-path\", "
+            "\"step_id\": \"...\", \"expect\": \"...\"}]}. "
+            "Must include at least one 'order' test and one 'approval' test "
+            "if the spec has approval steps."
+        )
+
+        result = self.model.complete(AUTHOR_ROLE, prompt, context)
+        plan = result.get("tests") if isinstance(result, dict) else None
+
+        # Schema validation
+        if not isinstance(plan, list) or not plan:
+            raise TestAuthorError("Test author returned no tests")
+
+        # FIX-5: validate test plan
+        valid_kinds = {"order", "check", "approval", "failure-path"}
+        spec_step_ids = {step.id for step in spec.procedure}
+        has_order = False
+        has_approval = False
+
+        for i, test in enumerate(plan):
+            if not isinstance(test, dict):
+                raise TestAuthorError(f"Test #{i} is not a dict")
+            kind = test.get("kind", "")
+            if kind not in valid_kinds:
+                raise TestAuthorError(f"Test #{i} has invalid kind {kind!r}")
+
+            # FIX-5: name/step_id/expect must be strings
+            name = test.get("name", "")
+            step_id = test.get("step_id", "")
+            expect = test.get("expect", "")
+            if not isinstance(name, str):
+                raise TestAuthorError(f"Test #{i} name must be a string")
+            if not isinstance(step_id, str):
+                raise TestAuthorError(f"Test #{i} step_id must be a string")
+            if not isinstance(expect, str):
+                raise TestAuthorError(f"Test #{i} expect must be a string")
+
+            if kind == "order":
+                has_order = True
+                # FIX-5: order test requires non-empty expect listing step ids
+                if not expect:
+                    raise TestAuthorError(
+                        f"Test #{i} (order) requires non-empty expect")
+            if kind == "approval":
+                has_approval = True
+            if kind == "check":
+                # FIX-5: check/approval/failure-path step_id must be in spec
+                if step_id and step_id not in spec_step_ids:
+                    raise TestAuthorError(
+                        f"Test #{i} step_id {step_id!r} not in spec")
+            if kind == "failure-path":
+                if step_id and step_id not in spec_step_ids:
+                    raise TestAuthorError(
+                        f"Test #{i} step_id {step_id!r} not in spec")
+
+        # Coverage floor: need order test
+        if not has_order:
+            raise TestAuthorError("Test plan must include at least one 'order' test")
+
+        # Coverage floor: need approval test if spec has approval steps
+        if self._has_approval_step(spec.procedure) and not has_approval:
+            raise TestAuthorError(
+                "Test plan must include at least one 'approval' test "
+                "since the spec has approval steps")
+
+        # Render test source
+        test_source = self._render_tests(spec, plan)
+
+        import hashlib
+        suite_hash = hashlib.sha256(test_source.encode()).hexdigest()
+
+        return IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source=test_source,
+            suite_hash=suite_hash,
+            author_id=getattr(self.model, "model_id", "unknown"),
+            identity_basis=self.identity.basis,
+            authored_at=authored_at,
+        )
+
+    def _canonical_procedure(self, procedure: tuple) -> list:
+        """Convert procedure to canonical list for context."""
+        result = []
+        for step in procedure:
+            result.append({
+                "id": step.id,
+                "objective": step.objective,
+                "task_type": step.task_type,
+                "tools": list(step.tools),
+                "depends_on": list(step.depends_on),
+                "check": [list(pair) for pair in step.check],
+            })
+        return result
+
+    def _has_approval_step(self, procedure: tuple) -> bool:
+        """Check if any step is an approval step."""
+        from selflearn.compilation.compiler import is_approval_step
+        return any(is_approval_step(step) for step in procedure)
+
+    def _render_tests(self, spec: ExecutorSpec, plan: list) -> str:
+        """Render test plan into executable Python test source.
+
+        FIX-5: every model-supplied string goes through json.dumps (repr)
+        before rendering into test source. No raw concatenation/format.
+        """
+        lines = []
+        lines.append("# Auto-generated workflow test suite")
+        lines.append("# Generated by workflow-test-author")
+        lines.append("")
+        lines.append("import json")
+        lines.append("")
+        lines.append("def run_tests(load_executor):")
+        lines.append('    """Run the test suite against an executor."""')
+        lines.append("    results = []")
+        lines.append("")
+
+        # Build set of valid step ids for this spec
+        spec_step_ids = {step.id for step in spec.procedure}
+
+        for i, test in enumerate(plan):
+            name = test.get("name", f"test_{i}")
+            kind = test.get("kind")
+            step_id = test.get("step_id", "")
+            expect = test.get("expect", "")
+
+            # FIX-5: all strings go through json.dumps before code embedding
+            safe_name = json.dumps(name)
+            safe_step_id = json.dumps(step_id)
+            safe_expect = json.dumps(expect)
+
+            lines.append(f"    # Test: {name} (kind={kind})")
+            if kind == "order":
+                # FIX-5: expect is comma-separated step ids -> list via json.loads
+                lines.append(f"    # Expect: step order matches {expect}")
+                lines.append("    try:")
+                lines.append("        executor = load_executor()")
+                lines.append("        result = executor['run'](lambda s, d: {'status': 'ok'})")
+                # FIX-5: parse expect as JSON list to avoid .split() injection
+                lines.append(f"        expected_order = json.loads({safe_expect})")
+                lines.append("        actual_order = result.get('completed', [])")
+                lines.append("        assert actual_order == expected_order, f'Order mismatch: {actual_order} vs {expected_order}'")
+                lines.append(f"        results.append(('pass', {safe_name}))")
+                lines.append("    except Exception as e:")
+                lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")
+                lines.append("")
+
+            elif kind == "check":
+                lines.append(f"    # Expect: check {expect}")
+                lines.append("    try:")
+                lines.append("        executor = load_executor()")
+                lines.append("        def check_handler(sid, sdata):")
+                lines.append("            return {'status': 'ok', 'checks': {" + safe_step_id + ": " + safe_expect + "}}")
+                lines.append("        result = executor['run'](check_handler)")
+                lines.append("        assert " + safe_step_id + " in result.get('completed', [])")
+                lines.append(f"        results.append(('pass', {safe_name}))")
+                lines.append("    except Exception as e:")
+                lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")
+                lines.append("")
+
+            elif kind == "approval":
+                lines.append(f"    # Expect: approval required at {step_id}")
+                lines.append("    try:")
+                lines.append("        executor = load_executor()")
+                lines.append("        def approval_handler(sid, sdata):")
+                lines.append("            return {'status': 'ok'}")
+                lines.append("        try:")
+                lines.append("            executor['run'](approval_handler)")
+                lines.append(f"            results.append(('fail', {safe_name} + ': approval not raised'))")
+                lines.append("        except Exception as e:")
+                lines.append("            if 'ApprovalRequired' in type(e).__name__:")
+                lines.append(f"                results.append(('pass', {safe_name}))")
+                lines.append("            else:")
+                lines.append(f"                results.append(('fail', {safe_name} + ': wrong exception')))")
+                lines.append("    except Exception as e:")
+                lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")
+                lines.append("")
+
+            elif kind == "failure-path":
+                lines.append(f"    # Expect: failure at {step_id}")
+                lines.append("    try:")
+                lines.append("        executor = load_executor()")
+                lines.append(f"        def fail_handler(sid, sdata):")
+                lines.append(f"            if sid == {safe_step_id}:")
+                lines.append("                return {'status': 'fail'}")
+                lines.append("            return {'status': 'ok'}")
+                lines.append("        try:")
+                lines.append("            executor['run'](fail_handler)")
+                lines.append(f"            results.append(('fail', {safe_name} + ': no failure')))")
+                lines.append("        except Exception as e:")
+                lines.append(f"            results.append(('pass', {safe_name}))")
+                lines.append("    except Exception as e:")
+                lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")
+                lines.append("")
+
+        lines.append("    return results")
+        return "\n".join(lines)

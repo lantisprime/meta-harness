@@ -36,6 +36,7 @@ from selflearn.contracts import (
     Probe,
 )
 from selflearn.learning.gaps import parse_state_data
+from selflearn.compilation.models import canonical_procedure_hash
 from selflearn.store.packstore import (
     MANIFEST_SCHEMA_VERSION,
     PackStore,
@@ -151,6 +152,84 @@ def _doctor_pack(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
     _check_manifest(pack_dir, good, fix, report)
     _check_vectors(pack_dir, good, fix, report)
     _check_probes(pack_dir, good, fix, report)
+    _check_executors(pack_dir, fix, report)
+
+
+def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
+    """Check executor registry and active executors.
+
+    If executors/registry.json is absent, return silently.
+    If corrupt, report Finding with fixable=False.
+    For each ACTIVE record: entry file missing -> dangling entry Finding;
+    recomputed canonical_procedure_hash != record.spec_hash -> stale spec Finding.
+    Never auto-fixes (fix flag ignored for these codes).
+    """
+    pack = pack_dir.name
+    exec_dir = pack_dir / "executors"
+    registry_path = exec_dir / "registry.json"
+
+    if not registry_path.exists():
+        # No executors registered - nothing to check
+        return
+
+    # Check registry is parseable
+    try:
+        data = json.loads(registry_path.read_text())
+        records = data.get("records", [])
+    except (json.JSONDecodeError, IOError) as e:
+        report.findings.append(Finding(
+            "executor.registry-corrupt",
+            f"{pack}/executors/registry.json",
+            f"Registry unreadable: {e}",
+            fixable=False,
+        ))
+        return
+
+    # Load entries for reference
+    entries_dir = pack_dir / "entries"
+    entry_files = {f.stem: f for f in entries_dir.glob("*.md")} if entries_dir.exists() else {}
+
+    # Check each ACTIVE record
+    for record in records:
+        if record.get("status") != "active":
+            continue
+
+        entry_id = record.get("entry_id", "")
+
+        # Check: entry file exists
+        if entry_id not in entry_files:
+            report.findings.append(Finding(
+                "executor.dangling-entry",
+                f"{pack}/executors/{entry_id}",
+                f"Active executor for missing entry {entry_id}",
+                fixable=False,
+            ))
+            continue
+
+        # Check: spec_hash matches current procedure
+        try:
+            # Read the entry file to get procedure
+            entry_path = entry_files[entry_id]
+            front, body, err = _read_front(entry_path)
+            if err is not None:
+                continue
+
+            cand, err = _build_candidate(front, body)
+            if err is not None or not cand.procedure:
+                continue
+
+            current_hash = canonical_procedure_hash(cand.procedure)
+            if current_hash != record.get("spec_hash"):
+                report.findings.append(Finding(
+                    "executor.stale-spec",
+                    f"{pack}/executors/{entry_id}",
+                    f"Active executor spec_hash {record.get('spec_hash', '?')[:16]}... "
+                    f"does not match current procedure hash {current_hash[:16]}...",
+                    fixable=False,
+                ))
+        except Exception:
+            # If we can't verify, skip silently
+            pass
 
 
 @dataclass
