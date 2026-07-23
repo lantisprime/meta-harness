@@ -186,32 +186,47 @@ class ExecutorRuntime:
         # Bounded-authority check: a tampered registry.path cannot widen the
         # read surface outside the store root.
         #
-        # Resolution, containment, and the read all sit inside ONE OSError
-        # guard, for two reasons. First, .resolve() is the operation that
-        # actually raises (ELOOP, or EACCES on a /proc/<pid>/root component);
-        # leaving it above the try made the handler unreachable and let a raw
-        # OSError escape run() unjournalled. Second, checking one path object
-        # and then reading a different one is a check/use split -- the read
-        # must come from the same resolved path that was validated.
+        # Every operation that can fail sits inside a guard, and each failure
+        # is journalled under the kind that honestly describes it: a
+        # containment breach is `executor.path-escape`, while a path that
+        # cannot be resolved or read is `executor.path-unreadable`. Collapsing
+        # both into one kind would record a mere read failure as an escape
+        # attempt, corrupting the evidence taxonomy for any consumer that
+        # buckets by kind. The read comes from the same resolved path that was
+        # validated, so there is no check/use split.
         try:
             store_root_resolved = Path(self.store.root).resolve()
             exec_path_resolved = exec_path.resolve()
-            if not exec_path_resolved.is_relative_to(store_root_resolved):
-                self._journal_refusal(entry_id, "executor.path-escape",
-                                     f"executor path {active.path!r} escapes store root",
-                                     now=now)
-                raise RuntimeCompError(
-                    f"Executor path {active.path!r} escapes store root")
-            if not exec_path_resolved.exists():
-                raise RuntimeCompError(
-                    f"Executor source missing: {active.path}")
-            source = exec_path_resolved.read_text()
+            contained = exec_path_resolved.is_relative_to(store_root_resolved)
         except OSError as exc:
-            self._journal_refusal(entry_id, "executor.path-escape",
-                                 f"cannot validate executor path {active.path!r}: {exc}",
+            self._journal_refusal(entry_id, "executor.path-unreadable",
+                                 f"cannot resolve executor path {active.path!r}: {exc}",
                                  now=now)
             raise RuntimeCompError(
                 f"Cannot validate executor path {active.path!r}") from exc
+
+        if not contained:
+            self._journal_refusal(entry_id, "executor.path-escape",
+                                 f"executor path {active.path!r} escapes store root",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Executor path {active.path!r} escapes store root")
+
+        if not exec_path_resolved.exists():
+            raise RuntimeCompError(f"Executor source missing: {active.path}")
+
+        # UnicodeDecodeError is a ValueError, not an OSError, so it needs
+        # catching explicitly: a locale-drifted or corrupted executor file
+        # would otherwise escape run() raw and unjournalled -- the same class
+        # of breach as the resolve() gap, in a different exception family.
+        try:
+            source = exec_path_resolved.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            self._journal_refusal(entry_id, "executor.path-unreadable",
+                                 f"cannot read executor path {active.path!r}: {exc}",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Cannot read executor path {active.path!r}") from exc
 
         import hashlib
         actual_hash = hashlib.sha256(source.encode()).hexdigest()

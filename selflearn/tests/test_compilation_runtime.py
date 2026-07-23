@@ -1209,8 +1209,10 @@ def test_runtime_path_validation_oserror_is_journalled(monkeypatch):
 
         def _refuse_resolve(self, *args, **kwargs):
             # Only executor-path validation is made to fail; unrelated
-            # resolution elsewhere in the call keeps working.
-            if str(self).startswith(str(store_root)):
+            # resolution elsewhere in the call keeps working. Uses
+            # is_relative_to, not str.startswith -- a prefix check would also
+            # match a sibling directory sharing the tempdir name prefix.
+            if self.is_relative_to(store_root):
                 raise PermissionError(13, "Permission denied")
             return real_resolve(self, *args, **kwargs)
 
@@ -1221,7 +1223,10 @@ def test_runtime_path_validation_oserror_is_journalled(monkeypatch):
                        task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                        now="2024-01-01T00:00:00Z")
 
-        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
+        # A resolution failure is NOT an escape attempt: it must be journalled
+        # as unreadable, and must not pollute the path-escape bucket.
+        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
 
 
 def test_runtime_unreadable_contained_path_is_journalled():
@@ -1229,7 +1234,9 @@ def test_runtime_unreadable_contained_path_is_journalled():
 
     ``active.path == "."`` resolves to the store root itself, which is contained
     and exists, so it passes containment and then raises IsADirectoryError on
-    read. That OSError must be journalled and normalized, not surfaced raw.
+    read. That OSError must be journalled and normalized, not surfaced raw --
+    and journalled as *unreadable*, not as an escape attempt, since the path
+    never left the store root.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
@@ -1262,12 +1269,69 @@ def test_runtime_unreadable_contained_path_is_journalled():
 
         runtime = ExecutorRuntime(registry, store, provenance, clock)
 
-        with pytest.raises(RuntimeCompError, match="Cannot validate executor path"):
+        with pytest.raises(RuntimeCompError, match="Cannot read executor path"):
             runtime.run("wf-001", task_id="t1", topic="test",
                        task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                        now="2024-01-01T00:00:00Z")
 
-        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
+        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
+def test_runtime_undecodable_source_is_journalled():
+    """An executor file that cannot be decoded fails closed, not raw.
+
+    ``read_text()`` raises UnicodeDecodeError, which is a ValueError and NOT an
+    OSError, so it needs catching explicitly. Reachable through locale drift
+    (executor written under UTF-8, run under a C/POSIX-locale runtime) or a
+    corrupted file on disk.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        # A contained, existing executor file holding bytes that are not valid
+        # UTF-8. Placed under the pack's own executors/ dir, matching the
+        # layout ExecutorRegistry.write_candidate produces, so PackStore does
+        # not mistake a bare top-level directory for a pack.
+        exec_rel = f"{pack}/executors/wf-001/deadbeef.py"
+        exec_abs = store_root / exec_rel
+        exec_abs.parent.mkdir(parents=True, exist_ok=True)
+        exec_abs.write_bytes(b"\xff\xfe# not decodable\n")
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            path=exec_rel,
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="Cannot read executor path"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
 
 
 # =============================================================================
