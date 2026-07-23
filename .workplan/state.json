@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 105,
+  "revision": 109,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3119,6 +3119,118 @@
         "revisionFrom": 102,
         "revisionTo": 103,
         "at": "2026-07-23T14:46:28.499Z"
+      }
+    },
+    {
+      "id": "TASK-20260724-018",
+      "title": "Repair validateIntegrationReceipt so a card integrated before another card's board transition can still be accepted, while still rejecting an integrationReceipt ahead of the board",
+      "status": "in_progress",
+      "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "priority": 1,
+      "trace": "Discovered during META-17/META-8 acceptance 2026-07-24: global-revision equality strands any card whose accept does not immediately follow its own integrate; TASK-20260723-017 is currently unacceptable by any legal transition",
+      "evidence": [
+        "workplan.mjs:2168-2171",
+        "workplan.mjs:2449-2451",
+        "workplan.mjs:2553"
+      ],
+      "next": [
+        "ready",
+        "claim",
+        "start"
+      ],
+      "definition": {
+        "sourceRevision": "git:b75a0926512a889c2b09dd0be9b7165c48439177;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-acceptance-wedge-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-wp-fix",
+        "branch": "fix/workplan-integration-receipt-revision",
+        "baseCommit": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "currentHead": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Single-predicate repair to the atomic Kanban control root. validateIntegrationReceipt currently requires receipt.revisionTo === expectedRevision. Because expectedRevision is the GLOBAL board revision, any transition on any OTHER card between a card's integrate and its accept permanently strands that card in verifying: revisions are monotonic, so the required revision can never recur, and block (the only other exit from verifying) applies the identical check. This is not hypothetical -- TASK-20260723-017 (META-17) integrated 102->103, TASK-20260714-006 (META-8) integrated 103->104, and META-17 is now unacceptable by any legal transition. The equality test provides no card-level staleness protection that the status machine does not already guarantee: while card.status === 'verifying' the latest receipt is necessarily the integration receipt, since the only exits from verifying are accept (->done) and block (->blocked) and both are gated on that status. The genuine threat the check must retain is an integrationReceipt claiming a revision AHEAD of the board, which indicates forgery or corruption. Change the predicate from strict inequality to receipt.revisionTo > expectedRevision. Scope is scripts/workplan.mjs plus regression tests in scripts/workplan.test.mjs. No product source, no selflearn, no discovery package, no prompt/evaluator/deployment wiring.",
+        "stopCondition": "Stop and fail closed on: any edit outside scripts/workplan.mjs and scripts/workplan.test.mjs; any change that weakens single-winner claim arbitration, fencing, path reservation, lock classification, or actor/owner separation; any relaxation permitting an integrationReceipt whose revisionTo exceeds the board revision; any change to the append-only receipt chain, receipt hashing, or revision monotonicity; any hand-edit of .workplan/state.json; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The implementing seat may not self-approve. Pi/NeuralWatt GLM-5.2 reviews the frozen base..head diff read-only and returns P0-P3 findings with file:line evidence, preserved verbatim under .review-store/ per AGENTS.md. A distinct coordinator actor runs integrate and accept, and per the defect this card fixes, accept must follow integrate with no intervening board transition until the fix itself is accepted. This card grants no promotion, deployment, evaluator-write, or credential authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "nextCheckpoint": "A card integrated before another card's board transition can still be accepted; an integrationReceipt whose revisionTo exceeds the board revision is still rejected; block-from-verifying and resume-from-blocked-verifying both tolerate an intervening transition on an unrelated card; and every pre-existing workplan test still passes.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ],
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 106,
+          "revisionTo": 107,
+          "at": "2026-07-23T23:44:59.577Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 107,
+          "revisionTo": 108,
+          "at": "2026-07-23T23:44:59.651Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 108,
+          "revisionTo": 109,
+          "at": "2026-07-23T23:44:59.724Z"
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "sourceRevision": "git:b75a0926512a889c2b09dd0be9b7165c48439177;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-acceptance-wedge-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-wp-fix",
+        "branch": "fix/workplan-integration-receipt-revision",
+        "baseCommit": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "currentHead": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "paths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Single-predicate repair to the atomic Kanban control root. validateIntegrationReceipt currently requires receipt.revisionTo === expectedRevision. Because expectedRevision is the GLOBAL board revision, any transition on any OTHER card between a card's integrate and its accept permanently strands that card in verifying: revisions are monotonic, so the required revision can never recur, and block (the only other exit from verifying) applies the identical check. This is not hypothetical -- TASK-20260723-017 (META-17) integrated 102->103, TASK-20260714-006 (META-8) integrated 103->104, and META-17 is now unacceptable by any legal transition. The equality test provides no card-level staleness protection that the status machine does not already guarantee: while card.status === 'verifying' the latest receipt is necessarily the integration receipt, since the only exits from verifying are accept (->done) and block (->blocked) and both are gated on that status. The genuine threat the check must retain is an integrationReceipt claiming a revision AHEAD of the board, which indicates forgery or corruption. Change the predicate from strict inequality to receipt.revisionTo > expectedRevision. Scope is scripts/workplan.mjs plus regression tests in scripts/workplan.test.mjs. No product source, no selflearn, no discovery package, no prompt/evaluator/deployment wiring.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "nextCheckpoint": "A card integrated before another card's board transition can still be accepted; an integrationReceipt whose revisionTo exceeds the board revision is still rejected; block-from-verifying and resume-from-blocked-verifying both tolerate an intervening transition on an unrelated card; and every pre-existing workplan test still passes.",
+        "revisionFrom": 107,
+        "revisionTo": 108,
+        "at": "2026-07-23T23:44:59.650Z"
       }
     }
   ]
