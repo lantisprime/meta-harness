@@ -1165,6 +1165,111 @@ def test_runtime_path_escape_blocked():
         assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
 
 
+def test_runtime_path_validation_oserror_is_journalled(monkeypatch):
+    """A filesystem error while validating the executor path must be journalled
+    and normalized to RuntimeCompError, never surfaced as a raw OSError.
+
+    Citing test for the gate P1 on 4a8069b: the ``.resolve()`` calls sat above
+    the ``try``, so its ``except OSError`` handler was unreachable and an OSError
+    (e.g. ELOOP, or EACCES on a ``/proc/<pid>/root`` component) escaped ``run()``
+    raw and unjournalled.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            path="executors/wf-001.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        real_resolve = Path.resolve
+
+        def _refuse_resolve(self, *args, **kwargs):
+            # Only executor-path validation is made to fail; unrelated
+            # resolution elsewhere in the call keeps working.
+            if str(self).startswith(str(store_root)):
+                raise PermissionError(13, "Permission denied")
+            return real_resolve(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", _refuse_resolve)
+
+        with pytest.raises(RuntimeCompError, match="Cannot validate executor path"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
+def test_runtime_unreadable_contained_path_is_journalled():
+    """A contained-but-unreadable executor path fails closed as RuntimeCompError.
+
+    ``active.path == "."`` resolves to the store root itself, which is contained
+    and exists, so it passes containment and then raises IsADirectoryError on
+    read. That OSError must be journalled and normalized, not surfaced raw.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            path=".",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="Cannot validate executor path"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
 # =============================================================================
 # F4-12 citing test: transition refuses to operate on unknown record
 # =============================================================================

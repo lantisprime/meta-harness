@@ -185,15 +185,27 @@ class ExecutorRuntime:
 
         # Bounded-authority check: a tampered registry.path cannot widen the
         # read surface outside the store root.
-        store_root_resolved = Path(self.store.root).resolve()
-        exec_path_resolved = exec_path.resolve()
+        #
+        # Resolution, containment, and the read all sit inside ONE OSError
+        # guard, for two reasons. First, .resolve() is the operation that
+        # actually raises (ELOOP, or EACCES on a /proc/<pid>/root component);
+        # leaving it above the try made the handler unreachable and let a raw
+        # OSError escape run() unjournalled. Second, checking one path object
+        # and then reading a different one is a check/use split -- the read
+        # must come from the same resolved path that was validated.
         try:
+            store_root_resolved = Path(self.store.root).resolve()
+            exec_path_resolved = exec_path.resolve()
             if not exec_path_resolved.is_relative_to(store_root_resolved):
                 self._journal_refusal(entry_id, "executor.path-escape",
                                      f"executor path {active.path!r} escapes store root",
                                      now=now)
                 raise RuntimeCompError(
                     f"Executor path {active.path!r} escapes store root")
+            if not exec_path_resolved.exists():
+                raise RuntimeCompError(
+                    f"Executor source missing: {active.path}")
+            source = exec_path_resolved.read_text()
         except OSError as exc:
             self._journal_refusal(entry_id, "executor.path-escape",
                                  f"cannot validate executor path {active.path!r}: {exc}",
@@ -201,10 +213,6 @@ class ExecutorRuntime:
             raise RuntimeCompError(
                 f"Cannot validate executor path {active.path!r}") from exc
 
-        if not exec_path.exists():
-            raise RuntimeCompError(f"Executor source missing: {active.path}")
-
-        source = exec_path.read_text()
         import hashlib
         actual_hash = hashlib.sha256(source.encode()).hexdigest()
         if actual_hash != active.executor_hash:
