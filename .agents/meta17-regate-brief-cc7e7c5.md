@@ -190,7 +190,7 @@ index 60eb9fc..1fa7ce9 100644
          exec_path = Path(self.store.root) / active.path
 -        if not exec_path.exists():
 -            raise RuntimeCompError(f"Executor source missing: {active.path}")
- 
+
 -        source = exec_path.read_text()
 +        # Bounded-authority check: a tampered registry.path cannot widen the
 +        # read surface outside the store root.
@@ -231,14 +231,14 @@ index 4623368..2e31380 100644
 +++ b/selflearn/src/selflearn/compilation/testgen.py
 @@ -16,11 +16,15 @@ from selflearn.ports import IdentityPort, ModelPort, ProvenancePort
  AUTHOR_ROLE = "workflow-test-author"
- 
- 
+
+
 -class TestAuthorError(RuntimeError):
 +class WorkflowTestAuthorError(RuntimeError):
      """Error during test generation."""
      pass
- 
- 
+
+
 +# Backward-compatible alias preserved outside the public __all__.
 +TestAuthorError = WorkflowTestAuthorError
 +
@@ -265,10 +265,10 @@ index 4623368..2e31380 100644
 +            raise WorkflowTestAuthorError(
                  f"identity verification failed: {exc}"
              ) from exc
- 
+
 @@ -71,7 +75,7 @@ class WorkflowTestAuthor:
              IndependentTestSuite with generated test source
- 
+
          Raises:
 -            TestAuthorError: If the model returns invalid output
 +            WorkflowTestAuthorError: If the model returns invalid output
@@ -276,16 +276,16 @@ index 4623368..2e31380 100644
          # Build context - NEVER includes executor source (asserted in tests)
          context = {
 @@ -96,7 +100,7 @@ class WorkflowTestAuthor:
- 
+
          # Schema validation
          if not isinstance(plan, list) or not plan:
 -            raise TestAuthorError("Test author returned no tests")
 +            raise WorkflowTestAuthorError("Test author returned no tests")
- 
+
          # FIX-5: validate test plan
          valid_kinds = {"order", "check", "approval", "failure-path"}
 @@ -106,67 +110,67 @@ class WorkflowTestAuthor:
- 
+
          for i, test in enumerate(plan):
              if not isinstance(test, dict):
 -                raise TestAuthorError(f"Test #{i} is not a dict")
@@ -294,7 +294,7 @@ index 4623368..2e31380 100644
              if kind not in valid_kinds:
 -                raise TestAuthorError(f"Test #{i} has invalid kind {kind!r}")
 +                raise WorkflowTestAuthorError(f"Test #{i} has invalid kind {kind!r}")
- 
+
              # FIX-5: name/step_id/expect must be strings
              name = test.get("name", "")
              step_id = test.get("step_id", "")
@@ -308,7 +308,7 @@ index 4623368..2e31380 100644
              if not isinstance(expect, str):
 -                raise TestAuthorError(f"Test #{i} expect must be a string")
 +                raise WorkflowTestAuthorError(f"Test #{i} expect must be a string")
- 
+
              if kind == "order":
                  has_order = True
                  # F2-10: order expect may be a JSON array or comma-separated ids.
@@ -353,19 +353,19 @@ index 4623368..2e31380 100644
 -                    raise TestAuthorError(
 +                    raise WorkflowTestAuthorError(
                          f"Test #{i} step_id {step_id!r} not in spec")
- 
+
          # Coverage floor: need order test
          if not has_order:
 -            raise TestAuthorError("Test plan must include at least one 'order' test")
 +            raise WorkflowTestAuthorError("Test plan must include at least one 'order' test")
- 
+
          # Coverage floor: need approval test if spec has approval steps
          if self._has_approval_step(spec.procedure) and not has_approval:
 -            raise TestAuthorError(
 +            raise WorkflowTestAuthorError(
                  "Test plan must include at least one 'approval' test "
                  "since the spec has approval steps")
- 
+
 @@ -240,6 +244,7 @@ class WorkflowTestAuthor:
          # F4-2: do not emit `import json`.  The sandbox harness injects `json`
          # directly into the restricted execution namespace; keeping imports out
@@ -388,94 +388,94 @@ index 536901a..a65a71c 100644
  from selflearn.ports import ExecutionPort, ExecutionResult, IdentityPort, ProvenancePort
  from selflearn.store.packstore import PackStore
 @@ -215,7 +215,7 @@ def test_test_author_rejects_compiler_identity():
- 
+
      identity = FakeIdentity()
- 
+
 -    with pytest.raises(TestAuthorError, match="distinct from compiler"):
 +    with pytest.raises(WorkflowTestAuthorError, match="distinct from compiler"):
          WorkflowTestAuthor(CompilerModel(), identity)
- 
- 
+
+
 @@ -229,14 +229,14 @@ def test_test_author_accepts_distinct_identity():
- 
- 
+
+
  def test_test_author_wraps_identity_error():
 -    """F2-17: identity.distinct failure becomes TestAuthorError."""
 +    """F2-17: identity.distinct failure becomes WorkflowTestAuthorError."""
      class ExplodingIdentity:
          basis = "explodes"
- 
+
          def distinct(self, a, b):
              raise RuntimeError("identity backend unavailable")
- 
+
 -    with pytest.raises(TestAuthorError, match="identity verification failed"):
 +    with pytest.raises(WorkflowTestAuthorError, match="identity verification failed"):
          WorkflowTestAuthor(FakeModel(), ExplodingIdentity())
- 
- 
+
+
 @@ -1125,7 +1125,7 @@ def test_testgen_order_expect_comma_split_renders():
- 
- 
+
+
  def test_testgen_nonexistent_step_id_raises():
 -    """Plan referencing nonexistent step_id -> TestAuthorError."""
 +    """Plan referencing nonexistent step_id -> WorkflowTestAuthorError."""
      from selflearn.compilation.testgen import WorkflowTestAuthor
- 
+
      class BadModel:
 @@ -1155,12 +1155,12 @@ def test_testgen_nonexistent_step_id_raises():
      )
- 
+
      author = WorkflowTestAuthor(BadModel(), FakeIdentity())
 -    with pytest.raises(TestAuthorError, match="nonexistent_step"):
 +    with pytest.raises(WorkflowTestAuthorError, match="nonexistent_step"):
          author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
- 
- 
+
+
  def test_testgen_order_without_expect_raises():
 -    """Order test without expect -> TestAuthorError."""
 +    """Order test without expect -> WorkflowTestAuthorError."""
      from selflearn.compilation.testgen import WorkflowTestAuthor
- 
+
      class BadModel:
 @@ -1188,7 +1188,7 @@ def test_testgen_order_without_expect_raises():
      )
- 
+
      author = WorkflowTestAuthor(BadModel(), FakeIdentity())
 -    with pytest.raises(TestAuthorError, match="non-empty expect"):
 +    with pytest.raises(WorkflowTestAuthorError, match="non-empty expect"):
          author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
- 
- 
+
+
 @@ -1458,7 +1458,7 @@ def test_gate_activation_binds_matching_registry_record():
  # =============================================================================
- 
+
  def test_testgen_approval_nonexistent_step_id_raises():
 -    """F3-4: approval step_id not in spec -> TestAuthorError."""
 +    """F3-4: approval step_id not in spec -> WorkflowTestAuthorError."""
      from selflearn.compilation.testgen import WorkflowTestAuthor
- 
+
      class BadModel:
 @@ -1488,14 +1488,14 @@ def test_testgen_approval_nonexistent_step_id_raises():
          procedure=steps,
      )
- 
+
 -    with pytest.raises(TestAuthorError, match="nonexistent"):
 +    with pytest.raises(WorkflowTestAuthorError, match="nonexistent"):
          WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
              spec, authored_at="t", provenance=FakeProvenance()
          )
- 
- 
+
+
  def test_testgen_approval_empty_step_id_raises():
 -    """F3-4: approval step_id empty -> TestAuthorError."""
 +    """F3-4: approval step_id empty -> WorkflowTestAuthorError."""
      from selflearn.compilation.testgen import WorkflowTestAuthor
- 
+
      class BadModel:
 @@ -1525,7 +1525,7 @@ def test_testgen_approval_empty_step_id_raises():
          procedure=steps,
      )
- 
+
 -    with pytest.raises(TestAuthorError, match="requires a step_id"):
 +    with pytest.raises(WorkflowTestAuthorError, match="requires a step_id"):
          WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
@@ -487,8 +487,8 @@ index 1ac5182..862d3fd 100644
 +++ b/selflearn/tests/test_compilation_runtime.py
 @@ -1120,6 +1120,156 @@ def test_runtime_missing_entry_journals_refusal():
          assert any(e["kind"] == "executor.unverifiable" for e in provenance.events)
- 
- 
+
+
 +# =============================================================================
 +# Final tidy: executor path-escape blocked
 +# =============================================================================

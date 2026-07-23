@@ -186,7 +186,7 @@ index 1fa7ce9..2dfd524 100644
                                   now=now)
              raise RuntimeCompError(
                  f"Cannot validate executor path {active.path!r}") from exc
- 
+
 +        if not contained:
 +            self._journal_refusal(entry_id, "executor.path-escape",
 +                                 f"executor path {active.path!r} escapes store root",
@@ -218,7 +218,7 @@ index 862d3fd..109ab32 100644
 --- a/selflearn/tests/test_compilation_runtime.py
 +++ b/selflearn/tests/test_compilation_runtime.py
 @@ -1209,8 +1209,10 @@ def test_runtime_path_validation_oserror_is_journalled(monkeypatch):
- 
+
          def _refuse_resolve(self, *args, **kwargs):
              # Only executor-path validation is made to fail; unrelated
 -            # resolution elsewhere in the call keeps working.
@@ -229,21 +229,21 @@ index 862d3fd..109ab32 100644
 +            if self.is_relative_to(store_root):
                  raise PermissionError(13, "Permission denied")
              return real_resolve(self, *args, **kwargs)
- 
+
 @@ -1221,7 +1223,10 @@ def test_runtime_path_validation_oserror_is_journalled(monkeypatch):
                         task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                         now="2024-01-01T00:00:00Z")
- 
+
 -        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
 +        # A resolution failure is NOT an escape attempt: it must be journalled
 +        # as unreadable, and must not pollute the path-escape bucket.
 +        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
 +        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
- 
- 
+
+
  def test_runtime_unreadable_contained_path_is_journalled():
 @@ -1229,7 +1234,9 @@ def test_runtime_unreadable_contained_path_is_journalled():
- 
+
      ``active.path == "."`` resolves to the store root itself, which is contained
      and exists, so it passes containment and then raises IsADirectoryError on
 -    read. That OSError must be journalled and normalized, not surfaced raw.
@@ -254,15 +254,15 @@ index 862d3fd..109ab32 100644
      with tempfile.TemporaryDirectory() as tmpdir:
          store_root = Path(tmpdir)
 @@ -1262,12 +1269,69 @@ def test_runtime_unreadable_contained_path_is_journalled():
- 
+
          runtime = ExecutorRuntime(registry, store, provenance, clock)
- 
+
 -        with pytest.raises(RuntimeCompError, match="Cannot validate executor path"):
 +        with pytest.raises(RuntimeCompError, match="Cannot read executor path"):
              runtime.run("wf-001", task_id="t1", topic="test",
                         task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                         now="2024-01-01T00:00:00Z")
- 
+
 -        assert any(e["kind"] == "executor.path-escape" for e in provenance.events)
 +        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
 +        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
@@ -322,7 +322,7 @@ index 862d3fd..109ab32 100644
 +                       now="2024-01-01T00:00:00Z")
 +
 +        assert any(e["kind"] == "executor.path-unreadable" for e in provenance.events)
- 
- 
+
+
  # =============================================================================
 ```
