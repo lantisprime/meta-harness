@@ -1,4 +1,4 @@
-"""Native discovery kernel (META-7): campaign, lineage, knowledge, and role-context contracts."""
+"""Native discovery kernel (META-7) and bounded search-policy evolution (META-8)."""
 from metaharness.discovery.models import (
     AttemptState,
     CampaignState,
@@ -52,6 +52,53 @@ from metaharness.discovery.supervisor import (
     SupervisorError,
     SupervisorPoisonedError,
 )
+from metaharness.discovery.population import (
+    ApproachFingerprint,
+    PopulationDescriptor,
+    PopulationWindow,
+)
+from metaharness.discovery.policy import (
+    InspirationSelector,
+    IslandVisibility,
+    MemoryVisibility,
+    ParentSelector,
+    PolicyValidationReceipt,
+    PolicyValidationStage,
+    PolicyValidationVerdict,
+    SearchPolicyDSL,
+    SearchPolicySnapshot,
+    SearchPolicyStopRules,
+    VariationClass,
+    validate_policy,
+)
+from metaharness.discovery.scheduler import (
+    BudgetAllocation,
+    CandidateAlternative,
+    PopulationScheduler,
+    ScheduledSpawn,
+    SchedulerError,
+    SearchDecisionReceipt,
+)
+from metaharness.discovery.heartbeat import (
+    ConsolidationProposal,
+    HeartbeatAction,
+    HeartbeatEngine,
+    HeartbeatError,
+    HeartbeatKind,
+    HeartbeatOutcome,
+    HeartbeatTrigger,
+    RedirectProposal,
+    RedirectTarget,
+    ReflectionProposal,
+)
+from metaharness.discovery.evolution import (
+    EvolutionError,
+    PolicyActivationReceipt,
+    PolicyWindowScore,
+    SearchPolicyEvolver,
+    StrategyHistoryOutcome,
+    StrategyHistoryRow,
+)
 
 __all__ = [
     "LineageError",
@@ -100,4 +147,41 @@ __all__ = [
     "DiscoveryTerminalOutcome",
     "DiscoveryTerminalReceipt",
     "is_attempt_terminal",
+    "ApproachFingerprint",
+    "PopulationDescriptor",
+    "PopulationWindow",
+    "InspirationSelector",
+    "IslandVisibility",
+    "MemoryVisibility",
+    "ParentSelector",
+    "PolicyValidationReceipt",
+    "PolicyValidationStage",
+    "PolicyValidationVerdict",
+    "SearchPolicyDSL",
+    "SearchPolicySnapshot",
+    "SearchPolicyStopRules",
+    "VariationClass",
+    "validate_policy",
+    "BudgetAllocation",
+    "CandidateAlternative",
+    "PopulationScheduler",
+    "ScheduledSpawn",
+    "SchedulerError",
+    "SearchDecisionReceipt",
+    "ConsolidationProposal",
+    "HeartbeatAction",
+    "HeartbeatEngine",
+    "HeartbeatError",
+    "HeartbeatKind",
+    "HeartbeatOutcome",
+    "HeartbeatTrigger",
+    "RedirectProposal",
+    "RedirectTarget",
+    "ReflectionProposal",
+    "EvolutionError",
+    "PolicyActivationReceipt",
+    "PolicyWindowScore",
+    "SearchPolicyEvolver",
+    "StrategyHistoryOutcome",
+    "StrategyHistoryRow",
 ]
