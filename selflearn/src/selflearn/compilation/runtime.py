@@ -229,6 +229,11 @@ class ExecutorRuntime:
                 f"Cannot read executor path {active.path!r}") from exc
 
         if missing:
+            # Journalled like every other refusal: an aborted run must never
+            # leave a silent gap in the evidence record.
+            self._journal_refusal(entry_id, "executor.missing-source",
+                                 f"executor source missing at {active.path!r}",
+                                 now=now)
             raise RuntimeCompError(f"Executor source missing: {active.path}")
 
         # UnicodeDecodeError is a ValueError, not an OSError, so it needs
@@ -236,7 +241,7 @@ class ExecutorRuntime:
         # would otherwise escape run() raw and unjournalled -- the same class
         # of breach as the resolve() gap, in a different exception family.
         try:
-            source = exec_path_resolved.read_text()
+            source = exec_path_resolved.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             self._journal_refusal(entry_id, "executor.path-unreadable",
                                  f"cannot read executor path {active.path!r}: {exc}",

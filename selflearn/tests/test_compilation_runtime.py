@@ -1278,6 +1278,53 @@ def test_runtime_unreadable_contained_path_is_journalled():
         assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
 
 
+def test_runtime_missing_source_is_journalled():
+    """A genuinely absent executor file must journal its refusal.
+
+    Every other refusal path emits a provenance event; this one did not, so an
+    aborted run left a silent gap in the evidence record.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            # Contained and resolvable, but no such file exists.
+            path=f"{pack}/executors/wf-001/absent.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="Executor source missing"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.missing-source" for e in provenance.events)
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
 def test_runtime_stat_failure_is_journalled(monkeypatch):
     """An OSError from the existence check must be journalled and normalized.
 
@@ -1346,9 +1393,14 @@ def test_runtime_undecodable_source_is_journalled():
     """An executor file that cannot be decoded fails closed, not raw.
 
     ``read_text()`` raises UnicodeDecodeError, which is a ValueError and NOT an
-    OSError, so it needs catching explicitly. Reachable through locale drift
-    (executor written under UTF-8, run under a C/POSIX-locale runtime) or a
-    corrupted file on disk.
+    OSError, so it needs catching explicitly. Reachable through a corrupted
+    file on disk.
+
+    The read is now pinned to utf-8 (matching content_hash's explicit
+    text.encode("utf-8")), so these bytes fail to decode on every runner. Under
+    the previous locale-dependent read this test would have passed for the
+    wrong reason on a latin-1/cp1252 locale, where b"\\xff\\xfe" decodes cleanly
+    and the run would instead have hit the hash-mismatch path.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)

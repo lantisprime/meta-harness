@@ -208,7 +208,7 @@ class ExecutorRegistry:
         path = entry_dir / f"{candidate.spec.spec_hash}.py"
 
         if path.exists():
-            existing = path.read_text()
+            existing = path.read_text(encoding="utf-8")
             if existing != candidate.source:
                 raise RegistryError(
                     f"Refusing to overwrite {path} with different content")
@@ -216,7 +216,10 @@ class ExecutorRegistry:
         else:
             # FIX-9: write source via tmp + os.replace (atomic)
             tmp = path.with_suffix(".py.tmp")
-            tmp.write_text(candidate.source)
+            # utf-8 pinned: content_hash() hashes text.encode("utf-8"),
+            # so locale-dependent file I/O would break the hash contract
+            # for any non-ASCII source under a non-utf-8 locale.
+            tmp.write_text(candidate.source, encoding="utf-8")
             os.replace(tmp, path)
 
         # FIX-3: add quarantined record (idempotent — skip if already present)

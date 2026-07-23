@@ -21,10 +21,6 @@ class WorkflowTestAuthorError(RuntimeError):
     pass
 
 
-# Backward-compatible alias preserved outside the public __all__.
-TestAuthorError = WorkflowTestAuthorError
-
-
 # Marker to represent the compiler identity for distinctness check
 class _CompilerMarker:
     """Marker class representing the deterministic workflow compiler."""
