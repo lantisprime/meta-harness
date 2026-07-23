@@ -106,7 +106,7 @@ except OSError as exc:
 
 ## Test-quality assessment (focus area 6)
 
-`test_runtime_path_escape_blocked` (`selflearn/tests/test_compilation_runtime.py:1127`) uses `path="../../etc/hostile.py"` — a **genuinely escaping** path (it resolves above the store root regardless of tempdir depth) — and asserts **both** `pytest.raises(RuntimeCompError, match="escapes store root")` **and** `any(e["kind"] == "executor.path-escape" for e in provenance.events)`. The guard's refusal message and journal kind are **distinct** from the `"Executor source missing"` / `executor.tampered` paths, so the test proves the **containment** guard fired (not the existence or hash check). 
+`test_runtime_path_escape_blocked` (`selflearn/tests/test_compilation_runtime.py:1127`) uses `path="../../etc/hostile.py"` — a **genuinely escaping** path (it resolves above the store root regardless of tempdir depth) — and asserts **both** `pytest.raises(RuntimeCompError, match="escapes store root")` **and** `any(e["kind"] == "executor.path-escape" for e in provenance.events)`. The guard's refusal message and journal kind are **distinct** from the `"Executor source missing"` / `executor.tampered` paths, so the test proves the **containment** guard fired (not the existence or hash check).
 **Would it fail if the guard were deleted?** Yes — without the guard, the flow reaches `if not exec_path.exists()` (:204); `/…/../../etc/hostile.py` does not exist → raises `RuntimeCompError("Executor source missing: …")` (different message) and emits **no** `executor.path-escape` event; both assertions would fail. **Adequate.** (Minor hardening: also add a case with an **existing** file outside the root to prove the guard fires *before* the hash check; not required.)
 
 I could **not** run the suite (bash denied), so I cannot confirm the claimed 107 / 331+1 / 1631 counts. By grep, `test_compilation_runtime.py` has 24 `def test_` functions (incl. the new path-escape test).
@@ -125,7 +125,7 @@ I could **not** run the suite (bash denied), so I cannot confirm the claimed 107
 
 ## Regression vs `89572ff`
 
-**No.** `4a8069b` is strictly additive in behavior: it adds the path-containment guard + `executor.path-escape` journalling + the new test, performs a mechanical rename (`TestAuthorError` → `WorkflowTestAuthorError`) with the two names being the same class object, and keeps a benign backward-compatible alias. It does **not** remove or weaken any behavior that was approved at `89572ff`. The P1 (Finding A) is a **new control that under-delivers on its own stated contract** (raw `OSError` not normalized/journalled when `resolve()` raises), not a regression of any previously-approved behavior — the "weird path → raw OSError" surface predates `89572ff` (Finding F). 
+**No.** `4a8069b` is strictly additive in behavior: it adds the path-containment guard + `executor.path-escape` journalling + the new test, performs a mechanical rename (`TestAuthorError` → `WorkflowTestAuthorError`) with the two names being the same class object, and keeps a benign backward-compatible alias. It does **not** remove or weaken any behavior that was approved at `89572ff`. The P1 (Finding A) is a **new control that under-delivers on its own stated contract** (raw `OSError` not normalized/journalled when `resolve()` raises), not a regression of any previously-approved behavior — the "weird path → raw OSError" surface predates `89572ff` (Finding F).
 
 ## Required follow-up before integration
 

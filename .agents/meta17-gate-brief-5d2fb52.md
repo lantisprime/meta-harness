@@ -151,7 +151,7 @@ index d6f4d23..6f0b83c 100644
 +            return json.loads(self._registry_path.read_text(encoding="utf-8"))
          except (json.JSONDecodeError, IOError) as e:
              raise RegistryError(f"Registry corrupt: {e}")
- 
+
 @@ -77,7 +77,7 @@ class ExecutorRegistry:
          """Atomic write of registry using tmp + os.replace."""
          self._executors_dir.mkdir(parents=True, exist_ok=True)
@@ -159,7 +159,7 @@ index d6f4d23..6f0b83c 100644
 -        tmp.write_text(json.dumps(data, indent=1))
 +        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
          os.replace(tmp, self._registry_path)
- 
+
      def record_for(self, entry_id: str, status: str | None = None) -> list[ExecutorRecord]:
 @@ -89,7 +89,7 @@ class ExecutorRegistry:
          if not self._registry_path.exists():
@@ -175,7 +175,7 @@ index 8fb35aa..c5edaf2 100644
 --- a/selflearn/src/selflearn/compilation/runtime.py
 +++ b/selflearn/src/selflearn/compilation/runtime.py
 @@ -181,6 +181,20 @@ class ExecutorRuntime:
- 
+
          # Load and verify executor source
          from pathlib import Path
 +
@@ -193,7 +193,7 @@ index 8fb35aa..c5edaf2 100644
 +                f"Executor path {active.path!r} contains control characters")
 +
          exec_path = Path(self.store.root) / active.path
- 
+
          # Bounded-authority check: a tampered registry.path cannot widen the
 @@ -198,7 +212,7 @@ class ExecutorRuntime:
              store_root_resolved = Path(self.store.root).resolve()
@@ -216,7 +216,7 @@ index 8fb35aa..c5edaf2 100644
 @@ -236,13 +250,14 @@ class ExecutorRuntime:
                                   now=now)
              raise RuntimeCompError(f"Executor source missing: {active.path}")
- 
+
 -        # UnicodeDecodeError is a ValueError, not an OSError, so it needs
 -        # catching explicitly: a locale-drifted or corrupted executor file
 -        # would otherwise escape run() raw and unjournalled -- the same class
@@ -239,8 +239,8 @@ index 1efc5ae..dd679ce 100644
 +++ b/selflearn/tests/test_compilation_runtime.py
 @@ -1278,6 +1278,126 @@ def test_runtime_unreadable_contained_path_is_journalled():
          assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
- 
- 
+
+
 +def test_runtime_non_ascii_executor_round_trips():
 +    """A VALID non-ASCII executor must round-trip write -> read -> hash -> run.
 +
@@ -363,5 +363,5 @@ index 1efc5ae..dd679ce 100644
 +
  def test_runtime_missing_source_is_journalled():
      """A genuinely absent executor file must journal its refusal.
- 
+
 ```

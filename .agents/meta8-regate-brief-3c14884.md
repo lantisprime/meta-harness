@@ -156,12 +156,12 @@ index d929924..e978c0f 100644
      actor_label: BoundedIdentifier
 +    is_root: bool = False
      activation_hash: str = Field(default="", pattern=SHA256_PATTERN)
- 
+
      @model_validator(mode="wrap")
 @@ -174,6 +175,21 @@ class PolicyActivationReceipt(FrozenModel):
          if self.parent_policy_hash == self.policy_hash:
              raise ValueError("an activation cannot name its policy as its parent")
- 
+
 +        if self.is_root:
 +            if self.parent_policy_hash is not None:
 +                raise ValueError(
@@ -190,13 +190,13 @@ index d929924..e978c0f 100644
 +        # so consider()'s appended activation_receipts sequence stays
 +        # unchanged for already-existing tests.
 +        self._root_activation = self._build_root_activation(root)
- 
+
      @property
      def current(self) -> SearchPolicySnapshot:
 @@ -234,6 +256,71 @@ class SearchPolicyEvolver:
      def activation_receipts(self) -> tuple[PolicyActivationReceipt, ...]:
          return self._activation_receipts
- 
+
 +    @property
 +    def root_activation(self) -> PolicyActivationReceipt:
 +        """The single is_root=True activation minted at construction.
@@ -304,7 +304,7 @@ index 2c1381f..ba49311 100644
 +++ b/src/metaharness/discovery/scheduler.py
 @@ -356,11 +356,23 @@ class PopulationScheduler:
      # -- public API ---------------------------------------------------------
- 
+
      def schedule(
 -        self, descriptor: PopulationDescriptor, *, sequence: int
 +        self, descriptor: PopulationDescriptor, *, sequence: int,
@@ -325,12 +325,12 @@ index 2c1381f..ba49311 100644
              raise SchedulerError("sequence must be non-negative")
 +        if window_attempts_used < 0:
 +            raise SchedulerError("window_attempts_used must be non-negative")
- 
+
          # F5: round-trip re-validate the descriptor from its own JSON dump so
          # a stale in-process hash (model_copy tampering) fails closed before
 @@ -383,6 +395,17 @@ class PopulationScheduler:
              )
- 
+
          dsl = policy.policy
 +        # F-final-1: the policy's own stop-rule attempt cap is enforced
 +        # cumulatively across the window. remaining_window is the budget left
@@ -348,7 +348,7 @@ index 2c1381f..ba49311 100644
              raise SchedulerError(
 @@ -396,14 +419,15 @@ class PopulationScheduler:
              )
- 
+
          # width / concurrency respect DSL maxima, the campaign budget, the
 -        # policy's own stop-rule attempt cap (F2), and the descriptor's
 +        # policy's own per-window stop-rule attempt cap (F2 + F-final-1: capped
@@ -374,8 +374,8 @@ index ea24e7b..6e5fca7 100644
      )
 -    return scheduler.schedule(descriptor, sequence=1)[0].receipt
 +    return scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)[0].receipt
- 
- 
+
+
  def _without_self_hash(model):
 @@ -366,7 +366,7 @@ def test_scheduler_receipt_binds_policy_descriptor_and_rejects_tampering():
      receipt = PopulationScheduler(
@@ -383,22 +383,22 @@ index ea24e7b..6e5fca7 100644
          campaign_budgets=make_budgets(),
 -    ).schedule(descriptor, sequence=2)[0].receipt
 +    ).schedule(descriptor, sequence=2, window_attempts_used=0)[0].receipt
- 
+
      assert receipt.descriptor_hash == descriptor.descriptor_hash
      assert receipt.policy_hash == snapshot.policy_hash
 @@ -396,7 +396,7 @@ def test_tamper_sweep_over_real_schedule_heartbeat_policy_pipeline():
      root = make_parent()
- 
+
      scheduler = PopulationScheduler(root, campaign_budgets=make_budgets())
 -    spawn = scheduler.schedule(descriptor, sequence=1)[0]
 +    spawn = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)[0]
- 
+
      hub = make_real_hub(project_id="meta-harness")
      action = make_heartbeat_action(
 @@ -474,6 +474,99 @@ def test_forged_receipt_or_activation_with_mismatched_parent_hash_is_rejected():
          PolicyActivationReceipt(**activation_payload)
- 
- 
+
+
 +def test_forged_non_root_activation_with_no_parent_is_rejected():
 +    receipts = make_passed_validation_receipts()
 +
@@ -578,11 +578,11 @@ index 85df2df..b237c69 100644
      scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
 -    spawns = scheduler.schedule(make_descriptor(), sequence=1)
 +    spawns = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
- 
+
      assert spawns, "scheduler must emit at least one spawn"
      for spawn in spawns:
 @@ -399,14 +399,14 @@ def test_scheduler_diversity_floor_forces_non_elite_parents_on_concentrated_desc
- 
+
      # Not concentrated (0.3 <= 0.7): ELITE selects the frontier elite.
      relaxed = make_diverse_descriptor(concentration=0.3)
 -    relaxed_spawns = scheduler.schedule(relaxed, sequence=1)
@@ -590,7 +590,7 @@ index 85df2df..b237c69 100644
      relaxed_opt = _optimizer_spawns(relaxed_spawns)
      assert relaxed_opt, "expected at least one optimizer spawn"
      assert relaxed_opt[0].receipt.parent_candidate_id == "cand-elite"
- 
+
      # Concentrated (0.95 > 0.7): forced UNDEREXPLORED picks the non-elite.
      concentrated = make_diverse_descriptor(concentration=0.95)
 -    concentrated_spawns = scheduler.schedule(concentrated, sequence=1)
@@ -601,19 +601,19 @@ index 85df2df..b237c69 100644
 @@ -422,17 +422,17 @@ def test_scheduler_baseline_reseed_fires_on_the_interval():
      )
      scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
- 
+
 -    reseed_at_zero = scheduler.schedule(make_descriptor(), sequence=0)
 +    reseed_at_zero = scheduler.schedule(make_descriptor(), sequence=0, window_attempts_used=0)
      assert any(
          s.receipt.reason.startswith("baseline reseed") for s in reseed_at_zero
      ), "a baseline reseed must fire on a multiple of the interval"
- 
+
 -    none_at_one = scheduler.schedule(make_descriptor(), sequence=1)
 +    none_at_one = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
      assert not any(
          s.receipt.reason.startswith("baseline reseed") for s in none_at_one
      ), "no baseline reseed should fire off the interval"
- 
+
 -    reseed_at_five = scheduler.schedule(make_descriptor(), sequence=5)
 +    reseed_at_five = scheduler.schedule(make_descriptor(), sequence=5, window_attempts_used=0)
      assert any(
@@ -622,12 +622,12 @@ index 85df2df..b237c69 100644
 @@ -443,8 +443,8 @@ def test_scheduler_is_deterministic_for_identical_inputs():
      scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
      descriptor = make_descriptor()
- 
+
 -    first = scheduler.schedule(descriptor, sequence=3)
 -    second = scheduler.schedule(descriptor, sequence=3)
 +    first = scheduler.schedule(descriptor, sequence=3, window_attempts_used=0)
 +    second = scheduler.schedule(descriptor, sequence=3, window_attempts_used=0)
- 
+
      assert len(first) == len(second)
      for a, b in zip(first, second):
 @@ -460,7 +460,7 @@ def test_scheduler_over_budget_allocation_is_rejected_and_never_over_allocates()
@@ -636,7 +636,7 @@ index 85df2df..b237c69 100644
      with pytest.raises(SchedulerError):
 -        scheduler.schedule(exhausted, sequence=1)
 +        scheduler.schedule(exhausted, sequence=1, window_attempts_used=0)
- 
+
      # Partial budget caps width to the remaining attempts (never over).
      cap_snapshot = make_sched_snapshot(
 @@ -470,14 +470,14 @@ def test_scheduler_over_budget_allocation_is_rejected_and_never_over_allocates()
@@ -646,14 +646,14 @@ index 85df2df..b237c69 100644
 -    spawns = cap_scheduler.schedule(partial, sequence=1)
 +    spawns = cap_scheduler.schedule(partial, sequence=1, window_attempts_used=0)
      assert len(spawns) == 2, "width must be capped to remaining attempts, not exceeded"
- 
- 
+
+
  def test_scheduler_optimizer_needs_parent_explorer_must_not_have_parent():
      snapshot = make_sched_snapshot()
      scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
 -    spawns = scheduler.schedule(make_descriptor(), sequence=1)
 +    spawns = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
- 
+
      optimizers = _optimizer_spawns(spawns)
      explorers = _explorer_spawns(spawns)
 @@ -529,7 +529,7 @@ def test_scheduler_binds_policy_and_descriptor_hash_on_every_receipt():
@@ -662,7 +662,7 @@ index 85df2df..b237c69 100644
      descriptor = make_descriptor()
 -    spawns = scheduler.schedule(descriptor, sequence=2)
 +    spawns = scheduler.schedule(descriptor, sequence=2, window_attempts_used=0)
- 
+
      assert spawns
      for spawn in spawns:
 @@ -550,13 +550,13 @@ def test_scheduler_rejects_campaign_mismatch_and_tampered_policy():
@@ -671,14 +671,14 @@ index 85df2df..b237c69 100644
      with pytest.raises(SchedulerError):
 -        scheduler.schedule(foreign, sequence=1)
 +        scheduler.schedule(foreign, sequence=1, window_attempts_used=0)
- 
- 
+
+
  def test_scheduler_receipt_self_hash_rejects_tampering_and_authority_extras():
      snapshot = make_sched_snapshot()
      scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
 -    spawn = scheduler.schedule(make_descriptor(), sequence=1)[0]
 +    spawn = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)[0]
- 
+
      tampered = spawn.receipt.model_dump(mode="json")
      tampered["receipt_hash"] = "sha256:" + "9" * 64
 @@ -605,7 +605,7 @@ def test_scheduler_f1_reseed_never_overruns_width_with_optimizer_only():
@@ -689,7 +689,7 @@ index 85df2df..b237c69 100644
 +    spawns = scheduler.schedule(make_descriptor(), sequence=0, window_attempts_used=0)
      assert len(spawns) == 2, "reseed must occupy a slot inside width, not add width+1"
      assert any(s.receipt.reason.startswith("baseline reseed") for s in spawns)
- 
+
 @@ -626,7 +626,7 @@ def test_scheduler_f2_stop_rules_max_attempts_caps_batch_size():
          snapshot, campaign_budgets=make_budgets(max_concurrency=10)
      )
@@ -698,7 +698,7 @@ index 85df2df..b237c69 100644
 +    spawns = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)
      assert len(spawns) <= 4
      assert len(spawns) == 4
- 
+
 @@ -675,7 +675,7 @@ def test_scheduler_f3_emitted_batch_respects_diversity_floor():
          parent_selection_concentration=0.5,
          lineage_depth=1,
@@ -707,7 +707,7 @@ index 85df2df..b237c69 100644
 +    spawns = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)
      assert len(spawns) == 2
      assert _batch_parent_concentration(spawns) <= 0.5 + 1e-12
- 
+
 @@ -697,7 +697,7 @@ def test_scheduler_f3_degrades_single_optimizer_under_high_floor():
          snapshot, campaign_budgets=make_budgets(max_concurrency=10)
      )
@@ -723,7 +723,7 @@ index 85df2df..b237c69 100644
      )
 -    spawn_one = scheduler_one.schedule(make_descriptor(), sequence=1)[0]
 +    spawn_one = scheduler_one.schedule(make_descriptor(), sequence=1, window_attempts_used=0)[0]
- 
+
      snapshot_two = make_sched_snapshot(campaign_id="campaign-2")
      scheduler_two = PopulationScheduler(
          snapshot_two, campaign_budgets=make_budgets()
@@ -731,7 +731,7 @@ index 85df2df..b237c69 100644
      desc_two = make_descriptor(campaign_id="campaign-2")
 -    spawn_two = scheduler_two.schedule(desc_two, sequence=1)[0]
 +    spawn_two = scheduler_two.schedule(desc_two, sequence=1, window_attempts_used=0)[0]
- 
+
      with pytest.raises(ValidationError):
          ScheduledSpawn(assignment=spawn_two.assignment, receipt=spawn_one.receipt)
 @@ -732,7 +732,7 @@ def test_scheduler_f4_scheduled_spawn_rejects_foreign_campaign_pairing():
@@ -749,8 +749,8 @@ index 85df2df..b237c69 100644
      with pytest.raises(SchedulerError):
 -        scheduler.schedule(tampered, sequence=1)
 +        scheduler.schedule(tampered, sequence=1, window_attempts_used=0)
- 
- 
+
+
  def test_scheduler_f6_optimizer_build_without_parent_raises_not_assert():
 @@ -775,3 +775,67 @@ def test_scheduler_f6_optimizer_build_without_parent_raises_not_assert():
              expected_gain=0.5,

@@ -158,7 +158,7 @@ index 251f3a2..d6f4d23 100644
 +++ b/selflearn/src/selflearn/compilation/registry.py
 @@ -208,7 +208,7 @@ class ExecutorRegistry:
          path = entry_dir / f"{candidate.spec.spec_hash}.py"
- 
+
          if path.exists():
 -            existing = path.read_text()
 +            existing = path.read_text(encoding="utf-8")
@@ -175,7 +175,7 @@ index 251f3a2..d6f4d23 100644
 +            # for any non-ASCII source under a non-utf-8 locale.
 +            tmp.write_text(candidate.source, encoding="utf-8")
              os.replace(tmp, path)
- 
+
          # FIX-3: add quarantined record (idempotent — skip if already present)
 diff --git a/selflearn/src/selflearn/compilation/runtime.py b/selflearn/src/selflearn/compilation/runtime.py
 index 2dfd524..8fb35aa 100644
@@ -184,7 +184,7 @@ index 2dfd524..8fb35aa 100644
 @@ -212,7 +212,28 @@ class ExecutorRuntime:
              raise RuntimeCompError(
                  f"Executor path {active.path!r} escapes store root")
- 
+
 -        if not exec_path_resolved.exists():
 +        # exists() must be guarded too. On CPython < 3.13 Path.exists() only
 +        # swallows ENOENT/ENOTDIR/EBADF/ELOOP and re-raises everything else --
@@ -209,7 +209,7 @@ index 2dfd524..8fb35aa 100644
 +                                 f"executor source missing at {active.path!r}",
 +                                 now=now)
              raise RuntimeCompError(f"Executor source missing: {active.path}")
- 
+
          # UnicodeDecodeError is a ValueError, not an OSError, so it needs
 @@ -220,7 +241,7 @@ class ExecutorRuntime:
          # would otherwise escape run() raw and unjournalled -- the same class
@@ -226,8 +226,8 @@ index 2e31380..1c8cbc6 100644
 +++ b/selflearn/src/selflearn/compilation/testgen.py
 @@ -21,10 +21,6 @@ class WorkflowTestAuthorError(RuntimeError):
      pass
- 
- 
+
+
 -# Backward-compatible alias preserved outside the public __all__.
 -TestAuthorError = WorkflowTestAuthorError
 -
@@ -241,8 +241,8 @@ index 109ab32..1efc5ae 100644
 +++ b/selflearn/tests/test_compilation_runtime.py
 @@ -1278,13 +1278,129 @@ def test_runtime_unreadable_contained_path_is_journalled():
          assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
- 
- 
+
+
 +def test_runtime_missing_source_is_journalled():
 +    """A genuinely absent executor file must journal its refusal.
 +
@@ -356,7 +356,7 @@ index 109ab32..1efc5ae 100644
 +
  def test_runtime_undecodable_source_is_journalled():
      """An executor file that cannot be decoded fails closed, not raw.
- 
+
      ``read_text()`` raises UnicodeDecodeError, which is a ValueError and NOT an
 -    OSError, so it needs catching explicitly. Reachable through locale drift
 -    (executor written under UTF-8, run under a C/POSIX-locale runtime) or a
