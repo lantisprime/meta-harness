@@ -29,12 +29,11 @@ byte-identical outcome hashes.
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Any, Callable, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from metaharness.context import ContextTrust, Sensitivity
 from metaharness.context.models import SHA256_PATTERN, FrozenModel
@@ -235,26 +234,47 @@ _HEARTBEAT_CREATOR_ID = "heartbeat-engine"
 class HeartbeatEngine:
     """Deterministic evaluator of policy-owned heartbeat actions.
 
-    Constructed with a tuple of ``HeartbeatAction`` contracts and a real
-    ``DiscoveryKnowledgeHub``. :meth:`evaluate` fires the actions whose
-    trigger condition holds (subject to cooldown and budget), appends
-    reflection/consolidation outcomes to the hub as untrusted candidates
-    through the existing ``append()`` API, and returns the self-hashed
-    outcome receipts. No wall clock, no randomness.
+    Constructed with a tuple of ``HeartbeatAction`` contracts, a real
+    ``DiscoveryKnowledgeHub``, and the explicit ``project_id`` the engine is
+    scoped to (F10 — the engine no longer reaches into the hub's private
+    ``_project_id``; the caller asserts the binding). :meth:`evaluate` fires
+    the actions whose trigger condition holds (subject to cooldown and a
+    *cumulative* cost budget), appends reflection/consolidation outcomes to
+    the hub as untrusted candidates through the existing ``append()`` API, and
+    returns the self-hashed outcome receipts. No wall clock, no randomness.
     """
 
     def __init__(
         self,
         actions: Sequence[HeartbeatAction],
         hub: DiscoveryKnowledgeHub,
+        *,
+        project_id: str,
     ) -> None:
-        self._actions: tuple[HeartbeatAction, ...] = tuple(actions)
+        # F9: round-trip re-validate each action from its own JSON dump so a
+        # stale in-process action_hash (model_copy tampering) fails closed at
+        # construction rather than embedding a stale binding downstream.
+        validated: list[HeartbeatAction] = []
+        for action in actions:
+            try:
+                validated.append(
+                    HeartbeatAction.model_validate(action.model_dump(mode="json"))
+                )
+            except (ValidationError, ValueError) as exc:
+                raise HeartbeatError(
+                    f"heartbeat action {getattr(action, 'action_id', '?')!r} "
+                    f"failed self-hash revalidation: {exc}"
+                ) from exc
+        self._actions: tuple[HeartbeatAction, ...] = tuple(validated)
         self._hub = hub
-        # Idempotent-append guard: an artifact_id this engine has already
-        # published is not re-appended on a repeat evaluate() at the same
-        # sequence (the outcomes are still recomputed deterministically —
-        # only the append side effect is suppressed).
-        self._appended: set[str] = set()
+        if not project_id:
+            raise HeartbeatError("project_id must be a non-empty string")
+        self._project_id = project_id
+        # F8: idempotent-append guard keyed by (campaign_id, action_id,
+        # sequence). An exact same-key replay suppresses the append (the
+        # outcome receipt is recomputed deterministically); any other append
+        # rejection surfaces as HeartbeatError (fail-closed).
+        self._appended: set[tuple[str, str, int]] = set()
 
     @property
     def actions(self) -> tuple[HeartbeatAction, ...]:
@@ -263,6 +283,10 @@ class HeartbeatEngine:
     @property
     def hub(self) -> DiscoveryKnowledgeHub:
         return self._hub
+
+    @property
+    def project_id(self) -> str:
+        return self._project_id
 
     def evaluate(
         self,
@@ -284,12 +308,36 @@ class HeartbeatEngine:
         if sequence < 0:
             raise HeartbeatError("sequence must be non-negative")
 
+        # F9: round-trip re-validate the descriptor from its own JSON dump so a
+        # stale in-process descriptor_hash (model_copy tampering) fails closed
+        # before any trigger math runs.
+        try:
+            descriptor = PopulationDescriptor.model_validate(
+                descriptor.model_dump(mode="json")
+            )
+        except (ValidationError, ValueError) as exc:
+            raise HeartbeatError(
+                f"population descriptor failed self-hash revalidation: {exc}"
+            ) from exc
+
         remaining = dict(descriptor.remaining_budget)
-        remaining_cost = remaining.get("cost", None)
+        # F10: the cost budget is read once here, then decremented cumulatively
+        # per firing action (F7) so two 0.75-cost actions cannot both pass
+        # against a 1.0 budget.
+        if "cost" in remaining:
+            remaining_cost_budget: float | None = float(remaining["cost"])
+        else:
+            remaining_cost_budget = None
         descriptor_hash = descriptor.descriptor_hash
 
+        # F7: process actions in a deterministic order (by action_id) so the
+        # cumulative cost budget is applied the same way regardless of
+        # construction order, and a cost-contention tie has a deterministic
+        # winner.
+        ordered_actions = sorted(self._actions, key=lambda a: a.action_id)
+
         outcomes: list[HeartbeatOutcome] = []
-        for action in self._actions:
+        for action in ordered_actions:
             if not self._trigger_holds(
                 action,
                 descriptor,
@@ -303,11 +351,21 @@ class HeartbeatEngine:
             last = last_fired.get(action.action_id)
             if last is not None and (sequence - last) < action.cooldown_sequences:
                 continue
-            # Budget gate: the action's resource_cost must fit the descriptor's
-            # remaining cost budget (when a cost budget is reported at all).
+
+            # F10: a costly action must be budget-checkable. If the descriptor
+            # reports no "cost" entry at all, a resource_cost > 0 action cannot
+            # be gated — fail closed (raise) rather than skipping the gate.
+            if action.resource_cost > 0.0 and remaining_cost_budget is None:
+                raise HeartbeatError(
+                    f"action {action.action_id!r} has resource_cost "
+                    f"{action.resource_cost} but the descriptor reports no "
+                    "'cost' budget entry (fail closed)"
+                )
+            # F7: cumulative cost gate — the action's resource_cost must fit the
+            # *remaining* (decremented) cost budget.
             if (
-                remaining_cost is not None
-                and action.resource_cost > float(remaining_cost) + 1e-12
+                remaining_cost_budget is not None
+                and action.resource_cost > remaining_cost_budget + 1e-12
             ):
                 continue
 
@@ -322,10 +380,13 @@ class HeartbeatEngine:
                 descriptor=descriptor,
                 sequence=sequence,
                 trigger_evidence=trigger_evidence,
-                evaluation_evidence=evaluation_evidence,
-                event_evidence=event_evidence,
             )
             outcomes.append(outcome)
+
+            # F7: decrement the cumulative cost budget by what this firing
+            # actually cost.
+            if remaining_cost_budget is not None:
+                remaining_cost_budget -= action.resource_cost
 
             if action.kind in (
                 HeartbeatKind.REFLECTION,
@@ -392,8 +453,6 @@ class HeartbeatEngine:
         descriptor: PopulationDescriptor,
         sequence: int,
         trigger_evidence: str,
-        evaluation_evidence: Sequence[str],
-        event_evidence: Sequence[str],
     ) -> HeartbeatOutcome:
         kind = action.kind
         if kind is HeartbeatKind.REFLECTION:
@@ -458,11 +517,20 @@ class HeartbeatEngine:
         to claim LINEAGE/CAMPAIGN-scoped writes), with UNTRUSTED_EVIDENCE
         trust and INTERNAL sensitivity. The hub forces lifecycle to CANDIDATE
         and append-only storage; the engine never widens scope, never
-        activates, and never deletes. The append is idempotent per
-        (action_id, sequence).
+        activates, and never deletes.
+
+        F8: the idempotency key is (campaign_id, action_id, sequence) and the
+        artifact_id includes campaign_id, so the same action/sequence across
+        two campaigns append as distinct artifacts. An exact same-key replay
+        (already appended by this engine) suppresses the append; any other
+        append rejection surfaces as HeartbeatError (fail-closed — never
+        silently swallowed).
         """
-        artifact_id = f"hb-{action.action_id}-seq{sequence}"
-        if artifact_id in self._appended:
+        campaign_id = descriptor.campaign_id
+        idempotency_key = (campaign_id, action.action_id, sequence)
+        if idempotency_key in self._appended:
+            # Exact same-key idempotent replay: the outcome is recomputed
+            # deterministically; the append side effect is suppressed.
             return
         if outcome.reflection_note is not None:
             kind = DiscoveryKnowledgeKind.NOTE
@@ -473,29 +541,27 @@ class HeartbeatEngine:
         else:
             # Redirection outcomes are never appended (proposal only).
             return
+        artifact_id = f"hb-{campaign_id}-{action.action_id}-seq{sequence}"
         try:
             self._hub.append(
                 artifact_id=artifact_id,
                 kind=kind,
-                project_id=self._hub_project_id(),
-                campaign_id=descriptor.campaign_id,
+                project_id=self._project_id,
+                campaign_id=campaign_id,
                 creator_id=_HEARTBEAT_CREATOR_ID,
                 content=content,
                 scope=DiscoveryKnowledgeScope.PRIVATE,
                 trust=ContextTrust.UNTRUSTED_EVIDENCE,
                 sensitivity=Sensitivity.INTERNAL,
             )
-        except KnowledgeError:
-            # A duplicate artifact_id (or any other append rejection) is
-            # suppressed so a repeated evaluate() at the same sequence stays
-            # deterministic in its outcome stream; the outcome receipt is the
-            # durable record, not the append. Fail closed: we never widen
-            # scope or fabricate a fake append receipt.
-            return
-        self._appended.add(artifact_id)
-
-    def _hub_project_id(self) -> str:
-        # The MVP hub exposes no public project_id accessor; read its bound
-        # project id directly so appends route through the existing API
-        # (same process, same package).
-        return getattr(self._hub, "_project_id")
+        except KnowledgeError as exc:
+            # F8: do NOT silently swallow. The only suppressed case is the
+            # exact same-key idempotent replay (handled above). Any other
+            # append rejection — a foreign artifact_id collision, a
+            # sensitivity ceiling breach, secret-shaped content, ... — is a
+            # real failure that must surface, not blend into a silent skip.
+            raise HeartbeatError(
+                f"heartbeat append for action {action.action_id!r} "
+                f"(artifact_id {artifact_id!r}) was rejected: {exc}"
+            ) from exc
+        self._appended.add(idempotency_key)

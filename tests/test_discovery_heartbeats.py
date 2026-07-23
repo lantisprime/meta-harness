@@ -17,6 +17,7 @@ from metaharness.discovery.heartbeat import (
     ConsolidationProposal,
     HeartbeatAction,
     HeartbeatEngine,
+    HeartbeatError,
     HeartbeatKind,
     HeartbeatOutcome,
     HeartbeatTrigger,
@@ -91,14 +92,26 @@ def make_action(**overrides) -> HeartbeatAction:
     return HeartbeatAction(**defaults)
 
 
-def make_hub(*, project_id: str = "project-1") -> DiscoveryKnowledgeHub:
+PROJECT_ID = "project-1"
+
+
+def make_hub(*, project_id: str = PROJECT_ID) -> DiscoveryKnowledgeHub:
     return DiscoveryKnowledgeHub(project_id=project_id)
+
+
+def make_engine(
+    actions,
+    hub: DiscoveryKnowledgeHub | None = None,
+    *,
+    project_id: str = PROJECT_ID,
+) -> HeartbeatEngine:
+    return HeartbeatEngine(actions, hub or make_hub(), project_id=project_id)
 
 
 def _read_artifact(hub: DiscoveryKnowledgeHub, artifact_id: str, campaign_id: str):
     requester = DiscoveryKnowledgeRequester(
         creator_id="heartbeat-engine",
-        project_id=hub._project_id,
+        project_id=PROJECT_ID,
         campaign_id=campaign_id,
     )
     return hub.read(artifact_id, requester=requester)[0]
@@ -112,9 +125,8 @@ def _read_artifact(hub: DiscoveryKnowledgeHub, artifact_id: str, campaign_id: st
 def test_heartbeat_plateau_trigger_math_respects_epsilon():
     # epsilon=0.5 -> one full expected improvement period elapses at 2 steps.
     not_yet = make_descriptor(steps_since_meaningful_improvement=1)
-    engine = HeartbeatEngine(
+    engine = make_engine(
         (make_action(improvement_epsilon=0.5, cooldown_sequences=1),),
-        make_hub(),
     )
     assert engine.evaluate(not_yet, sequence=2, last_fired={}) == ()
 
@@ -124,9 +136,8 @@ def test_heartbeat_plateau_trigger_math_respects_epsilon():
     assert outcomes[0].reflection_note is not None
 
     # epsilon == 0 means no improvement is expected -> plateau is undefined.
-    zero_engine = HeartbeatEngine(
+    zero_engine = make_engine(
         (make_action(improvement_epsilon=0.0, cooldown_sequences=1),),
-        make_hub(),
     )
     assert zero_engine.evaluate(plateau, sequence=2, last_fired={}) == ()
 
@@ -138,7 +149,7 @@ def test_heartbeat_cooldown_blocks_refiring_until_elapsed():
         improvement_epsilon=0.5,
         cooldown_sequences=3,
     )
-    engine = HeartbeatEngine((action,), make_hub())
+    engine = make_engine((action,))
     descriptor = make_descriptor(steps_since_meaningful_improvement=4)
 
     first = engine.evaluate(descriptor, sequence=5, last_fired={})
@@ -160,7 +171,7 @@ def test_heartbeat_budget_exceeded_action_does_not_fire():
         cooldown_sequences=1,
         resource_cost=5.0,
     )
-    engine = HeartbeatEngine((action,), make_hub())
+    engine = make_engine((action,))
     descriptor = make_descriptor(
         steps_since_meaningful_improvement=4,
         remaining_budget={"attempts": 9.0, "cost": 1.0},
@@ -175,7 +186,7 @@ def test_heartbeat_budget_exceeded_action_does_not_fire():
         cooldown_sequences=1,
         resource_cost=0.5,
     )
-    cheap_engine = HeartbeatEngine((cheap,), make_hub())
+    cheap_engine = make_engine((cheap,))
     assert len(cheap_engine.evaluate(descriptor, sequence=5, last_fired={})) == 1
 
 
@@ -185,7 +196,7 @@ def test_heartbeat_time_trigger_uses_sequence_arithmetic():
         trigger=HeartbeatTrigger.TIME,
         cooldown_sequences=5,
     )
-    engine = HeartbeatEngine((action,), make_hub())
+    engine = make_engine((action,))
     descriptor = make_descriptor()
 
     assert engine.evaluate(descriptor, sequence=1, last_fired={}) == ()
@@ -208,7 +219,7 @@ def test_heartbeat_evaluation_and_event_triggers_require_explicit_evidence():
         trigger=HeartbeatTrigger.EVENT,
         cooldown_sequences=1,
     )
-    engine = HeartbeatEngine((eval_action, event_action), make_hub())
+    engine = make_engine((eval_action, event_action))
     descriptor = make_descriptor()
 
     assert engine.evaluate(descriptor, sequence=3, last_fired={}) == ()
@@ -246,13 +257,13 @@ def test_heartbeat_reflection_lands_in_hub_as_untrusted_candidate_note():
         cooldown_sequences=1,
     )
     hub = make_hub()
-    engine = HeartbeatEngine((action,), hub)
+    engine = make_engine((action,), hub)
     descriptor = make_descriptor(steps_since_meaningful_improvement=4)
 
     outcomes = engine.evaluate(descriptor, sequence=5, last_fired={})
     assert len(outcomes) == 1
 
-    artifact = _read_artifact(hub, "hb-hb-note-seq5", descriptor.campaign_id)
+    artifact = _read_artifact(hub, "hb-campaign-1-hb-note-seq5", descriptor.campaign_id)
     assert artifact.kind is DiscoveryKnowledgeKind.NOTE
     assert artifact.lifecycle is DiscoveryKnowledgeLifecycle.CANDIDATE
     assert artifact.trust is ContextTrust.UNTRUSTED_EVIDENCE
@@ -268,7 +279,7 @@ def test_heartbeat_consolidation_lands_in_hub_as_untrusted_skill_candidate():
         cooldown_sequences=1,
     )
     hub = make_hub()
-    engine = HeartbeatEngine((action,), hub)
+    engine = make_engine((action,), hub)
     descriptor = make_descriptor()
 
     outcomes = engine.evaluate(
@@ -282,7 +293,7 @@ def test_heartbeat_consolidation_lands_in_hub_as_untrusted_skill_candidate():
     assert proposal is not None
     assert proposal.kind is DiscoveryKnowledgeKind.SKILL_CANDIDATE
 
-    artifact = _read_artifact(hub, "hb-hb-skill-seq5", descriptor.campaign_id)
+    artifact = _read_artifact(hub, "hb-campaign-1-hb-skill-seq5", descriptor.campaign_id)
     assert artifact.kind is DiscoveryKnowledgeKind.SKILL_CANDIDATE
     assert artifact.lifecycle is DiscoveryKnowledgeLifecycle.CANDIDATE
     assert artifact.trust is ContextTrust.UNTRUSTED_EVIDENCE
@@ -297,7 +308,7 @@ def test_heartbeat_redirection_never_appends_and_is_only_a_proposal():
         cooldown_sequences=1,
     )
     hub = make_hub()
-    engine = HeartbeatEngine((action,), hub)
+    engine = make_engine((action,), hub)
     descriptor = make_descriptor(steps_since_meaningful_improvement=4)
 
     outcomes = engine.evaluate(descriptor, sequence=5, last_fired={})
@@ -306,7 +317,7 @@ def test_heartbeat_redirection_never_appends_and_is_only_a_proposal():
     # A redirect outcome is a queued proposal only: nothing is appended.
     requester = DiscoveryKnowledgeRequester(
         creator_id="heartbeat-engine",
-        project_id=hub._project_id,
+        project_id=PROJECT_ID,
         campaign_id=descriptor.campaign_id,
     )
     summaries, _ = hub.query(requester=requester)
@@ -329,11 +340,11 @@ def test_heartbeat_evaluate_is_deterministic_for_identical_inputs():
     descriptor = make_descriptor(steps_since_meaningful_improvement=4)
 
     hub_a = make_hub()
-    engine_a = HeartbeatEngine((action,), hub_a)
+    engine_a = make_engine((action,), hub_a)
     first = engine_a.evaluate(descriptor, sequence=5, last_fired={})
 
     hub_b = make_hub()
-    engine_b = HeartbeatEngine((action,), hub_b)
+    engine_b = make_engine((action,), hub_b)
     second = engine_b.evaluate(descriptor, sequence=5, last_fired={})
 
     assert len(first) == len(second) == 1
@@ -453,3 +464,140 @@ def test_heartbeat_consolidation_proposal_kind_is_restricted():
     ):
         proposal = ConsolidationProposal(kind=kind, content="ok")
         assert proposal.kind is kind
+
+
+# ---------------------------------------------------------------------------
+# META-8 fix-round regressions (F7-F10).
+# ---------------------------------------------------------------------------
+
+
+def test_heartbeat_f7_cumulative_cost_accounting_within_one_batch():
+    # Two 0.75-cost actions against a 1.0 budget: only one fires (the
+    # deterministic action_id-sorted winner), proving the cost budget is
+    # decremented cumulatively rather than read once per action.
+    action_a = make_action(
+        action_id="hb-a",
+        resource_cost=0.75,
+        improvement_epsilon=0.5,
+        cooldown_sequences=1,
+    )
+    action_b = make_action(
+        action_id="hb-b",
+        resource_cost=0.75,
+        improvement_epsilon=0.5,
+        cooldown_sequences=1,
+    )
+    engine = make_engine((action_a, action_b))
+    descriptor = make_descriptor(
+        steps_since_meaningful_improvement=4,
+        remaining_budget={"attempts": 9.0, "cost": 1.0},
+    )
+    outcomes = engine.evaluate(descriptor, sequence=5, last_fired={})
+    assert len(outcomes) == 1
+    # "hb-a" < "hb-b" lexicographically, so hb-a wins the cost-contention tie.
+    assert outcomes[0].action_hash == action_a.action_hash
+
+
+def test_heartbeat_f8_same_action_sequence_across_two_campaigns_both_append():
+    # The idempotency key and artifact_id include campaign_id, so the same
+    # action/sequence across two campaigns on one hub append as two distinct
+    # artifacts rather than colliding.
+    action = make_action(
+        action_id="hb-x",
+        improvement_epsilon=0.5,
+        cooldown_sequences=1,
+    )
+    hub = make_hub()
+    engine = make_engine((action,), hub)
+    desc1 = make_descriptor(
+        campaign_id="campaign-1", steps_since_meaningful_improvement=4
+    )
+    desc2 = make_descriptor(
+        campaign_id="campaign-2", steps_since_meaningful_improvement=4
+    )
+
+    outcomes1 = engine.evaluate(desc1, sequence=5, last_fired={})
+    outcomes2 = engine.evaluate(desc2, sequence=5, last_fired={})
+    assert len(outcomes1) == 1 and len(outcomes2) == 1
+
+    art1 = _read_artifact(hub, "hb-campaign-1-hb-x-seq5", "campaign-1")
+    art2 = _read_artifact(hub, "hb-campaign-2-hb-x-seq5", "campaign-2")
+    assert art1.campaign_id == "campaign-1"
+    assert art2.campaign_id == "campaign-2"
+
+
+def test_heartbeat_f8_append_rejection_surfaces_as_heartbeat_error():
+    # A genuinely rejected append (a duplicate artifact_id pre-populated from
+    # outside this engine, NOT a same-key idempotent replay) must surface as
+    # HeartbeatError — never silently swallowed.
+    action = make_action(
+        action_id="hb-y",
+        improvement_epsilon=0.5,
+        cooldown_sequences=1,
+    )
+    hub = make_hub()
+    # Pre-populate the hub with the exact artifact_id the engine will target.
+    hub.append(
+        artifact_id="hb-campaign-1-hb-y-seq5",
+        kind=DiscoveryKnowledgeKind.NOTE,
+        project_id=PROJECT_ID,
+        campaign_id="campaign-1",
+        creator_id="seed",
+        content="seed content",
+        scope=DiscoveryKnowledgeScope.PRIVATE,
+        trust=ContextTrust.UNTRUSTED_EVIDENCE,
+        sensitivity=Sensitivity.INTERNAL,
+    )
+    engine = make_engine((action,), hub)
+    descriptor = make_descriptor(
+        campaign_id="campaign-1", steps_since_meaningful_improvement=4
+    )
+    with pytest.raises(HeartbeatError):
+        engine.evaluate(descriptor, sequence=5, last_fired={})
+
+
+def test_heartbeat_f9_rejects_stale_hash_action_at_construction():
+    action = make_action(resource_cost=1.0)
+    # model_copy bypasses validation, leaving a stale action_hash relative to
+    # the mutated cooldown_sequences field.
+    tampered = action.model_copy(update={"cooldown_sequences": 2})
+    with pytest.raises(HeartbeatError):
+        HeartbeatEngine((tampered,), make_hub(), project_id=PROJECT_ID)
+
+
+def test_heartbeat_f9_rejects_stale_hash_descriptor_at_evaluate():
+    action = make_action(improvement_epsilon=0.5, cooldown_sequences=1)
+    engine = make_engine((action,))
+    descriptor = make_descriptor()
+    tampered = descriptor.model_copy(update={"best_score": 0.5})
+    with pytest.raises(HeartbeatError):
+        engine.evaluate(tampered, sequence=5, last_fired={})
+
+
+def test_heartbeat_f10_costly_action_without_cost_budget_fails_closed():
+    # An action with resource_cost > 0 whose descriptor reports no "cost"
+    # budget entry cannot be budget-gated -> fail closed (raise), not skip.
+    action = make_action(resource_cost=1.0)
+    engine = make_engine((action,))
+    descriptor = make_descriptor(
+        steps_since_meaningful_improvement=4,
+        remaining_budget={"attempts": 9.0},
+    )
+    with pytest.raises(HeartbeatError):
+        engine.evaluate(descriptor, sequence=5, last_fired={})
+
+
+def test_heartbeat_f10_engine_uses_explicit_project_id_for_appends():
+    # The engine takes an explicit project_id (F10) and never reaches into the
+    # hub's private _project_id. A mismatched project_id surfaces on append as
+    # HeartbeatError (the hub rejects cross-project writes).
+    hub = make_hub(project_id=PROJECT_ID)
+    engine = HeartbeatEngine(
+        (make_action(improvement_epsilon=0.5, cooldown_sequences=1),),
+        hub,
+        project_id="other-project",
+    )
+    assert engine.project_id == "other-project"
+    descriptor = make_descriptor(steps_since_meaningful_improvement=4)
+    with pytest.raises(HeartbeatError):
+        engine.evaluate(descriptor, sequence=5, last_fired={})

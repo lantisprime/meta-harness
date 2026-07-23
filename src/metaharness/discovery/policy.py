@@ -5,6 +5,9 @@ contains only closed enums, bounded identifiers, finite numbers, and frozen
 submodels: executable code, paths, tools, evaluator references, permissions,
 and activation or deployment authority are structurally absent.  Validation is
 pure and deterministic, and each completed stage emits an immutable receipt.
+SIMULATION is a deterministic coarse pre-projection of scheduler behavior;
+authoritative diversity-floor enforcement happens when the scheduler emits the
+actual batch.
 """
 from __future__ import annotations
 
@@ -170,6 +173,7 @@ class SearchPolicySnapshot(FrozenModel):
     schema_version: Literal[1] = 1
     policy_id: BoundedIdentifier
     parent_policy_id: BoundedIdentifier | None = None
+    parent_policy_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     campaign_id: BoundedIdentifier
     policy: SearchPolicyDSL
     window_id: BoundedIdentifier
@@ -195,6 +199,7 @@ class PolicyValidationReceipt(FrozenModel):
 
     schema_version: Literal[1] = 1
     policy_hash: str = Field(pattern=SHA256_PATTERN)
+    parent_policy_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     stage: PolicyValidationStage
     verdict: PolicyValidationVerdict
     reason: str = Field(min_length=1, max_length=512)
@@ -235,6 +240,7 @@ class PolicyValidationReceipt(FrozenModel):
 
 def _receipt(
     candidate: SearchPolicySnapshot,
+    parent_policy_hash: str | None,
     stage: PolicyValidationStage,
     verdict: PolicyValidationVerdict,
     reason: str,
@@ -243,6 +249,7 @@ def _receipt(
 ) -> PolicyValidationReceipt:
     return PolicyValidationReceipt(
         policy_hash=candidate.policy_hash,
+        parent_policy_hash=parent_policy_hash,
         stage=stage,
         verdict=verdict,
         reason=reason,
@@ -251,10 +258,13 @@ def _receipt(
 
 
 def _static_failure(
-    candidate: SearchPolicySnapshot, reason: str
+    candidate: SearchPolicySnapshot,
+    parent_policy_hash: str | None,
+    reason: str,
 ) -> PolicyValidationReceipt:
     return _receipt(
         candidate,
+        parent_policy_hash,
         PolicyValidationStage.STATIC,
         PolicyValidationVerdict.FAILED,
         f"static failed: {reason}",
@@ -275,6 +285,7 @@ def _changed_policy_fields(
 def _validate_static(
     candidate: SearchPolicySnapshot,
     parent: SearchPolicySnapshot | None,
+    parent_policy_hash: str | None,
 ) -> PolicyValidationReceipt:
     policy = candidate.policy
     if not math.isclose(
@@ -283,28 +294,42 @@ def _validate_static(
         rel_tol=0.0,
         abs_tol=1e-9,
     ):
-        return _static_failure(candidate, "role fractions do not sum to 1.0")
+        return _static_failure(
+            candidate,
+            parent_policy_hash,
+            "role fractions do not sum to 1.0",
+        )
     if (
         policy.parent_selector is ParentSelector.ELITE
         and policy.diversity_floor <= 0.0
     ):
         return _static_failure(
             candidate,
+            parent_policy_hash,
             "ELITE parent selection requires a positive diversity_floor",
         )
     if policy.max_width * policy.max_depth > MAX_POLICY_WIDTH_DEPTH_PRODUCT:
         return _static_failure(
             candidate,
+            parent_policy_hash,
             "max_width multiplied by max_depth exceeds the bounded search envelope",
         )
     if policy.stop_rules is None:
-        return _static_failure(candidate, "stop_rules are required")
+        return _static_failure(
+            candidate,
+            parent_policy_hash,
+            "stop_rules are required",
+        )
 
     if parent is None:
-        if candidate.parent_policy_id is not None:
+        if (
+            candidate.parent_policy_id is not None
+            or candidate.parent_policy_hash is not None
+        ):
             return _static_failure(
                 candidate,
-                "a child naming parent_policy_id requires the parent snapshot",
+                parent_policy_hash,
+                "a child naming a parent requires the parent snapshot",
             )
     else:
         try:
@@ -312,26 +337,40 @@ def _validate_static(
                 parent.model_dump(mode="json")
             )
         except (AttributeError, ValidationError):
-            return _static_failure(candidate, "parent snapshot failed hash validation")
+            return _static_failure(
+                candidate,
+                parent_policy_hash,
+                "parent snapshot failed hash validation",
+            )
         if candidate.parent_policy_id != parent.policy_id:
             return _static_failure(
                 candidate,
+                parent_policy_hash,
                 "parent_policy_id does not match the supplied parent snapshot",
+            )
+        if candidate.parent_policy_hash != parent.policy_hash:
+            return _static_failure(
+                candidate,
+                parent_policy_hash,
+                "parent_policy_hash does not match the supplied parent snapshot",
             )
         if candidate.campaign_id != parent.campaign_id:
             return _static_failure(
                 candidate,
+                parent_policy_hash,
                 "child and parent policies must belong to the same campaign",
             )
         changed_fields = _changed_policy_fields(candidate.policy, parent.policy)
         if changed_fields > MAX_POLICY_MUTATION_FIELDS:
             return _static_failure(
                 candidate,
+                parent_policy_hash,
                 "child changes more than three top-level DSL fields",
             )
 
     return _receipt(
         candidate,
+        parent_policy_hash,
         PolicyValidationStage.STATIC,
         PolicyValidationVerdict.PASSED,
         "static passed: cross-field bounds and policy lineage verified",
@@ -384,11 +423,13 @@ def _select_parent_ids(
 
 def _validate_simulation(
     candidate: SearchPolicySnapshot,
+    parent_policy_hash: str | None,
     window: PopulationDescriptor | None,
 ) -> PolicyValidationReceipt:
     if window is None:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: a PopulationDescriptor window is required",
@@ -400,6 +441,7 @@ def _validate_simulation(
     except (AttributeError, ValidationError):
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: population descriptor failed hash validation",
@@ -409,6 +451,7 @@ def _validate_simulation(
     if candidate.campaign_id != window.campaign_id:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: population descriptor campaign mismatch",
@@ -417,6 +460,7 @@ def _validate_simulation(
     if candidate.window_id != window.window_id:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: population descriptor window mismatch",
@@ -425,6 +469,7 @@ def _validate_simulation(
     if not window.candidate_nodes:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: population descriptor has no candidate nodes",
@@ -434,16 +479,22 @@ def _validate_simulation(
     policy = candidate.policy
     selected_parent_ids = _select_parent_ids(policy, window)
     parent_count = len(selected_parent_ids)
-    projected_concentration = max(
-        window.parent_selection_concentration,
-        1.0 / parent_count,
-    )
+    if policy.parent_selector is ParentSelector.BASELINE:
+        # The scheduler emits BASELINE selections as fresh explorers with no
+        # candidate parent, so candidate-parent concentration is exactly zero.
+        projected_concentration = 0.0
+    else:
+        projected_concentration = max(
+            window.parent_selection_concentration,
+            1.0 / parent_count,
+        )
     # Concentration and diversity are complementary fractions: a diversity
     # floor of d permits concentration of at most 1-d.
     maximum_concentration = 1.0 - policy.diversity_floor
     if projected_concentration > maximum_concentration + 1e-12:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: projected parent concentration exceeds diversity allowance",
@@ -455,6 +506,7 @@ def _validate_simulation(
     if missing_budget_keys:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: remaining_budget requires attempts and cost entries",
@@ -468,6 +520,7 @@ def _validate_simulation(
     if planned_attempts > remaining_budget["attempts"]:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: planned attempts exceed remaining budget",
@@ -476,15 +529,21 @@ def _validate_simulation(
     if window.cost_so_far > policy.stop_rules.max_cost:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: policy max_cost is already exhausted",
             descriptor_hash=window.descriptor_hash,
         )
     additional_cost_cap = policy.stop_rules.max_cost - window.cost_so_far
+    # Deliberately conservative: reject when the policy's entire remaining
+    # cost ceiling exceeds the campaign's reported remaining cost budget.
+    # This may over-reject a policy that would spend less than its ceiling,
+    # but it cannot permit runtime overspend.
     if additional_cost_cap > remaining_budget["cost"]:
         return _receipt(
             candidate,
+            parent_policy_hash,
             PolicyValidationStage.SIMULATION,
             PolicyValidationVerdict.FAILED,
             "simulation failed: additional cost cap exceeds remaining budget",
@@ -497,6 +556,7 @@ def _validate_simulation(
     optimizer_slots = policy.max_concurrency - explorer_slots
     return _receipt(
         candidate,
+        parent_policy_hash,
         PolicyValidationStage.SIMULATION,
         PolicyValidationVerdict.PASSED,
         (
@@ -516,6 +576,7 @@ def validate_policy(
 ) -> tuple[PolicyValidationReceipt, ...]:
     """Run SCHEMA -> STATIC -> SIMULATION -> SHADOW, stopping on failure."""
 
+    parent_policy_hash = parent.policy_hash if parent is not None else None
     try:
         candidate_dump = candidate.model_dump(mode="json")
         candidate_bytes = candidate.model_dump_json()
@@ -532,6 +593,7 @@ def validate_policy(
         return (
             _receipt(
                 candidate,
+                parent_policy_hash,
                 PolicyValidationStage.SCHEMA,
                 PolicyValidationVerdict.FAILED,
                 "schema failed: snapshot hash or DSL round-trip is invalid",
@@ -541,18 +603,27 @@ def validate_policy(
     receipts = [
         _receipt(
             verified_candidate,
+            parent_policy_hash,
             PolicyValidationStage.SCHEMA,
             PolicyValidationVerdict.PASSED,
             "schema passed: snapshot hash and DSL round-trip verified",
         )
     ]
 
-    static_receipt = _validate_static(verified_candidate, parent)
+    static_receipt = _validate_static(
+        verified_candidate,
+        parent,
+        parent_policy_hash,
+    )
     receipts.append(static_receipt)
     if static_receipt.verdict is PolicyValidationVerdict.FAILED:
         return tuple(receipts)
 
-    simulation_receipt = _validate_simulation(verified_candidate, window)
+    simulation_receipt = _validate_simulation(
+        verified_candidate,
+        parent_policy_hash,
+        window,
+    )
     receipts.append(simulation_receipt)
     if simulation_receipt.verdict is PolicyValidationVerdict.FAILED:
         return tuple(receipts)
@@ -560,6 +631,7 @@ def validate_policy(
     receipts.append(
         _receipt(
             verified_candidate,
+            parent_policy_hash,
             PolicyValidationStage.SHADOW,
             PolicyValidationVerdict.PASSED,
             "shadow passed: policy is eligible only and grants no activation authority",

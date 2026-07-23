@@ -63,6 +63,7 @@ def make_snapshot(**overrides) -> SearchPolicySnapshot:
     defaults: dict = dict(
         policy_id="policy-child",
         parent_policy_id="policy-root",
+        parent_policy_hash=make_parent().policy_hash,
         campaign_id="campaign-1",
         policy=make_policy(),
         window_id="window-1",
@@ -76,6 +77,7 @@ def make_parent(**overrides) -> SearchPolicySnapshot:
     defaults: dict = dict(
         policy_id="policy-root",
         parent_policy_id=None,
+        parent_policy_hash=None,
         campaign_id="campaign-1",
         policy=make_policy(),
         window_id="window-0",
@@ -398,6 +400,7 @@ def make_activation_receipt(**overrides) -> PolicyActivationReceipt:
     )
     defaults: dict = dict(
         policy_hash=receipts[0].policy_hash,
+        parent_policy_hash=receipts[0].parent_policy_hash,
         validation_receipts=receipts,
         validation_receipt_hashes=[
             receipt.receipt_hash for receipt in receipts
@@ -422,6 +425,7 @@ def test_activation_receipt_requires_exactly_four_passed_stage_receipts():
 
     failed_static = PolicyValidationReceipt(
         policy_hash=receipts[1].policy_hash,
+        parent_policy_hash=receipts[1].parent_policy_hash,
         stage=PolicyValidationStage.STATIC,
         verdict=PolicyValidationVerdict.FAILED,
         reason="static failed: bounded mutation rejected",
@@ -507,6 +511,7 @@ def test_child_proposal_binds_to_current_policy_parent():
     )
 
     assert child.parent_policy_id == evolver.current.policy_id
+    assert child.parent_policy_hash == evolver.current.policy_hash
     assert child.campaign_id == evolver.current.campaign_id
     assert child.policy_hash != evolver.current.policy_hash
 
@@ -578,6 +583,7 @@ def test_shadow_rejection_preserves_parent_and_records_exact_stage(monkeypatch):
     passed = validate_policy(candidate, parent=evolver.current, window=descriptor)
     failed_shadow = PolicyValidationReceipt(
         policy_hash=candidate.policy_hash,
+        parent_policy_hash=evolver.current.policy_hash,
         stage=PolicyValidationStage.SHADOW,
         verdict=PolicyValidationVerdict.FAILED,
         reason="shadow failed: grants no activation authority",
@@ -715,3 +721,63 @@ def test_consider_rejects_missing_shadow_receipt_without_activation(monkeypatch)
     assert row.outcome is StrategyHistoryOutcome.REJECTED_SHADOW
     assert evolver.current == parent
     assert evolver.activation_receipts == ()
+
+
+def test_baseline_selector_with_positive_diversity_floor_passes_simulation():
+    parent = make_parent()
+    candidate = SearchPolicyEvolver(parent).propose_child(
+        make_policy(
+            parent_selector=ParentSelector.BASELINE,
+            diversity_floor=0.2,
+        ),
+        window_id="window-1",
+        sequence=1,
+    )
+
+    receipts = validate_policy(
+        candidate,
+        parent=parent,
+        window=make_descriptor(),
+    )
+
+    assert [receipt.stage for receipt in receipts] == list(PolicyValidationStage)
+    assert all(
+        receipt.verdict is PolicyValidationVerdict.PASSED
+        for receipt in receipts
+    )
+
+
+def test_exact_parent_hash_changes_receipts_and_wrong_parent_is_rejected():
+    parent_a = make_parent()
+    parent_b = make_parent(policy=make_policy(max_concurrency=3))
+    assert parent_a.policy_id == parent_b.policy_id
+    assert parent_a.policy_hash != parent_b.policy_hash
+
+    evolver_a = SearchPolicyEvolver(parent_a)
+    child = evolver_a.propose_child(
+        make_policy(),
+        window_id="window-1",
+        sequence=1,
+    )
+    descriptor = make_descriptor()
+    receipts_a = validate_policy(child, parent=parent_a, window=descriptor)
+    receipts_b = validate_policy(child, parent=parent_b, window=descriptor)
+
+    assert receipts_a[0].parent_policy_hash == parent_a.policy_hash
+    assert receipts_b[0].parent_policy_hash == parent_b.policy_hash
+    assert receipts_a[0].receipt_hash != receipts_b[0].receipt_hash
+    assert receipts_b[-1].stage is PolicyValidationStage.STATIC
+    assert receipts_b[-1].verdict is PolicyValidationVerdict.FAILED
+
+    evolver_b = SearchPolicyEvolver(parent_b)
+    rejected = evolver_b.consider(child, window=descriptor, sequence=1)
+    assert rejected.outcome is StrategyHistoryOutcome.REJECTED_STATIC
+    assert evolver_b.current == parent_b
+    assert evolver_b.activation_receipts == ()
+
+    activated = evolver_a.consider(child, window=descriptor, sequence=1)
+    assert activated.outcome is StrategyHistoryOutcome.ACTIVATED
+    assert (
+        evolver_a.activation_receipts[0].parent_policy_hash
+        == parent_a.policy_hash
+    )

@@ -28,7 +28,7 @@ from __future__ import annotations
 import math
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from metaharness.context.models import SHA256_PATTERN, FrozenModel
 from metaharness.discovery.models import (
@@ -86,8 +86,9 @@ class SearchDecisionReceipt(FrozenModel):
     lineage/candidate (or ``None`` for a fresh explorer), the role, variation
     class, briefing template, the width/depth/concurrency/budget allocated,
     the alternatives actually considered with their selector scores, the
-    bounded expected information gain, and a human-readable reason. It carries
-    no approval or authority field of any kind.
+    bounded expected information gain, a human-readable reason, and the
+    ``assignment_hash`` of the paired ``DiscoveryAssignment`` (F4 binding). It
+    carries no approval or authority field of any kind.
     """
 
     schema_version: Literal[1] = 1
@@ -95,6 +96,10 @@ class SearchDecisionReceipt(FrozenModel):
     sequence: int = Field(ge=0)
     descriptor_hash: str = Field(pattern=SHA256_PATTERN)
     policy_hash: str = Field(pattern=SHA256_PATTERN)
+    # F4: binds the receipt to its paired DiscoveryAssignment so a receipt
+    # cannot be re-paired onto a foreign assignment (foreign campaign, foreign
+    # parent, foreign role, foreign sequence). Verified on ScheduledSpawn.
+    assignment_hash: str = Field(pattern=SHA256_PATTERN)
     parent_lineage_id: str | None = Field(default=None, min_length=1)
     parent_candidate_id: str | None = Field(default=None, min_length=1)
     role: DiscoveryRole
@@ -147,17 +152,60 @@ class ScheduledSpawn(FrozenModel):
 
     ``assignment`` is a fully self-hashed ``DiscoveryAssignment`` ready for
     ``CampaignSupervisor.submit()``; ``receipt`` is the honest decision receipt
-    that explains the assignment's parent/role/variation/budget/briefing.
+    that explains the assignment's parent/role/variation/budget/briefing. The
+    after-validator (F4) binds them: the receipt's assignment_hash, role,
+    parent lineage/candidate, campaign, and sequence must all match the
+    paired assignment, and an explorer assignment may not carry a parent.
     """
 
     schema_version: Literal[1] = 1
     assignment: DiscoveryAssignment
     receipt: SearchDecisionReceipt
 
+    @model_validator(mode="after")
+    def _validate_receipt_assignment_binding(self) -> "ScheduledSpawn":
+        a = self.assignment
+        r = self.receipt
+        if r.assignment_hash != a.assignment_hash:
+            raise ValueError(
+                "receipt.assignment_hash must match assignment.assignment_hash"
+            )
+        if r.role != a.role:
+            raise ValueError("receipt.role must match assignment.role")
+        if r.parent_lineage_id != a.parent_lineage_id:
+            raise ValueError(
+                "receipt.parent_lineage_id must match assignment.parent_lineage_id"
+            )
+        # F4 maps the receipt's parent candidate to the assignment's parent
+        # attempt (the scheduler populates assignment.parent_attempt_id with
+        # the chosen parent's candidate_id, mirroring the receipt's
+        # parent_candidate_id).
+        if r.parent_candidate_id != a.parent_attempt_id:
+            raise ValueError(
+                "receipt.parent_candidate_id must match assignment.parent_attempt_id"
+            )
+        if r.campaign_id != a.campaign_id:
+            raise ValueError("receipt.campaign_id must match assignment.campaign_id")
+        if r.sequence != a.sequence:
+            raise ValueError("receipt.sequence must match assignment.sequence")
+        if r.role is DiscoveryRole.EXPLORER and a.parent_lineage_id is not None:
+            raise ValueError(
+                "an explorer assignment must not carry a parent_lineage_id"
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
-# Selector helpers (mirror policy.py's _select_parent_ids ordering,
-# but emit scored alternatives rather than bare ids)
+# Selector helpers — deterministic, scored alternative emission.
+#
+# These helpers order and score candidates for the *emission* path. They are
+# NOT a mirror of policy.py's _select_parent_ids: ELITE here tier-sorts (so the
+# frontier-tier candidate ranks first), and distinct-lineage dedup is always by
+# lineage_id regardless of selector. The policy.py SIMULATION stage is a coarse
+# pre-projection over the descriptor's *historical* concentration; THIS
+# emission path (with _enforce_emitted_diversity_floor below) is the
+# authoritative diversity-floor enforcement on what the scheduler actually
+# emits.
 # ---------------------------------------------------------------------------
 
 _TIER_PRIORITY: dict[str, float] = {
@@ -177,7 +225,14 @@ def _tier_priority(tier: str) -> float:
 def _selector_sort_key(
     node: ApproachFingerprint, selector: ParentSelector
 ) -> tuple[object, ...]:
-    """Deterministic ordering key per selector, mirroring policy.py semantics."""
+    """Deterministic ordering key per selector for *emission* ranking.
+
+    ELITE tier-sorts (frontier first); DIVERSE orders by structure_signature;
+    UNDEREXPLORED and UNCERTAIN order by lineage_id; SCORE_TIER by score_tier;
+    PARETO (and any future closed-enum member) orders by candidate_id. All ties
+    break by candidate_id. This is an emission-time ranking, not a mirror of
+    policy.py's _select_parent_ids.
+    """
 
     if selector is ParentSelector.ELITE:
         return (-_tier_priority(node.score_tier), node.candidate_id)
@@ -275,7 +330,7 @@ class PopulationScheduler:
         # fail closed here rather than embed a stale binding downstream.
         try:
             policy = SearchPolicySnapshot.model_validate(policy.model_dump(mode="json"))
-        except Exception as exc:  # pragma: no cover - re-raise path
+        except (ValidationError, ValueError) as exc:
             raise SchedulerError(
                 f"policy snapshot failed self-hash revalidation: {exc}"
             ) from exc
@@ -283,7 +338,7 @@ class PopulationScheduler:
             campaign_budgets = DiscoveryBudgets.model_validate(
                 campaign_budgets.model_dump(mode="json")
             )
-        except Exception as exc:  # pragma: no cover - re-raise path
+        except (ValidationError, ValueError) as exc:
             raise SchedulerError(
                 f"campaign budgets failed self-hash revalidation: {exc}"
             ) from exc
@@ -306,6 +361,21 @@ class PopulationScheduler:
         """Plan one bounded decision batch; deterministic in all inputs."""
         if sequence < 0:
             raise SchedulerError("sequence must be non-negative")
+
+        # F5: round-trip re-validate the descriptor from its own JSON dump so
+        # a stale in-process hash (model_copy tampering) fails closed before
+        # use. A self-hashed descriptor proves integrity only when the hash
+        # matches the current field values; the receipt binds the verified
+        # descriptor_hash, so a tampered descriptor must fail here.
+        try:
+            descriptor = PopulationDescriptor.model_validate(
+                descriptor.model_dump(mode="json")
+            )
+        except (ValidationError, ValueError) as exc:
+            raise SchedulerError(
+                f"population descriptor failed self-hash revalidation: {exc}"
+            ) from exc
+
         policy = self._policy
         if policy.campaign_id != descriptor.campaign_id:
             raise SchedulerError(
@@ -325,23 +395,26 @@ class PopulationScheduler:
                 "without over-allocating"
             )
 
-        # width / concurrency respect DSL maxima, the campaign budget, and the
-        # descriptor's remaining attempts budget — never over-allocate.
+        # width / concurrency respect DSL maxima, the campaign budget, the
+        # policy's own stop-rule attempt cap (F2), and the descriptor's
+        # remaining attempts budget — never over-allocate.
         width = min(
             dsl.max_width,
             dsl.max_concurrency,
             self._budgets.max_concurrency,
             remaining_attempts,
+            dsl.stop_rules.max_attempts,
         )
         if width < 1:
             raise SchedulerError("scheduler width is non-positive after budget caps")
 
         concurrency = min(dsl.max_concurrency, self._budgets.max_concurrency, width)
 
-        # Diversity-floor enforcement: when the descriptor's parent-selection
-        # concentration exceeds 1 - diversity_floor (the policy.py simulation
-        # bound), force non-elite UNDEREXPLORED optimizer parents so the
-        # scheduler cannot silently collapse onto the current leader.
+        # Diversity-floor enforcement (descriptor historical concentration):
+        # when concentration exceeds 1 - diversity_floor, force non-elite
+        # UNDEREXPLORED optimizer parents so the scheduler cannot silently
+        # collapse onto the current leader. _enforce_emitted_diversity_floor
+        # below additionally enforces the floor on the *emitted* batch (F3).
         maximum_concentration = 1.0 - dsl.diversity_floor
         concentrated = descriptor.parent_selection_concentration > (
             maximum_concentration + 1e-12
@@ -397,6 +470,33 @@ class PopulationScheduler:
         explorer_count += degraded_to_explorer
         optimizer_count = len(optimizer_parents)
 
+        # F1: the baseline reseed occupies a slot INSIDE width. Consume one
+        # explorer slot if any; otherwise degrade the lowest-ranked optimizer
+        # slot to the reseed. Total spawns never exceed width.
+        reseed_emitted = False
+        if reseed_due:
+            if explorer_count > 0:
+                explorer_count -= 1
+            elif optimizer_count > 0:
+                optimizer_count -= 1
+                if optimizer_parents:
+                    optimizer_parents.pop()
+            reseed_emitted = True
+
+        # F3: enforce the diversity floor on the EMITTED batch. While the batch
+        # parent concentration (max spawns-per-single-parent-lineage / total
+        # spawns in the batch) exceeds (1 - diversity_floor) + 1e-12, degrade
+        # the lowest-ranked surplus optimizer parent to a fresh explorer.
+        # Mutates optimizer_parents in place; returns the updated explorer
+        # count. Total emitted spawns stay equal to width (each degraded
+        # optimizer becomes an explorer — never removed, never over-allocated).
+        explorer_count = self._enforce_emitted_diversity_floor(
+            optimizer_parents,
+            explorer_count=explorer_count,
+            reseed_emitted=reseed_emitted,
+            diversity_floor=dsl.diversity_floor,
+        )
+
         # The highest-weight variation class heads every spawn (deterministic;
         # ties broken by class value).
         variation_class = max(
@@ -413,7 +513,7 @@ class PopulationScheduler:
         spawn_index = 0
 
         # 1) baseline reseed (if due) — a fresh explorer flagged as the reseed.
-        if reseed_due:
+        if reseed_emitted:
             spawns.append(
                 self._build_spawn(
                     role=DiscoveryRole.EXPLORER,
@@ -438,7 +538,6 @@ class PopulationScheduler:
                 )
             )
             spawn_index += 1
-            explorer_count -= 1
 
         # 2) fresh explorers (baseline-rooted, no parent lineage).
         for _ in range(explorer_count):
@@ -500,9 +599,67 @@ class PopulationScheduler:
             )
             spawn_index += 1
 
+        # F1 safety guard: total spawns must never exceed width. This is an
+        # invariant of the accounting above; the guard survives `python -O`.
+        if len(spawns) > width:
+            raise SchedulerError(
+                f"scheduler emitted {len(spawns)} spawns for a width-{width} batch "
+                "(over-allocation invariant violated)"
+            )
         return tuple(spawns)
 
     # -- internals ----------------------------------------------------------
+
+    @staticmethod
+    def _enforce_emitted_diversity_floor(
+        optimizer_parents: list[ApproachFingerprint],
+        *,
+        explorer_count: int,
+        reseed_emitted: bool,
+        diversity_floor: float,
+    ) -> int:
+        """F3: degrade lowest-ranked surplus optimizers to explorers until the
+        emitted batch's parent concentration respects the diversity floor.
+
+        ``optimizer_parents`` is the selector-ordered (best-first) list of
+        distinct-lineage optimizer parents still scheduled; this method pops
+        surplus entries from it and returns the updated ``explorer_count``.
+        The total emitted-spawn count (reseed + explorers + optimizers) is
+        unchanged: each degraded optimizer becomes a fresh explorer.
+        """
+        if not optimizer_parents:
+            return explorer_count
+        maximum_concentration = 1.0 - diversity_floor
+        while optimizer_parents:
+            total = (
+                explorer_count + len(optimizer_parents) + (1 if reseed_emitted else 0)
+            )
+            if total <= 0:
+                break
+            counts: dict[str, int] = {}
+            for parent in optimizer_parents:
+                counts[parent.lineage_id] = counts.get(parent.lineage_id, 0) + 1
+            max_count = max(counts.values())
+            concentration = max_count / total
+            if concentration <= maximum_concentration + 1e-12:
+                break
+            # The over-concentrated lineage (max count; deterministic tie-break
+            # by lexicographically smallest lineage id).
+            over_lineage = min(
+                lineage for lineage, count in counts.items() if count == max_count
+            )
+            # Degrade the lowest-ranked optimizer on that lineage (last in the
+            # selector-ordered list) to a fresh explorer.
+            degrade_idx: int | None = None
+            for idx in range(len(optimizer_parents) - 1, -1, -1):
+                if optimizer_parents[idx].lineage_id == over_lineage:
+                    degrade_idx = idx
+                    break
+            if degrade_idx is None:
+                break
+            optimizer_parents.pop(degrade_idx)
+            explorer_count += 1
+        return explorer_count
 
     @staticmethod
     def _alternatives_for(
@@ -543,7 +700,13 @@ class PopulationScheduler:
         reason: str,
     ) -> ScheduledSpawn:
         if role is DiscoveryRole.OPTIMIZER:
-            assert parent is not None  # invariant guaranteed by schedule()
+            # F6: an optimizer spawn requires a parent fingerprint. This guard
+            # raises (not `assert`) so it survives `python -O`.
+            if parent is None:
+                raise SchedulerError(
+                    "an optimizer spawn requires a parent fingerprint "
+                    "(invariant violated by schedule())"
+                )
             lineage_id = f"{campaign_id}-lin-{sequence}-{spawn_index}"
             attempt_id = f"{campaign_id}-att-{sequence}-optimizer-{spawn_index}"
             parent_lineage_id = parent.lineage_id
@@ -571,6 +734,7 @@ class PopulationScheduler:
             sequence=sequence,
             descriptor_hash=descriptor_hash,
             policy_hash=policy_hash,
+            assignment_hash=assignment.assignment_hash,
             parent_lineage_id=parent_lineage_id,
             parent_candidate_id=parent_candidate_id,
             role=role,

@@ -39,6 +39,7 @@ from metaharness.discovery.knowledge import (
 )
 from metaharness.discovery.policy import (
     InspirationSelector,
+    ParentSelector,
     PolicyValidationReceipt,
     PolicyValidationStage,
     PolicyValidationVerdict,
@@ -182,7 +183,7 @@ def test_crafted_heartbeat_consolidation_stays_private_untrusted_candidate():
         trigger=HeartbeatTrigger.EVALUATION,
     )
     descriptor = make_policy_descriptor()
-    engine = HeartbeatEngine((action,), hub)
+    engine = HeartbeatEngine((action,), hub, project_id="meta-harness")
     crafted = HeartbeatOutcome(
         action_hash=action.action_hash,
         fired_sequence=7,
@@ -205,7 +206,7 @@ def test_crafted_heartbeat_consolidation_stays_private_untrusted_candidate():
         campaign_id=descriptor.campaign_id,
     )
     artifact, _ = hub.read(
-        "hb-crafted-consolidation-seq7",
+        f"hb-{descriptor.campaign_id}-crafted-consolidation-seq7",
         requester=requester,
     )
 
@@ -309,6 +310,7 @@ def test_activation_proof_rejects_missing_failed_or_foreign_policy_receipts():
 
     failed_static = PolicyValidationReceipt(
         policy_hash=receipts[1].policy_hash,
+        parent_policy_hash=receipts[1].parent_policy_hash,
         stage=PolicyValidationStage.STATIC,
         verdict=PolicyValidationVerdict.FAILED,
         reason="static failed: adversarial stage failure",
@@ -403,7 +405,7 @@ def test_tamper_sweep_over_real_schedule_heartbeat_policy_pipeline():
         trigger=HeartbeatTrigger.PLATEAU,
         improvement_epsilon=0.5,
     )
-    heartbeat_outcome = HeartbeatEngine((action,), hub).evaluate(
+    heartbeat_outcome = HeartbeatEngine((action,), hub, project_id="meta-harness").evaluate(
         descriptor,
         sequence=5,
         last_fired={},
@@ -436,6 +438,102 @@ def test_tamper_sweep_over_real_schedule_heartbeat_policy_pipeline():
         tampered_activation["validation_receipt_hashes"][index] = _BAD_HASH
         with pytest.raises(ValidationError):
             PolicyActivationReceipt.model_validate(tampered_activation)
+
+
+def test_forged_receipt_or_activation_with_mismatched_parent_hash_is_rejected():
+    receipts = make_passed_validation_receipts()
+
+    forged_receipts = tuple(
+        receipt.model_copy(
+            update={"parent_policy_hash": "sha256:" + "f" * 64}
+        )
+        if receipt is receipts[2]
+        else receipt
+        for receipt in receipts
+    )
+    activation_payload = {
+        "policy_hash": receipts[0].policy_hash,
+        "parent_policy_hash": receipts[0].parent_policy_hash,
+        "validation_receipts": forged_receipts,
+        "validation_receipt_hashes": [
+            receipt.receipt_hash for receipt in forged_receipts
+        ],
+        "activated_for_window": "window-1",
+        "activated_sequence": 1,
+        "actor_label": "policy-validation-gate",
+    }
+    with pytest.raises(ValidationError):
+        PolicyActivationReceipt(**activation_payload)
+
+    activation_payload["validation_receipts"] = receipts
+    activation_payload["parent_policy_hash"] = "sha256:" + "f" * 64
+    activation_payload["validation_receipt_hashes"] = [
+        receipt.receipt_hash for receipt in receipts
+    ]
+    with pytest.raises(ValidationError):
+        PolicyActivationReceipt(**activation_payload)
+
+
+def test_baseline_with_positive_diversity_floor_full_pipeline_activates():
+    parent = make_parent()
+    evolver = SearchPolicyEvolver(parent)
+    child = evolver.propose_child(
+        make_policy(
+            parent_selector=ParentSelector.BASELINE,
+            diversity_floor=0.2,
+        ),
+        window_id="window-1",
+        sequence=1,
+    )
+
+    receipts = validate_policy(
+        child,
+        parent=parent,
+        window=make_policy_descriptor(),
+    )
+    assert {receipt.verdict for receipt in receipts} == {
+        PolicyValidationVerdict.PASSED
+    }
+
+    row = evolver.consider(child, window=make_policy_descriptor(), sequence=1)
+
+    assert row.outcome is StrategyHistoryOutcome.ACTIVATED
+    assert evolver.current == child
+    activation = evolver.activation_receipts[0]
+    assert activation.policy_hash == child.policy_hash
+    assert activation.parent_policy_hash == parent.policy_hash
+
+
+def test_tamper_sweep_extends_to_parent_policy_hash_on_evolution_receipts():
+    descriptor = make_policy_descriptor(
+        steps_since_meaningful_improvement=4
+    )
+    root = make_parent()
+    evolver = SearchPolicyEvolver(root)
+    child = evolver.propose_child(
+        make_policy(), window_id="window-1", sequence=1
+    )
+    history_row = evolver.consider(child, window=descriptor, sequence=1)
+    assert history_row.outcome is StrategyHistoryOutcome.ACTIVATED
+    activation = evolver.activation_receipts[0]
+
+    for instance in (history_row, activation):
+        payload = instance.model_dump(mode="json")
+        payload["parent_policy_hash"] = _BAD_HASH
+        with pytest.raises(ValidationError):
+            instance.__class__.model_validate(payload)
+
+    for receipt in activation.validation_receipts:
+        payload = receipt.model_dump(mode="json")
+        payload["parent_policy_hash"] = _BAD_HASH
+        with pytest.raises(ValidationError):
+            PolicyValidationReceipt.model_validate(payload)
+
+    tampered = make_snapshot().model_copy(
+        update={"parent_policy_hash": _BAD_HASH}
+    )
+    with pytest.raises(ValidationError):
+        SearchPolicySnapshot.model_validate(tampered.model_dump(mode="json"))
 
 
 def test_redirect_proposal_cannot_activate_policy_child_without_consider():

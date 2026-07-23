@@ -583,3 +583,195 @@ def test_scheduler_receipt_self_hash_rejects_tampering_and_authority_extras():
             reason="authority extra",
             can_promote=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# META-8 fix-round regressions (F1-F6).
+# ---------------------------------------------------------------------------
+
+
+def test_scheduler_f1_reseed_never_overruns_width_with_optimizer_only():
+    # optimizer_fraction=1.0 + a due reseed at sequence=0 must emit exactly
+    # `width` spawns (the reseed consumes a slot INSIDE width rather than
+    # appending an extra spawn on top of it).
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "explorer_fraction": 0.0,
+            "optimizer_fraction": 1.0,
+            "max_width": 2,
+            "max_concurrency": 2,
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    spawns = scheduler.schedule(make_descriptor(), sequence=0)
+    assert len(spawns) == 2, "reseed must occupy a slot inside width, not add width+1"
+    assert any(s.receipt.reason.startswith("baseline reseed") for s in spawns)
+
+
+def test_scheduler_f2_stop_rules_max_attempts_caps_batch_size():
+    # The policy's own stop_rules.max_attempts must cap the batch even when
+    # max_width / max_concurrency / remaining budget would permit more.
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "max_width": 10,
+            "max_concurrency": 10,
+            "stop_rules": SearchPolicyStopRules(
+                max_attempts=4, max_cost=50.0, stagnation_window=3
+            ),
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    descriptor = make_descriptor(remaining_budget={"attempts": 100.0})
+    spawns = scheduler.schedule(descriptor, sequence=1)
+    assert len(spawns) <= 4
+    assert len(spawns) == 4
+
+
+def _make_diverse_nodes(count: int) -> list:
+    return [
+        ApproachFingerprint(
+            candidate_id=f"c-{i}",
+            lineage_id=f"lin-{i}",
+            approach_descriptor_tokens=["local"],
+            structure_signature=f"sig-{i}",
+            score_tier="frontier",
+        )
+        for i in range(count)
+    ]
+
+
+def _batch_parent_concentration(spawns: tuple[ScheduledSpawn, ...]) -> float:
+    total = len(spawns)
+    if total == 0:
+        return 0.0
+    counts: dict[str, int] = {}
+    for spawn in spawns:
+        lineage = spawn.receipt.parent_lineage_id
+        if lineage is not None:
+            counts[lineage] = counts.get(lineage, 0) + 1
+    max_count = max(counts.values()) if counts else 0
+    return max_count / total
+
+
+def test_scheduler_f3_emitted_batch_respects_diversity_floor():
+    # 10 candidates on distinct lineages, max_concurrency=2, 50/50 fractions,
+    # diversity_floor=0.5 -> emitted batch concentration must be <= 0.5.
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "max_width": 2,
+            "max_concurrency": 2,
+            "diversity_floor": 0.5,
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    descriptor = make_descriptor(
+        candidate_nodes=_make_diverse_nodes(10),
+        parent_selection_concentration=0.5,
+        lineage_depth=1,
+    )
+    spawns = scheduler.schedule(descriptor, sequence=1)
+    assert len(spawns) == 2
+    assert _batch_parent_concentration(spawns) <= 0.5 + 1e-12
+
+
+def test_scheduler_f3_degrades_single_optimizer_under_high_floor():
+    # width=1, optimizer-only: a single optimizer is 100% concentration. With
+    # diversity_floor=0.5 (allowed 0.5), 1/1=1.0 > 0.5 -> the F3 loop degrades
+    # it to a fresh explorer so the emitted batch respects the floor.
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "explorer_fraction": 0.0,
+            "optimizer_fraction": 1.0,
+            "max_width": 1,
+            "max_concurrency": 1,
+            "diversity_floor": 0.5,
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    descriptor = make_descriptor(lineage_depth=1)
+    spawns = scheduler.schedule(descriptor, sequence=1)
+    assert len(spawns) == 1
+    assert spawns[0].receipt.role is DiscoveryRole.EXPLORER
+    assert spawns[0].receipt.parent_lineage_id is None
+    assert _batch_parent_concentration(spawns) == 0.0
+
+
+def test_scheduler_f4_scheduled_spawn_rejects_foreign_campaign_pairing():
+    # A valid receipt re-paired onto a foreign-campaign assignment must be
+    # rejected by the ScheduledSpawn binding validator (F4).
+    snapshot_one = make_sched_snapshot()
+    scheduler_one = PopulationScheduler(
+        snapshot_one, campaign_budgets=make_budgets()
+    )
+    spawn_one = scheduler_one.schedule(make_descriptor(), sequence=1)[0]
+
+    snapshot_two = make_sched_snapshot(campaign_id="campaign-2")
+    scheduler_two = PopulationScheduler(
+        snapshot_two, campaign_budgets=make_budgets()
+    )
+    desc_two = make_descriptor(campaign_id="campaign-2")
+    spawn_two = scheduler_two.schedule(desc_two, sequence=1)[0]
+
+    with pytest.raises(ValidationError):
+        ScheduledSpawn(assignment=spawn_two.assignment, receipt=spawn_one.receipt)
+
+    # Positive control: the scheduler's own spawn passes the binding validator.
+    ScheduledSpawn(
+        assignment=spawn_one.assignment, receipt=spawn_one.receipt
+    )
+
+
+def test_scheduler_f4_receipt_carries_assignment_hash_binding():
+    snapshot = make_sched_snapshot()
+    scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
+    spawn = scheduler.schedule(make_descriptor(), sequence=1)[0]
+    # F4: every receipt binds the paired assignment hash.
+    assert spawn.receipt.assignment_hash == spawn.assignment.assignment_hash
+    assert spawn.receipt.assignment_hash.startswith("sha256:")
+
+
+def test_scheduler_f5_rejects_stale_hash_descriptor_from_model_copy():
+    snapshot = make_sched_snapshot()
+    scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
+    descriptor = make_descriptor()
+    # model_copy bypasses validation, leaving a stale descriptor_hash relative
+    # to the mutated remaining_budget.
+    tampered = descriptor.model_copy(
+        update={"remaining_budget": (("attempts", 1.0),)}
+    )
+    with pytest.raises(SchedulerError):
+        scheduler.schedule(tampered, sequence=1)
+
+
+def test_scheduler_f6_optimizer_build_without_parent_raises_not_assert():
+    # The optimizer-needs-parent guard raises SchedulerError (surviving -O)
+    # rather than a bare `assert`.
+    snapshot = make_sched_snapshot()
+    scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
+    with pytest.raises(SchedulerError):
+        scheduler._build_spawn(
+            role=DiscoveryRole.OPTIMIZER,
+            parent=None,
+            spawn_index=0,
+            sequence=1,
+            campaign_id="campaign-1",
+            descriptor_hash=make_descriptor().descriptor_hash,
+            policy_hash=snapshot.policy_hash,
+            width=1,
+            depth_allocated=1,
+            concurrency=1,
+            budget_allocation=BudgetAllocation(attempts=1, cost=0.0),
+            alternatives=(),
+            variation_class=VariationClass.LOCAL,
+            briefing_template_id="minimal-brief-v1",
+            expected_gain=0.5,
+            reason="optimizer without parent",
+        )

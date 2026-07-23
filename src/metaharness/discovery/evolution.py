@@ -106,6 +106,7 @@ class PolicyActivationReceipt(FrozenModel):
 
     schema_version: Literal[1] = 1
     policy_hash: str = Field(pattern=SHA256_PATTERN)
+    parent_policy_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     validation_receipts: tuple[PolicyValidationReceipt, ...]
     validation_receipt_hashes: tuple[HashString, ...]
     activated_for_window: BoundedIdentifier
@@ -163,6 +164,15 @@ class PolicyActivationReceipt(FrozenModel):
             raise ValueError(
                 "every activation validation receipt must judge policy_hash"
             )
+        if any(
+            receipt.parent_policy_hash != self.parent_policy_hash
+            for receipt in verified_receipts
+        ):
+            raise ValueError(
+                "every activation validation receipt must bind parent_policy_hash"
+            )
+        if self.parent_policy_hash == self.policy_hash:
+            raise ValueError("an activation cannot name its policy as its parent")
 
         receipt_hashes = tuple(
             receipt.receipt_hash for receipt in verified_receipts
@@ -198,8 +208,11 @@ class SearchPolicyEvolver:
             )
         except (AttributeError, ValidationError) as exc:
             raise EvolutionError("root policy failed self-hash validation") from exc
-        if root.parent_policy_id is not None:
-            raise EvolutionError("root policy must not name a parent_policy_id")
+        if (
+            root.parent_policy_id is not None
+            or root.parent_policy_hash is not None
+        ):
+            raise EvolutionError("root policy must not name a parent")
 
         self._current = root
         self._strategy_history: tuple[StrategyHistoryRow, ...] = ()
@@ -353,6 +366,7 @@ class SearchPolicyEvolver:
         return SearchPolicySnapshot(
             policy_id=f"policy-{sequence}-{digest}",
             parent_policy_id=self._current.policy_id,
+            parent_policy_hash=self._current.policy_hash,
             campaign_id=self._current.campaign_id,
             policy=candidate_dsl,
             window_id=window_id,
@@ -383,6 +397,7 @@ class SearchPolicyEvolver:
     def _failed_stage(
         receipts: tuple[PolicyValidationReceipt, ...],
         policy_hash: str,
+        parent_policy_hash: str,
     ) -> tuple[PolicyValidationStage | None, str]:
         expected = tuple(PolicyValidationStage)
         for index, stage in enumerate(expected):
@@ -399,6 +414,8 @@ class SearchPolicyEvolver:
                 return stage, f"{stage.value} rejected: ordered receipt missing"
             if receipt.policy_hash != policy_hash:
                 return stage, f"{stage.value} rejected: receipt policy mismatch"
+            if receipt.parent_policy_hash != parent_policy_hash:
+                return stage, f"{stage.value} rejected: receipt parent mismatch"
             if receipt.verdict is not PolicyValidationVerdict.PASSED:
                 return stage, receipt.reason
         if len(receipts) != len(expected):
@@ -433,7 +450,11 @@ class SearchPolicyEvolver:
         self._validate_sequence(sequence)
         parent = self._current
         receipts = validate_policy(candidate, parent=parent, window=window)
-        failed_stage, reason = self._failed_stage(receipts, candidate.policy_hash)
+        failed_stage, reason = self._failed_stage(
+            receipts,
+            candidate.policy_hash,
+            parent.policy_hash,
+        )
         window_score = self._consideration_window_score(
             parent.policy_hash,
             window,
@@ -456,6 +477,7 @@ class SearchPolicyEvolver:
         try:
             activation = PolicyActivationReceipt(
                 policy_hash=candidate.policy_hash,
+                parent_policy_hash=parent.policy_hash,
                 validation_receipts=receipts,
                 validation_receipt_hashes=tuple(
                     receipt.receipt_hash for receipt in receipts
@@ -493,14 +515,14 @@ class SearchPolicyEvolver:
         self._strategy_history = (*self._strategy_history, row)
         return row
 
-    def _snapshot_by_policy_id(
-        self, policy_id: str
+    def _snapshot_by_policy_hash(
+        self, policy_hash: str
     ) -> SearchPolicySnapshot | None:
         return next(
             (
                 snapshot
                 for snapshot in reversed(self._known_snapshots)
-                if snapshot.policy_id == policy_id
+                if snapshot.policy_hash == policy_hash
             ),
             None,
         )
@@ -508,12 +530,14 @@ class SearchPolicyEvolver:
     def _activated_ancestor_hashes(self) -> set[str]:
         ancestors: set[str] = set()
         cursor = self._current
-        while cursor.parent_policy_id is not None:
-            parent = self._snapshot_by_policy_id(cursor.parent_policy_id)
-            if parent is None:
-                raise EvolutionError("active policy lineage is incomplete")
+        while cursor.parent_policy_hash is not None:
+            parent = self._snapshot_by_policy_hash(cursor.parent_policy_hash)
+            if parent is None or parent.policy_id != cursor.parent_policy_id:
+                raise EvolutionError("active policy hash lineage is incomplete")
             ancestors.add(parent.policy_hash)
             cursor = parent
+        if cursor.parent_policy_id is not None:
+            raise EvolutionError("active policy lacks an exact parent hash binding")
         activated_hashes = {
             row.policy_hash
             for row in self._strategy_history
