@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 81,
+  "revision": 86,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2585,6 +2585,151 @@
         "claim Claude lane",
         "start"
       ]
+    },
+    {
+      "id": "TASK-20260723-017",
+      "title": "compile learned selflearn workflow entries to cross-validated executors",
+      "status": "review",
+      "owner": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+      "paths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/src/selflearn/doctor.py",
+        "selflearn/src/selflearn/__init__.py",
+        "selflearn/tests/test_compilation.py",
+        "selflearn/tests/test_compilation_gate.py",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "priority": 1,
+      "trace": "Linear META-17; charter stages 4-5 (governed learning to reusable procedural knowledge); workflow entry remains the verified spec, executor is a derived artifact; evaluator non-self-approval, bounded authority, reversible lineage, honest termination; H/E/W frozen. CARD RECONSTRUCTED 2026-07-23 after control-root data loss (see evidence episode); definition hash verified byte-identical to the frozen dispatch value.",
+      "evidence": [
+        "Linear:META-17",
+        "Linear:META-13",
+        "github:PR-55",
+        "episode:20260723-111728-meta-17-build-done-pr-55-glm-approved-bu-d4b9"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Claude lane",
+        "start",
+        "submit at 4a8069b"
+      ],
+      "definition": {
+        "sourceRevision": "git:e487dba361ccb382eb9ab4bc29754367289ab39d;Linear:META-17;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-sha256:6824138edc7682e0b81c2fed47851bb1be6ff0f0ca8ed792cf369b5ded30713d;baseline:worktree-venv-224-passed-1-env-skip-pypdf,primary-venv-226-passed",
+        "worktreePath": "/private/tmp/meta-harness-meta-17",
+        "branch": "dev/meta-17-workflow-compilation",
+        "baseCommit": "e487dba361ccb382eb9ab4bc29754367289ab39d",
+        "currentHead": "e487dba361ccb382eb9ab4bc29754367289ab39d",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded claude-lane card for Linear META-17 adding a new selflearn compilation package with six modules: models.py (frozen self-hashed ExecutorSpec/ExecutorCandidate/IndependentTestSuite/CrossValidationReceipt contracts content-hash-bound to the source workflow entry procedure), compiler.py (WorkflowCompiler generating an executable deterministic spine from a published workflow entry: steps to functions, depends_on to control flow, step checks to assertions, approval-type steps to hard stops awaiting human input), testgen.py (WorkflowTestAuthor generating validation tests from the spec alone, never seeing executor bytes, identity enforced distinct from the compiler reusing the evalgen author!=validator mechanism), gate.py (CrossValidationGate running executor against the independent tests in the ExecutionPort sandbox; quarantine-by-default; sandbox pass plus strict-mode approval activates; failure rejects the executor and leaves the spec untouched; every gate decision journaled as a frozen receipt), runtime.py (ExecutorRuntime executing activated executors and emitting TaskOutcome records whose step_ids reference actually-executed steps, feeding the existing learning/marks machinery so failing steps harm the entry precisely), registry.py (hash-bound registry mapping entry content-hash to activated executor with staleness query). Existing-file edits limited to doctor.py (flag executors whose bound hash no longer matches their spec) and __init__.py exports. Tests land only in the three reserved new test files. The workflow entry remains the source of truth; the compiler never scores, approves, or activates its own output; H/E/W frozen; no live metaharness prompt/evaluator/deployment wiring; no changes to contracts.py, store, learning, verification, or retrieval modules.",
+        "stopCondition": "Stop and fail closed on: any edit outside the reserved paths; compiler and test-author sharing identity or the test-author observing executor bytes; an executor becoming runnable without a sandbox pass receipt plus recorded strict-mode approval; any construct letting generated executor code mutate the spec, store, marks, regression baselines, permissions, promotion state, or deployment pointers; generated code carrying network, credential, subprocess, or authority-minting capability beyond the ExecutionPort sandbox; a gate decision lacking a frozen journaled receipt; E/W drift; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "Builder seats (pi/MiniMax-M3 via herdr, bare --no-extensions) write product source and tests but never commit, push, or self-approve. Provider-diverse frozen-diff review (pi/GLM-5.2 via neuralwatt, read-only) precedes submission; the mandatory AGENTS.md gate (Pi/NeuralWatt GLM-5.2 on the frozen base..head diff, findings P0-P3 with file:line evidence) precedes Review. Inside the product, the cross-validation gate is the only activation path: an independently authored test suite (identity distinct from compiler) must pass in the sandbox and strict-mode approval must be recorded; the compiler can never approve, score, or activate its own output. The orchestrator triages every finding, personally inspects the final diff, and a distinct coordinator actor runs integrate and acceptance. Protected evaluator definitions, promotion state, deployment pointers, and E/W mutation remain outside all seats' authority.",
+        "acceptanceCommands": [
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+        ],
+        "nextCheckpoint": "Failing tests first prove: a workflow entry compiles to an executor content-hash-bound to its procedure (spec edit forces regeneration); the test-author never sees executor bytes and compiler/test-author identity collision is rejected; an executor is unrunnable until sandbox tests pass and strict-mode approval is recorded; approval-type steps become hard stops awaiting human input; a runtime run emits TaskOutcome records whose step_ids reference executed steps and feed learning/marks; doctor flags an executor whose spec hash drifted; a tamper sweep over executor and gate receipts rejects every mutation; the full selflearn suite stays at or above the 224-passed+1-env-skip baseline.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ],
+        "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 82,
+          "revisionTo": 83,
+          "at": "2026-07-23T11:29:16.323Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 83,
+          "revisionTo": 84,
+          "at": "2026-07-23T11:29:24.268Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 84,
+          "revisionTo": 85,
+          "at": "2026-07-23T11:29:24.344Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 85,
+          "revisionTo": 86,
+          "at": "2026-07-23T11:29:32.082Z",
+          "evidence": {
+            "branch": "dev/meta-17-workflow-compilation",
+            "head": "4a8069b822b5083ce0548adcebf0dc4649802e74"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+        "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+        "sourceRevision": "git:e487dba361ccb382eb9ab4bc29754367289ab39d;Linear:META-17;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;architecture-sha256:6824138edc7682e0b81c2fed47851bb1be6ff0f0ca8ed792cf369b5ded30713d;baseline:worktree-venv-224-passed-1-env-skip-pypdf,primary-venv-226-passed",
+        "worktreePath": "/private/tmp/meta-harness-meta-17",
+        "branch": "dev/meta-17-workflow-compilation",
+        "baseCommit": "e487dba361ccb382eb9ab4bc29754367289ab39d",
+        "currentHead": "e487dba361ccb382eb9ab4bc29754367289ab39d",
+        "paths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/src/selflearn/doctor.py",
+          "selflearn/src/selflearn/__init__.py",
+          "selflearn/tests/test_compilation.py",
+          "selflearn/tests/test_compilation_gate.py",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded claude-lane card for Linear META-17 adding a new selflearn compilation package with six modules: models.py (frozen self-hashed ExecutorSpec/ExecutorCandidate/IndependentTestSuite/CrossValidationReceipt contracts content-hash-bound to the source workflow entry procedure), compiler.py (WorkflowCompiler generating an executable deterministic spine from a published workflow entry: steps to functions, depends_on to control flow, step checks to assertions, approval-type steps to hard stops awaiting human input), testgen.py (WorkflowTestAuthor generating validation tests from the spec alone, never seeing executor bytes, identity enforced distinct from the compiler reusing the evalgen author!=validator mechanism), gate.py (CrossValidationGate running executor against the independent tests in the ExecutionPort sandbox; quarantine-by-default; sandbox pass plus strict-mode approval activates; failure rejects the executor and leaves the spec untouched; every gate decision journaled as a frozen receipt), runtime.py (ExecutorRuntime executing activated executors and emitting TaskOutcome records whose step_ids reference actually-executed steps, feeding the existing learning/marks machinery so failing steps harm the entry precisely), registry.py (hash-bound registry mapping entry content-hash to activated executor with staleness query). Existing-file edits limited to doctor.py (flag executors whose bound hash no longer matches their spec) and __init__.py exports. Tests land only in the three reserved new test files. The workflow entry remains the source of truth; the compiler never scores, approves, or activates its own output; H/E/W frozen; no live metaharness prompt/evaluator/deployment wiring; no changes to contracts.py, store, learning, verification, or retrieval modules.",
+        "acceptanceCommands": [
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+        ],
+        "nextCheckpoint": "Failing tests first prove: a workflow entry compiles to an executor content-hash-bound to its procedure (spec edit forces regeneration); the test-author never sees executor bytes and compiler/test-author identity collision is rejected; an executor is unrunnable until sandbox tests pass and strict-mode approval is recorded; approval-type steps become hard stops awaiting human input; a runtime run emits TaskOutcome records whose step_ids reference executed steps and feed learning/marks; doctor flags an executor whose spec hash drifted; a tamper sweep over executor and gate receipts rejects every mutation; the full selflearn suite stays at or above the 224-passed+1-env-skip baseline.",
+        "revisionFrom": 83,
+        "revisionTo": 84,
+        "at": "2026-07-23T11:29:24.268Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-17-workflow-compilation",
+        "head": "4a8069b822b5083ce0548adcebf0dc4649802e74",
+        "revisionFrom": 85,
+        "revisionTo": 86,
+        "at": "2026-07-23T11:29:32.082Z"
+      }
     }
   ]
 }
