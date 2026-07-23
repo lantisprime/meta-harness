@@ -1,0 +1,96 @@
+I now have everything I need. Both final confirmations hold: (a) no test constructs an `is_root=True` counterexample, so the root validator branch is untested by negation; (b) no consumer dereferences a `descriptor_hash` into a descriptor lookup — every usage either binds it from a real descriptor object or is a field/hash/structural-binding, so the zero sentinel cannot masquerade today. Compiling the review.
+
+---
+
+# META-8 Independent Frozen-Diff Review — head `3c14884`
+
+**Reviewer:** Pi / GLM-5.2 (read-only). **Base:** `439321b`. **Head:** `3c14884`. **Branch:** `dev/meta-8-scheduling-heartbeats-policy`.
+
+## Evidence caveats (transparency on what I could and could not do)
+
+- I could **not** execute `git diff`/`git show` (the harness blocks git), nor run `pytest` or any `python` (blocked as "destructive"). I therefore could **not** independently reproduce the "140 passed / 1837 passed" claims or the line-level diff for `heartbeat.py`/`scheduler.py`. This review is a **static** analysis of the checked-out worktree at `3c14884` plus the context artifacts.
+- What I *could* verify statically: full source of `evolution.py`, `policy.py`, `models.py`, `population.py`, `scheduler.py`, `heartbeat.py`; all consumers of `is_root`/`root_activation`/`activation_receipts`/`validation_receipt_hashes`/`descriptor_hash` across `src/**/*.py` and `tests/**/*.py`; the relevant new tests in `tests/adversarial/test_discovery_policy_boundaries.py` and `tests/test_discovery_policy.py`.
+- `is_root`/`root_activation` appear **only** in `src/metaharness/discovery/evolution.py` and the two discovery test files. No coupling exists in `heartbeat.py` or `scheduler.py` (grep-confirmed). H-only scope (E/W untouched) holds on this evidence.
+
+---
+
+## 1. Verdict
+
+**APPROVE-WITH-MOD.**
+
+No P0 and no P1. The synthetic root bootstrap does **not** create any path by which a non-root policy gains unearned activation authority (the per-receipt `policy_hash` + `parent_policy_hash` binding blocks injection — traced below). The two P2s are non-blocking honesty/marking observations on the genesis receipts; they do not bar integration under the AGENTS.md gate (P0/P1 only). APPROVE-WITH-MOD (not clean APPROVE) to flag the P2s for tracking, consistent with the gate's "track non-blocking design risks" semantics.
+
+---
+
+## 2. Findings (P0 → P3)
+
+### P0 — none.
+
+### P1 — none.
+
+### P2
+
+**P2-1. Synthetic PASSED validation receipts bypass `validate_policy` for the genesis; honest-but-implicent-marking.**
+`src/metaharness/discovery/evolution.py:271-322` (`_build_root_activation`) mints four genuine, self-hashed `PolicyValidationReceipt(verdict=PASSED)` for SCHEMA/STATIC/SIMULATION/SHADOW **without** invoking `validate_policy` — i.e., no schema round-trip, no static lineage check, and no SIMULATION concentration/budget/candidate-node check runs (`policy.py:426-568`, especially `_validate_simulation` at `policy.py:438-567`, would legitimately FAIL the genesis because `window is None` → "a PopulationDescriptor window is required"). The genesis genuinely has no population window, so synthetic PASSED is the *only* way to receipt it — that part is justified.
+
+Why this is only P2 and not P1: I traced the injection vectors the brief asked me to be adversarial about, and **none are realizable**:
+- A non-root activation constructed in `consider()` (`evolution.py:567-580`) builds its `validation_receipt_hashes` from the receipts returned by `validate_policy(candidate, parent=parent, window=window)`, which bind `policy_hash=candidate.policy_hash` and `parent_policy_hash=parent.policy_hash` (non-None).
+- `PolicyActivationReceipt._validate_stage_receipts` (`evolution.py:148-204`) requires **every** receipt's `policy_hash == self.policy_hash` (`evolution.py:166-170`) and **every** receipt's `parent_policy_hash == self.parent_policy_hash` (`evolution.py:172-176`). The bootstrap receipts carry `policy_hash=root.policy_hash` and `parent_policy_hash=None`; a non-root child has a different `policy_hash` and a non-None parent. Reuse is therefore structurally impossible — both checks fail simultaneously.
+- `validation_receipt_hashes` is not consumed anywhere without its matching `validation_receipts` (the validator at `evolution.py:195-199` forces them to correspond exactly), so hash-only replay is impossible.
+- The root activation cannot be replayed for a *different* root either — it binds `root.policy_hash`, and `is_root=True` requires `parent_policy_hash is None` **and** `activated_sequence == 0` (`evolution.py:178-186`), so no second/root-at-a-later-sequence forgery is constructible.
+- Critically, the root was **already** active by construction before this change (`__init__` sets `self._current = root`, `evolution.py:233`); the bootstrap receipt does not *grant* new authority, it receiptises existing implicit genesis state. "Activation" here is H-plane controller state ("current policy pointer"), explicitly **not** evaluator/release/deployment authority per the `SearchPolicyEvolver` docstring (`evolution.py:210-216`).
+
+Failure scenario (non-blocking): a **future** consumer that enumerates an evolver's validation receipts and equates "a `PolicyValidationReceipt` with `verdict=PASSED`" with "validation actually ran" would over-credit the genesis as validated. No current consumer does this (I confirmed no production code walks `activation_receipts`; see P3-3). Mitigations already present: `is_root=True`, `parent_policy_hash=None`, `activated_sequence==0`, reason strings containing "root policy bootstrap", and the SHADOW reason "grants no activation authority". Recommend: make the synthetic nature structural rather than textual — e.g. a distinct genesis `actor_label` (see P3-4) and/or a named/marked sentinel so the receipts cannot be mistaken for earned ones by a naive consumer.
+
+**P2-2. The zero descriptor sentinel is byte-identical to the internal `_HASH_PLACEHOLDER` and is pinned by no test.**
+`evolution.py:292` `zero_descriptor = "sha256:" + "0" * 64` is assigned as `descriptor_hash` on the SIMULATION (`evolution.py:293`) and SHADOW (`evolution.py:303`) bootstrap receipts. `src/metaharness/discovery/models.py:24` defines `_HASH_PLACEHOLDER = "sha256:" + "0" * 64` — the **same string**, used transiently by `_self_verifying` (`models.py:33-41`) as the placeholder it writes into a hash field before computing the real `content_hash(...)` excluding that field.
+
+Focus-2 assessment: a real `PopulationDescriptor.descriptor_hash` is `content_hash(model_dump(exclude={"descriptor_hash"}))` (`population.py:118-128`); producing all-zeros is a SHA-256 preimage and computationally infeasible, so it cannot **collide** with a real descriptor hash. No consumer **dereferences** a `descriptor_hash` into a descriptor object — every usage either copies `descriptor.descriptor_hash` from a real descriptor (scheduler/heartbeat/policy) or is a field/hash/structural-binding (the SIMULATION==SHADOW check at `evolution.py:200-203`); I confirmed via grep that there is no `by_hash`/`lookup`/`find_descriptor` path. So the sentinel cannot **masquerade** as a validated population today. 
+
+Why P2 not P3: the shared sentinel string is fragile coupling (two independent definitions of the same magic value with no link, and `_HASH_PLACEHOLDER` is private to `models.py`), and **no test pins** the bootstrap's `descriptor_hash` value — `test_root_activation_is_the_only_is_root_receipt_and_consider_emits_non_root` (`tests/adversarial/test_discovery_policy_boundaries.py:544`) does not assert the descriptor hash. Failure scenario (non-blocking): if `_HASH_PLACEHOLDER` semantics ever change, the bootstrap's "zero" sentinel would silently diverge with no test catching it. Recommend: define one named constant (e.g. `_ZERO_DESCRIPTOR_HASH`) in `population.py`/`policy.py`, reference it from `_build_root_activation`, and add a test pinning the bootstrap receipts' `descriptor_hash` to it (plus optionally assert a real `PopulationDescriptor` never produces it).
+
+### P3
+
+**P3-1. The `is_root=True` validator branch has no counterexample test (would not fail if removed).**
+`evolution.py:178-186` enforces `is_root=True ⇒ parent_policy_hash is None and activated_sequence == 0`. The `is_root=False` branch **is** genuinely counterexample-tested by `test_forged_non_root_activation_with_no_parent_is_rejected` (`tests/adversarial/test_discovery_policy_boundaries.py:477-542`): its first sub-case builds an `is_root=False` activation with `parent_policy_hash=None` and all-parent-None receipts and expects `ValidationError` — this sub-case would **fail** if the `is_root=False → non-None parent` invariant were removed (every other check passes: receipts' parent `None` == self parent `None`, `parent != policy`, etc.). So the brief's first question is answered YES. But a grep for `is_root=True` / `is_root = True` across `tests/**/*.py` returned **no matches**: `_build_root_activation` is the sole `is_root=True` producer and always sets the correct values, so **removing the `is_root=True` validator would not fail any test.** Recommend a counterexample test (e.g. `PolicyActivationReceipt(is_root=True, parent_policy_hash=<non-None>, …)` and `is_root=True, activated_sequence=1` → `ValidationError`).
+
+**P3-2. No single end-to-end "inject the bootstrap receipts into a non-root activation" test (coverage is by-analogy).**
+The bootstrap-injection vector is blocked, and existing tests would fail if it were accepted — `test_activation_proof_rejects_missing_failed_or_foreign_policy_receipts` (`tests/adversarial/test_discovery_policy_boundaries.py:~322-352`) rejects a foreign `policy_hash`, and the parent-`None` case above rejects the bootstrap's `parent_policy_hash=None`. So the brief's second question is answered YES (existing tests would fail). But there is **no** test that literally pulls `evolver.root_activation.validation_receipts` and attempts a non-root `PolicyActivationReceipt` for a different child, asserting rejection. Recommend a direct injection test for defense-in-depth (it would also pin the zero-descriptor + root-policy-hash binding together).
+
+**P3-3. `root_activation` is deliberately kept out of `activation_receipts`; boundary is documented but the design rationale is test-shaped.**
+`evolution.py:240-268` exposes the root via a separate `root_activation` property, with the comment that this keeps `consider()`'s appended `activation_receipts` sequence "unchanged for already-existing tests". The boundary **is** documented (`root_activation` docstring: "non-root consider() activations only"). I confirmed the specific risk the brief asks about — "any consumer, receipt chain, rollback path, or doctor/audit sweep that walks `activation_receipts` and will now silently miss the root" — is **NO**: `rollback` uses `_strategy_history` + `_known_snapshots` (`evolution.py:617-660`), never `_activation_receipts`; a grep across `src/**/*.py` shows **no production consumer** of `activation_receipts` or `root_activation` outside the evolver itself; and the root was **never** in `activation_receipts` even before `3c14884` (pre-existing), so this is not a regression. Residual concern: a **future** consumer assuming `activation_receipts` is the complete activation lineage would miss the genesis. Recommend: either prepend the root as index 0 (and update the tests, which would be the more honest audit trail) or add a `full_activation_lineage`/`all_activations` accessor plus an invariant test, so the boundary is enforced rather than merely documented.
+
+**P3-4. `actor_label="policy-validation-gate"` on a genesis receipt that bypassed the validation gate is mildly misleading.**
+`evolution.py:317-318` sets `actor_label="policy-validation-gate"` on the root activation — identical to `consider()`'s `self._ACTOR_LABEL` (`evolution.py:213`). The validation gate did **not** run for the root. An auditor correlating `actor_label` with "the gate ran" would be misled for the genesis; this slightly undercuts the `is_root`/"bootstrap" honesty marking. Recommend a distinct genesis label (e.g. `"policy-genesis-bootstrap"`) bound into `activation_hash`.
+
+**P3-5. Could not line-diff `heartbeat.py`/`scheduler.py` (tooling limitation, not a code defect).** Git and `python`/`pytest` were blocked by the harness, so I could not inspect the heartbeat/scheduler line-level delta or reproduce the pass counts. Static evidence: `is_root`/`root_activation` appear nowhere in `heartbeat.py` or `scheduler.py` (grep-confirmed), and both files I read are internally consistent with the `439321b` F1–F10 fixes (cumulative cost budget, `remaining_window`, F4 receipt↔assignment binding, round-trip revalidation, `_enforce_emitted_diversity_floor`). No new authority surface is introduced there.
+
+---
+
+## 3. Charter-invariant checks
+
+- **Evaluator non-self-approval — HOLDS.** No component self-approves its own *generated* candidate. The bootstrap receiptises the operator-provided **genesis** (which has no population window to simulate against, so `validate_policy` could not honestly run SIMULATION on it). The genesis does not gain evaluator, release, or deployment authority (those fields are absent from `PolicyActivationReceipt`/`FrozenModel` with `extra='forbid'`); "activation" here is H-plane controller state only. The synthetic PASSED receipts are honestly marked (`is_root`, "bootstrap" reasons, "grants no activation authority") and cannot be replayed/injected into a non-root activation (P2-1 trace). Residual honesty marking tracked as P2-1/P3-4.
+- **Bounded authority — HOLDS.** `consider()` emits only `is_root=False` receipts (`evolution.py:575`); the root bootstrap does not widen scope, activate memory/train weights, or grant promotion/deployment. Heartbeats remain proposal-only.
+- **Full-fidelity evidence and reversible lineage — HOLDS (with P3-3 caveat).** Receipts are self-hashing and append-only; `is_root` is a regular field bound into `activation_hash` via `_self_verifying(..., exclude={"activation_hash"})` (`models.py:33-41`; `evolution.py:115`). `validation_receipt_hashes` is forced to match the receipts exactly (`evolution.py:195-199`); SIMULATION/SHADOW bind the same descriptor (`evolution.py:200-203`). No receipt binds fewer fields than it claims. Rollback lineage is unchanged and cannot target the root (no ACTIVATED `StrategyHistoryRow` exists for the genesis; `root_activation` is a `PolicyActivationReceipt`, not a history row) — see focus-4 below. The `activation_receipts`/`root_activation` split is documented (P3-3).
+- **Honest termination / fail-closed — HOLDS.** No silent swallowing introduced; consider()/rollback()/construction all raise on invariant breach; the genesis path is explicit, not a silent default.
+- **Determinism — HOLDS.** `_build_root_activation` is a pure static method with no time/randomness/uuid; only ordered tuples and fixed-string reasons. Identical root ⇒ identical receipts ⇒ identical `activation_hash`. No set/dict-ordering enters the new code.
+- **H-only change (E/W frozen) — HOLDS (on static evidence).** `is_root`/`root_activation` are confined to `discovery/evolution.py` + the two discovery test files; no `E`/`W` edit; no heartbeat/scheduler coupling (P3-5 caveat re the unseen line-diff).
+
+---
+
+## 4. Regression vs `439321b`
+
+**`3c14884` regresses nothing that was fixed at `439321b`.** Specifically:
+
+- The six Codex P1 fixes from the `3290a35` round (simulation↔scheduler concentration, cumulative `max_attempts`, baseline-reseed slot accounting, F4 receipt↔assignment binding, round-trip self-hash revalidation, cumulative heartbeat cost budget) and the GLM P2/P3 fixes are all still present and untouched: `_enforce_emitted_diversity_floor` (`scheduler.py`), `remaining_window` (`scheduler.py`), F4 `ScheduledSpawn._validate_receipt_assignment_binding` (`scheduler.py`), `_self_verifying` round-trips in `scheduler`/`heartbeat`/`evolution`, and the cumulative `remaining_cost_budget` decrement (`heartbeat.py`) are unchanged by the `is_root`/`root_activation` addition.
+- The `439321b` re-review's non-blocking P2 (the F3 batch-concentration denominator) is unchanged — `_enforce_emitted_diversity_floor` still computes `max_count / (explorer_count + len(optimizer_parents) + reseed)`; not regressed, not addressed (as expected — it was a tracked, non-blocking observation).
+- The `439321b` re-review's non-blocking P3 (snapshot self-parent-by-**hash** not caught at snapshot level, caught at activation) is unchanged: `SearchPolicySnapshot._validate_lineage` (`policy.py:296-301`) still checks `parent_policy_id == policy_id` by **id** only; `PolicyActivationReceipt._validate_stage_receipts` (`evolution.py:177`) still catches `parent_policy_hash == policy_hash` at activation. Not regressed.
+- The bootstrap is **additive only**: `__init__` still sets `self._current = root` and `_known_snapshots = (root,)` exactly as before; `_build_root_activation` adds a self-hashed `is_root=True` receipt exposed via a new property without altering `consider()`, `rollback()`, or any scheduler/heartbeat path. No new rollback-to-root path is created (focus 4 answered NO).
+
+The only behaviours `3c14884` adds are the `is_root` field, the `root_activation` property, and the genesis bootstrap — all confined to `evolution.py` + tests, all honestly marked, none opening an injection/authority path.
+
+---
+
+**Disposition request to the implementing seat:** please classify P2-1, P2-2, and P3-1..P3-4 as ACCEPT / ACCEPT-WITH-MOD / REJECT / DEFER / NEEDS-EVIDENCE. My recommendation: ACCEPT-WITH-MOD for P2-2 (name+pin the sentinel) and P3-1 (add the `is_root=True` counterexample test); ACCEPT for P3-2 (direct injection test) and P3-4 (distinct genesis actor_label); P2-1 ACCEPT or DEFER (the marking mitigations already present may suffice, but a structural synthetic-marker is preferable). P3-3 is a design judgment for the coordinator. None of these block integration under the AGENTS.md gate.
+
+Note: I was unable to preserve this review verbatim to `.review-store/` myself (the harness denied write/git access); the coordinator should save this output to `.review-store/meta8-glm-5.2-review-3c14884.txt` (or the already-present `meta8-glm-gate-review-3c14884.txt` if that is the designated artifact) and record model=GLM-5.2, frozen head=`3c14884`, base=`439321b`, verdict=APPROVE-WITH-MOD, and these dispositions on the Linear card.

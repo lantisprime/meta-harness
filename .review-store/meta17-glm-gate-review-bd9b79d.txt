@@ -1,0 +1,94 @@
+I have everything I need. Both `bash` and `git` are denied (as the brief warned), so I corroborated against the inlined diff and the surrounding code via `read`/`grep`/`find`/`ls`. Here is my independent frozen-diff review.
+
+---
+
+# META-17 Independent Frozen-Diff Review — head `bd9b79d`, base `cc7e7c5`
+
+## Verdict: **APPROVE-WITH-MOD**
+
+The commit's three intended changes (kind-taxonomy honesty, `UnicodeDecodeError` catch, test predicate) are correct, well-tested, and consumer-safe. **However, the restructure reintroduces the original `4a8069b` P1 class — a raw `OSError` escaping `run()` unjournalled — for the `exists()` call specifically**, which the brief flagged and which `cc7e7c5` had covered. This is a blocking P1-conditional that needs a one-line defensive guard before integration.
+
+---
+
+## Findings
+
+### P1 — `exists()` sits outside every guard; a re-raised `OSError` escapes `run()` raw and unjournalled (regression of the `cc7e7c5` fix)
+**Evidence:** `selflearn/src/selflearn/compilation/runtime.py:215-216`
+```python
+        if not exec_path_resolved.exists():
+            raise RuntimeCompError(f"Executor source missing: {active.path}")
+```
+This block lives between the resolve guard (ends `runtime.py:206`, `...Cannot validate executor path... from exc`) and the read guard (`runtime.py:222-229`, `try: source = exec_path_resolved.read_text()` / `except (OSError, UnicodeDecodeError)`). It is in **neither** `try`.
+
+**Failure scenario:** `pathlib.Path.exists()` is *not* `os.path.exists()`. Its documented CPython behaviour is to swallow only a small ignored set (`ENOENT, ENOTDIR, EBADF, ELOOP`) and **re-raise** every other `OSError` — notably `EACCES`/`PermissionError`, `EPERM`, `EIO` (this `pathlib` footgun is longstanding and unchanged in modern CPython). So on a contained path whose final component is stat-denied (e.g. a mode-000 file owned by another uid, a `/proc` special node, or a failing-disk `EIO`) — reachable *after* `resolve()` already succeeded, since `resolve(strict=False)` need not stat the tail — `exists()` raises `PermissionError`, which:
+- is **not** caught by the read guard (that guard only wraps `read_text()`);
+- is **not** a `RuntimeCompError`, so it surfaces out of `run()` **raw**;
+- is **not** journalled — full-fidelity + honest-termination breach.
+
+This is the same class of breach that was the `4a8069b` P1, in a different operation. At `cc7e7c5`, `exists()` was *inside* the unified `try … except OSError`, so this `EACCES` was caught and journalled (as `path-escape`, imprecise but journalled+normalized). `bd9b79d` moving it out **regresses** that coverage.
+
+**Note on uncertainty:** I could not run `python` (bash denied) to confirm the exact ignored-set on this interpreter. If the coordinator can demonstrate (file-and-line evidence — e.g. `inspect.getsource(pathlib.Path.exists)` + the `_IGNORED_ERRORS` tuple on the run interpreter) that `exists()` swallows `EACCES` here, this finding downgrades to P2 (the `RuntimeCompError("Executor source missing")` at `:216` is still emitted **unjournalled**, pre-existing). Per the charter's "fail closed on any ambiguity," absent that evidence this is P1.
+
+**Mandatory mod (one of):**
+1. Wrap the stat so any `OSError` it raises is journalled+normalized:
+   ```python
+   try:
+       missing = not exec_path_resolved.exists()
+   except OSError as exc:
+       self._journal_refusal(entry_id, "executor.path-unreadable",
+                            f"cannot stat executor path {active.path!r}: {exc}", now=now)
+       raise RuntimeCompError(f"Cannot read executor path {active.path!r}") from exc
+   if missing:
+       raise RuntimeCompError(f"Executor source missing: {active.path}")
+   ```
+2. Or drop the redundant `exists()` check and let the read guard at `:222-229` handle a missing file (`FileNotFoundError` is an `OSError`, already caught→`path-unreadable`); record the "missing" nuance in the reason string. (Behaviour change: missing→`path-unreadable` rather than "source missing"; arguably more honest taxonomy but out of this commit's stated scope — option 1 is the minimal, in-scope fix.)
+
+Either removes the gap and the doubt.
+
+### P2 — `RuntimeCompError("Executor source missing")` is raised unjournalled (taxonomy hole; pre-existing, not introduced here)
+**Evidence:** `selflearn/src/selflearn/compilation/runtime.py:216`
+A refusal that aborts `run()` but emits **no** `_journal_refusal` and fits neither `executor.path-escape` nor `executor.path-unreadable`. Reachable when the registry points at a contained, resolvable, but genuinely-deleted file (the doctor's `executor.missing-source` scenario). Same behaviour at `cc7e7c5` (where it was inside the `try` but `RuntimeCompError ⊄ OSError`, so still uncaught/unjournalled) — so **not a regression of `bd9b79d`**. Flagging per focus-area 2 ("is the taxonomy complete?"): it isn't, for this one path. Recommended follow-up: journal it (e.g. as `executor.path-unreadable` with reason "source missing", or a dedicated kind) so the taxonomy has no journalled-silent refusal.
+
+### P3 — `read_text()` default encoding is locale-dependent; the new citing test is locale-sensitive
+**Evidence:** `selflearn/src/selflearn/compilation/runtime.py:223` (`source = exec_path_resolved.read_text()`, no `encoding=`); test `selflearn/tests/test_compilation_runtime.py:1290` (`exec_abs.write_bytes(b"\xff\xfe# not decodable\n")`).
+`read_text()` uses `locale.getpreferredencoding(False)`. Under UTF-8/ASCII (this runner, per coordinator's 336-passed result) `\xff` raises `UnicodeDecodeError` and the test constrains the new catch correctly (coordinator confirms it fails raw when the catch is narrowed back to `OSError`). Under a Latin-1/cp1252 locale the same bytes decode cleanly (ÿþ) and the test would pass for the wrong reason, exercising the hash-mismatch path instead (`executor.tampered`, `:234`) and failing to catch a regression of the `UnicodeDecodeError` handler. Non-blocking on this runner; latent. (Pinning `read_text(encoding="utf-8")` would remove the locale sensitivity but is a broader behaviour change.)
+
+### P3 — other non-`OSError` families from `read_text()`/decode are uncaught
+**Evidence:** `selflearn/src/selflearn/compilation/runtime.py:222-229`.
+Beyond `UnicodeDecodeError` (now caught), `bytes.decode(<bad-name>)` can raise `LookupError` if `locale.getpreferredencoding(False)` ever returns an invalid codec name (effectively unreachable — it returns a valid name or `'utf-8'`), and `decode` of a pathological file can raise `MemoryError` (non-recoverable, acceptable to propagate). Acceptable as-is; noted for completeness per focus-area 4.
+
+---
+
+## Answers to the six focus areas
+
+1. **Did the restructure reintroduce the P1?** Yes, conditionally — see P1. The `resolve()` P1 stays fixed (resolve calls are inside the guard at `runtime.py:199-206`), but the `exists()` call at `:215` now sits unguarded between the two `try` blocks and reintroduces the "raw `OSError` escapes `run()` unjournalled" class for any `OSError` that `pathlib.Path.exists()` re-raises. `is_relative_to` (`:200`) is pure-Python string work and cannot raise `OSError`. The `if not contained`/escape path (`:208-213`) journals before raising and is correct.
+2. **Taxonomy honest and complete?** Honest **yes** for the three sites this commit labels: resolve-failure→`path-unreadable` (`:204`), containment breach→`path-escape` (`:209`), read-failure→`path-unreadable` (`:225`). A resolve failure is correctly *not* an escape. **Complete — no:** the missing-source raise at `:216` is an unjournalled refusal fitting neither kind (P2). No failure mode is mis-bucketed: a contained-but-unreadable path can no longer be recorded as an escape.
+3. **Does the containment raise still work?** Yes. `if not contained` (`:208`) is outside any `try` but journals (`:209`) then raises `RuntimeCompError` (`:212-213`). `RuntimeCompError(RuntimeError)` is not an `OSError`/`UnicodeDecodeError`, so neither subsequent handler can swallow it; it propagates as the normalized error. `test_runtime_path_escape_blocked` (`test_compilation_runtime.py:1165`) constrains this (escapes store root → `path-escape` + `RuntimeCompError match="escapes store root"`).
+4. **Is `UnicodeDecodeError` the only escaping non-`OSError` family?** For `read_text()` itself, yes, modulo the theoretical `LookupError`/`MemoryError` in P3. `source.encode()` at `:231` is a `str`→`bytes` UTF-8 round-trip of a strictly-decoded `str` and cannot raise `UnicodeEncodeError`. The `import hashlib` at `:230` and `canonical_procedure_hash` upstream are unaffected.
+5. **The new citing test.** `test_runtime_undecodable_source_is_journalled` (`test_compilation_runtime.py:1271-1334`) is a faithful reproduction: a contained, existing file under `pack/executors/...` (matching `ExecutorRegistry.write_candidate` layout so `PackStore` doesn't misread a bare top-level dir) holding `b"\xff\xfe…"`. It fails raw `UnicodeDecodeError` when the catch is narrowed to `OSError`-only (coordinator confirms; consistent with the code), so it genuinely constrains the new `(OSError, UnicodeDecodeError)` catch. The two amended tests' `assert not any(... path-escape ...)` clauses are **non-vacuous** — each is paired with a preceding `assert any(... path-unreadable ...)` (`:1228`/`:1277`), so a regression that re-bucketed a resolve/read failure as `path-escape` would fail the positive assertion. They genuinely constrain the new taxonomy.
+6. **Regression risk from the kind rename.** None in-repo. Independent consumer sweep:
+   - `doctor.py` consumes `executor.stale-spec`, `executor.unverifiable`, `executor.missing-source`, `executor.dangling-entry`, `entry.corrupt` — **not** `path-escape`/`path-unreadable` (`grep` over `selflearn/src/selflearn/doctor.py`).
+   - The only `corpus.json` hits (`tests/fixtures/meta5/corpus.json:53,62`) are fuzz-test-case IDs `traversal-source-id-path-escape`/`traversal-artifact-ref-path-escape` under `category: traversal`, `target: ContextSourceRef.source_id` (memory-skill artifact resolution) — unrelated corpus IDs, not journal-kind consumers (verified at `corpus.json:50-67`).
+   - No other src/test/fixture outside `runtime.py` depends on the old broader meaning of `executor.path-escape`. The narrowing (escape now = genuine containment breach only) is strictly more honest and contract-positive.
+
+## Per-invariant
+
+- **Bounded authority — HOLDS.** `resolve()` follows symlinks *before* the containment check; a tampered `path` resolving outside the store root → `contained=False` → `path-escape`+raise (`:208-213`). The read surface never widens. (The P1 is an evidence/normalization gap, not a read-widening.)
+- **Evaluator non-self-approval — HOLDS.** This diff does not touch test-author identity or executor-bytes visibility. Not implicated.
+- **Full-fidelity evidence — PARTIAL / BREACHED (conditional).** Three of four refusal sites are journalled honestly (`:204`, `:209`, `:225`). BREACHED for the `exists()` re-raise path (P1, unjournalled raw `OSError`) and for the missing-source raise (P2, unjournalled). The P1 is the regression attributable to `bd9b79d`; the P2 is pre-existing.
+- **Honest termination — PARTIAL.** Holds for every guarded site; a raw `PermissionError` from `exists()` would be a fail-*open* escape (P1).
+- **Reversible lineage — HOLDS.** Content-hash check at `:231-234` is unchanged post-read; symlink/swap races are caught by hash-mismatch → `executor.tampered` (journalled `:234`). Executors stay content-hash-bound.
+
+## Regression statement
+
+- **Does `bd9b79d` regress anything approved at `cc7e7c5`?** Yes — narrowly. At `cc7e7c5`, the `exists()` call sat *inside* the unified `try … except OSError`, so an `EACCES`/`EIO`/`EPERM` re-raised by `pathlib.Path.exists()` was caught, journalled, and normalized. At `bd9b79d` it is outside both guards, so that same `OSError` escapes `run()` raw and unjournalled (P1 above). Scope of the regression is limited to the `OSError` subset that `pathlib.Path.exists()` re-raises (its non-ignored set); `ENOENT` is still swallowed → `RuntimeCompError("Executor source missing")`.
+- **Does the original `4a8069b` P1 remain fixed?** Yes. Both `.resolve()` calls (`runtime.py:200`) and the `is_relative_to` computation are inside the resolve guard (`:199-206`); `except OSError` is reachable and journals `executor.path-unreadable` with reason "cannot resolve" and raises `RuntimeCompError("Cannot validate executor path") from exc`. The `4a8069b` dead-handler/raw-escape defect is fixed and stays fixed.
+- The commit's three intended changes (kind split, `UnicodeDecodeError` catch, `is_relative_to` test predicate) are correct, approved, and consumer-safe.
+
+## Tools available and what I could not verify
+
+- **Had:** `read`, `grep`, `find`, `ls` — used to inspect `runtime.py`, `doctor.py`, `test_compilation_runtime.py`, `packstore.py`, `corpus.json`, and to run the independent consumer sweep.
+- **Denied:** `bash` and `git` (both rejected by the harness, matching the prior reviewers' experience). **I did not execute any command.**
+- **Could not verify:** (a) the exact `pathlib.Path.exists()` ignored-set on the run interpreter — my P1 is conditional on the documented CPython behaviour that it re-raises `EACCES`/`EPERM`/`EIO`; (b) the test pass/fail counts (relied on the coordinator's verbatim `336 passed` / `110 passed` output); (c) the runner's `locale.getpreferredencoding()` (relevant to P3). The coordinator can close the P1 either by applying the mandatory guard (recommended; removes all doubt) or by supplying file-and-line evidence of `pathlib.Path.exists()`'s ignored-set on this interpreter, which would downgrade P1→P2.
+
+**Disposition of prior-gate P2/P3s carried into this commit:** P2-1 (kind honesty) **resolved**; P2-2 (`UnicodeDecodeError`) **resolved**; P3-2 (test predicate) **resolved**; P3-1 (deprecation shim) deliberately deferred, as stated — acceptable.

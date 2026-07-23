@@ -1,3 +1,98 @@
+# Session Handoff — meta-harness (2026-07-23, session 50: control-root recovery after `reset --hard` incident; META-17 restored to Review)
+
+## State: META-17 card restored and submitted; host-alias fix shipped; META-8 lane needs its owning seat
+
+### The incident (session 49, recorded in episode `20260723-111728-meta-17-build-done-pr-55-glm-approved-bu-d4b9`)
+
+A `git reset --hard HEAD~1` on `main` — run to undo a commit that should have
+gone to a feature branch — discarded the **uncommitted** shared control-root
+state carried in the primary checkout. `.workplan/state.json` regressed
+**rev 92 → 81**, taking META-17's entire card and META-8's lifecycle receipts
+with it. Uncommitted changes to tracked files leave no git objects; reflog and
+`fsck` recover nothing.
+
+Two corrections to that episode's record, verified this session:
+
+- META-8 (`TASK-20260714-006`) is at **`backlog`**, not `in_progress`. It lost
+  its whole ready → claim → start chain, not just the submit receipt.
+- The newest **committed** handoff entry was **session 47**, so sessions 48 and
+  49 handoff entries were both lost (the episode said it reverted to 48).
+
+Recovery avenues checked and exhausted: git reflog/fsck (nothing), the three
+sibling worktrees (all carry the committed rev-81 content), APFS local
+snapshots (newest is 12:17, predating the 13:50 start of META-17's
+transitions), Time Machine (network destination unreadable without Full Disk
+Access; last volume activity 12:36, also predating). **Replay was the only
+path.**
+
+### Shipped: `WORKPLAN_HOST_ALIASES` (PR #56, merged `b3ea53c`)
+
+`scripts/workplan.mjs` required the owner/actor/lock host to equal the *current*
+`os.hostname()`. This machine flaps between `Charltons-MacBook-Pro.local` and
+`charltons-mbp.home.lan`, which had blocked META-17's original submit. Four
+host-equality checks (`parseReadyFlags`, `parseClaimOwner`,
+`parseCoordinatorActor`, `classifyLock`) now route through one `isThisHost`
+helper backed by a comma-separated `WORKPLAN_HOST_ALIASES` env var. Frozen owner
+strings still pin `namespace:host:session` exactly — only the host-equality
+*precondition* relaxes.
+
+Evidence: `node --test scripts/workplan.test.mjs` **117/117**, plus a 19/19 e2e
+driving the real CLI against a real git control root through a genuine hostname
+flap (posted on PR #56). Coverage gap stated plainly: `classifyLock`'s host
+check is unit-tested only — the e2e cannot reach it without a concurrently-held
+lock.
+
+### META-17 replayed: rev 81 → 86, status `review`
+
+`add` 81→82, `ready` 82→83, `claim` 83→84, `start` 84→85, `submit` 85→86 at
+`--expected-head 4a8069b822b5083ce0548adcebf0dc4649802e74`, caller worktree
+`/private/tmp/meta-harness-meta-17`.
+
+- Definition replayed from the surviving `.agents/meta17-definition.json`;
+  hash recomputes to `sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957`
+  — **byte-identical** to the value frozen at dispatch.
+- **Revision numbers differ from the originals** (86, not 92). The original
+  81→92 span interleaved META-8's transitions, which this session must not
+  replay. Nothing downstream pins those numbers: integration receipts compute
+  `revisionTo` at integrate time, and no META-17 acceptance receipt exists yet.
+- **The card owner is this recovery session**, not the original builder seat.
+  The original session id is unrecoverable — it appears in no surviving
+  artifact — and inventing one would write a false identity into an
+  append-only ledger. The owner field records who holds authority *now*, which
+  is accurate as written. Card `trace` and `evidence` flag the reconstruction.
+- Add-time descriptive metadata (`paths`, `trace`, `evidence`, `next`) is
+  **reconstructed** from the frozen build spec's writable file set and Linear
+  META-17, not recovered. The definition hash is the part that is exact.
+
+### Open — needs the META-8 seat, not this one
+
+`TASK-20260714-006` sits at `backlog` and must be replayed by its owning seat
+(herdr session `drv-meta8-20260723`): ready → claim → start → submit. That is an
+authority boundary; this session deliberately did not cross it. **If that seat
+resumes expecting rev 92 it will fail loud-closed against rev 86** — correct
+behaviour, but it will look like corruption unless the seat is told about the
+incident first. Its worktree `/private/tmp/meta-harness-meta-8` is intact at
+`439321b` and its review artifacts survive under `.review-store/meta8-*`.
+
+### Next steps
+
+1. Merge this control-root recovery so the state stops living uncommitted.
+2. Brief the META-8 seat, then let it replay its own lane.
+3. META-17: PR #55 is open and GLM-approved at `89572ff`; head `4a8069b` is a
+   post-approval P2 tidy that was never separately reviewed. Decide whether that
+   needs a re-review before integrate → accept.
+
+### Standing lesson
+
+Never run a destructive git op (`reset --hard`, `clean -fd`, `checkout -- .`,
+`stash drop`) in the primary checkout without checking `git status` first. It
+carries durable uncommitted control-root projections (`.workplan/state.json`,
+`WORKPLAN.md`, `memory/session_handoff.md`) that accumulate between closeout
+PRs by design. Commit to a feature branch from the outset instead of committing
+to `main` and correcting afterwards.
+
+---
+
 # Session Handoff — meta-harness (2026-07-22, session 47: META-7 SHIPPED — merged, accepted, Done)
 
 ## State: META-7 complete across repo, GitHub, Linear, and workplan; no card in flight

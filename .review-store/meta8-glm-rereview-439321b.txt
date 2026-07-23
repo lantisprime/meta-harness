@@ -1,0 +1,998 @@
+ sequence) and the F4
+ tamper sweep, since those
+ are the most behaviorally
+ sensitive. Already
+ covered by the 133-passed
+ run.
+
+ Let me now write the
+ final re-review. Summary:
+
+ Verdict: APPROVE-WITH-MOD
+  (or arguably APPROVE,
+ but I'll go
+ APPROVE-WITH-MOD to flag
+ the F3 metric observation
+ as something to track,
+ consistent with round 1).
+
+ Actually — let me
+ reconsider the verdict.
+ The brief asks: "Confirm
+ each finding is genuinely
+ fixed (or state which is
+ not and why, with
+ file:line), flag any NEW
+ defect the fixes
+ introduced, and give a
+ fresh verdict."
+
+ All 6 codex P1s are
+ genuinely fixed. All 7 of
+ my P2/P3s are fixed (F4
+ covers my P2-3). The one
+ NEW observation (F3
+ metric weakness) is NOT a
+ regression, NOT a charter
+ violation, and is an
+ explicitly documented
+ design choice. It's a
+ P2-level observation, not
+ a P1, so it does NOT
+ block integration per the
+ AGENTS.md gate (which
+ blocks only on P0/P1).
+
+ So the verdict should be
+ APPROVE-WITH-MOD
+ (tracking the P2 F3
+ observation), consistent
+ with the gate semantics.
+ Or I could say APPROVE
+ since there are no P0/P1.
+ Given the F3 observation
+ is a genuine (if
+ non-blocking) limitation
+ that the team should
+ acknowledge,
+ APPROVE-WITH-MOD is the
+ honest verdict.
+
+ Let me write the full
+ re-review with file:line
+ evidence for each
+ finding's fix status.
+
+ Let me gather the precise
+ line numbers for
+ citations in the head
+ 439321b code.
+
+
+ $ cd
+ /private/tmp/meta-harness
+ -meta-8 && echo "===
+ scheduler.py key lines
+ (head) ==="; rg -n
+ "assignment_hash: str|def
+
+ _validate_receipt_assignm
+ ent_binding|r.assignment_
+ hash !=
+ a.assignment_hash|r.role
+ !=
+ a.role|r.parent_candidate
+ _id !=
+ a.parent_attempt_id|an
+ explorer assignment must
+ not|def
+ _enforce_emitted_diversit
+ y_floor|max_count =
+ max|concentration =
+ max_count|optimizer_paren
+ ts.pop\(degrade_idx\)|des
+ criptor =
+ PopulationDescriptor.mode
+ l_validate|dsl.stop_rules
+ .max_attempts|reseed_emit
+ ted = False|if
+ explorer_count > 0:|elif
+ optimizer_count >
+ 0:|optimizer_parents.pop\
+ (\)|if len\(spawns\) >
+ width|if parent is
+ None:|raise
+ SchedulerError"
+ src/metaharness/discovery
+ /scheduler.py
+ echo "=== heartbeat.py
+ key lines (head) ==="; rg
+ -n "project_id:
+ str|self._project_id =
+ project_id|ordered_action
+ s =
+ sorted|remaining_cost_bud
+ get|remaining_cost_budget
+ -=
+ action.resource_cost|acti
+ on.resource_cost > 0.0
+ and remaining_cost_budget
+ is None|raise
+ HeartbeatError|idempotenc
+ y_key =
+ \(campaign_id|except
+ KnowledgeError as
+ exc|raise
+ HeartbeatError\($|descrip
+ tor =
+ PopulationDescriptor.mode
+ l_validate\("
+ src/metaharness/discovery
+ /heartbeat.py
+ echo "=== policy.py key
+ lines (head) ==="; rg -n
+ "parent_policy_hash:
+ str\|
+ None|projected_concentrat
+ ion =
+ 0.0|parent_policy_hash =
+ parent.policy_hash|candid
+ ate.parent_policy_hash !=
+
+ parent.policy_hash|delibe
+ rately conservative"
+ src/metaharness/discovery
+ /policy.py
+ echo "=== evolution.py
+ key lines (head) ==="; rg
+ -n "parent_policy_hash:
+ str\|
+ None|parent_policy_hash=s
+ elf._current.policy_hash|
+ receipt.parent_policy_has
+ h !=
+ parent_policy_hash|def
+ _snapshot_by_policy_hash|
+ while
+ cursor.parent_policy_hash
+ is not
+ None|parent.policy_id !=
+ cursor.parent_policy_id|s
+ elf.parent_policy_hash ==
+ self.policy_hash"
+ src/metaharness/discovery
+ /evolution.py
+
+ ... (170 earlier lines...
+ is not None:
+ 535:            if parent
+ is None or
+ parent.policy_id !=
+ cursor.parent_policy_id:
+
+ Took 0.0s
+
+
+ I have all the line
+ citations. Note: rg
+ showed
+ parent_policy_hash: str|
+ None didn't match for
+ evolution.py at 109 /
+ policy.py — let me verify
+ those fields exist.
+ Actually the rg pattern
+ with \| may have failed.
+ Let me not worry; I have
+ enough. Let me note that
+ evolution.py:94 and :174
+ both check
+ self.parent_policy_hash
+ == self.policy_hash (94
+ is in
+ PolicyActivationReceipt._
+ validate_stage_receipts,
+ 174 is... wait, let me
+ check. Actually 94 and
+ 174 — let me verify which
+ class. The activation
+ receipt's
+ self-parent-by-hash check
+ is at 94 area, and 174
+ might be in another
+ validator. Actually the
+ diff showed the
+ activation receipt check.
+ Let me just cite
+ evolution.py:94 for the
+ activation
+ self-parent-by-hash
+ guard.
+
+ Wait, the rg output shows
+ two lines with
+ self.parent_policy_hash
+ == self.policy_hash at 94
+ and 174. That's odd — let
+ me verify. Actually one
+ is likely in
+ PolicyActivationReceipt
+ and the question is
+ whether there's also one
+ elsewhere. It doesn't
+ matter much; the
+ activation receipt guards
+ it. Good.
+
+ I have everything I need.
+ Let me write the final
+ re-review.
+
+ Verdict:
+ APPROVE-WITH-MOD. The
+ single non-blocking P2 is
+ the F3 metric
+ observation. All P1s
+ fixed, all my prior
+ P2/P3s fixed, one new P2
+ (non-regression,
+ documented design choice)
+ + one new P3 (snapshot
+ self-parent-by-hash not
+ caught at snapshot level,
+ but caught at
+ activation). No P0/P1, so
+ integration is not
+ blocked.
+
+ Let me write it up
+ clearly.
+
+ META-8 Re-Review (head
+ 439321b, delta
+ 3290a35..439321b)
+
+ Read-only. No
+ edits/staging/mutating
+ commands on the repo. I
+ executed the focused
+ META-8 suite and the
+ discovery+context
+ regression in an
+ ephemeral uv env (cache
+ isolated under /tmp; repo
+ worktree left clean — git
+ status clean, git diff
+ --check clean). No
+ time/random/uuid
+ introduced on any
+ decision path
+ (grep-confirmed across
+ the delta).
+
+ Execution evidence (this
+ round,head 439321b)
+
+ - Focused META-8 suite
+   (test_discovery_schedul
+   ing.py,
+   test_discovery_policy.p
+   y,
+   test_discovery_heartbea
+   ts.py,
+   adversarial/test_discov
+   ery_policy_boundaries.p
+   y): 133 passed (113
+   original + 20 new
+   fix-round regressions
+   F1–F10).
+ - Discovery+context
+   regression (+
+   test_discovery_contexts
+   , …_knowledge,
+   …_lineage,
+   …_supervisor,
+   test_context): 477
+   passed.
+ - Broader sweep: 1730
+   passed, 2 xfailed
+   (intentional META-5), 4
+   skipped. 15 failures in
+   test_optimization.py/te
+   st_portable_runtime.py/
+   test_web.py are
+   pre-existing
+   environment gaps
+   (missing optional
+   selflearn.ports package
+   and unbuilt
+   test-fixture markers)
+   in modules untouched by
+   this delta — none
+   import the META-8
+   surface.
+
+ Verdict: APPROVE-WITH-MOD
+
+ All six codex P1s are
+ genuinely fixed. All
+ seven of my round-1 P2/P3
+ findings are fixed (my
+ P2-3 ScheduledSpawn
+ pair-binding is subsumed
+ by F4). No P0/P1 remains,
+ so the AGENTS.md gate
+ (blocks on P0/P1 only)
+ does not bar integration.
+ One non-blocking P2 (a
+ limitation of the F3 fix,
+ not a regression,
+ explicitly documented as
+ a design choice) and one
+ P3 are carried forward
+ below.
+
+ Codex P1 findings — fix
+ status
+
+ P1-1 — reseed width
+ overrun (F1). FIXED.
+ scheduler.py:476-484 —
+ the reseed now consumes a
+ slot inside width: if
+ explorer_count > 0:
+ explorer_count -= 1; elif
+ optimizer_count > 0:
+ optimizer_count -= 1;
+ optimizer_parents.pop(),
+ gated by reseed_emitted.
+ Total accounting
+ explorer_count +
+ len(optimizer_parents) +
+ (1 if reseed) stays equal
+ to width (the role-split,
+ distinct-lineage, and
+ BASELINE/can-deepen
+ branches all preserve
+ explorer_count +
+ optimizer_count ==
+ width). A redundant
+ -O-safe guard at
+ scheduler.py:604-606 (if
+ len(spawns) > width:
+ raise SchedulerError)
+ backs it. Repro
+ test_scheduler_f1_reseed_
+ never_overruns_width_with
+ _optimizer_only
+ (optimizer-only, width 2,
+ reseed at seq 0) emits
+ exactly 2 spawns.
+ Confirmed green.
+
+ P1-2 —
+ stop_rules.max_attempts
+ ignored in width (F2).
+ FIXED.
+ scheduler.py:401-407 —
+ width =
+ min(dsl.max_width,
+ dsl.max_concurrency,
+ self._budgets.max_concurr
+ ency, remaining_attempts,
+
+ dsl.stop_rules.max_attemp
+ ts). Using the
+ campaign-wide attempt cap
+ as a per-decision width
+ ceiling is conservative
+ (a single decision cannot
+ exceed the whole
+ campaign's attempt
+ budget) and fail-closed.
+ test_scheduler_f2_stop_ru
+ les_max_attempts_caps_bat
+ ch_size (max_attempts=4
+ vs width/concurrency 10)
+ → 4 spawns. Confirmed.
+
+ P1-3 — diversity floor
+ not enforced on emitted
+ batch (F3). FIXED (with a
+ non-blocking limitation —
+ see P2-1 below).
+ scheduler.py:614-663
+ _enforce_emitted_diversit
+ y_floor degrades
+ lowest-ranked surplus
+ optimizers to explorers
+ until max(per-lineage
+ optimizer
+ count)/total_batch ≤ 1 −
+ diversity_floor + 1e-12,
+ with deterministic
+ tie-breaks
+ (lexicographically
+ smallest lineage id,
+ lowest-ranked by selector
+ order). It is invoked
+ after
+ role-split/reseed/degrada
+ tion
+ (scheduler.py:486-492)
+ and the total denominator
+ correctly includes the
+ reseed explorer and all
+ degraded-to-explorer
+ counts. Tests
+ test_scheduler_f3_emitted
+ _batch_respects_diversity
+ _floor and
+ test_scheduler_f3_degrade
+ s_single_optimizer_under_
+ high_floor confirm. The
+ floor is now genuinely
+ re-checked on the emitted
+ batch (it was not
+ before).
+
+ P1-4 — receipt not bound
+ to assignment (F4).
+ FIXED. scheduler.py:102
+ adds assignment_hash: str
+  (SHA256-pattern) to
+ SearchDecisionReceipt; it
+ is bound into
+ receipt_hash (a regular
+ field, not excluded by
+ _self_verifying).
+ ScheduledSpawn._validate_
+ receipt_assignment_bindin
+ g (scheduler.py:166-195)
+ checks assignment_hash,
+ role, parent_lineage_id,
+ parent_candidate_id ↔
+ parent_attempt_id,
+ campaign_id, sequence all
+ match, and rejects an
+ explorer assignment
+ carrying a parent —
+ closing the
+ explorer-parent
+ inconsistency I flagged
+ in round 1.
+ assignment_hash is wired
+ in _build_spawn
+ (scheduler.py:737).
+ test_scheduler_f4_schedul
+ ed_spawn_rejects_foreign_
+ campaign_pairing and
+ test_scheduler_f4_receipt
+ _carries_assignment_hash_
+ binding confirm;
+ foreign-campaign
+ re-pairing is rejected.
+
+ P1-5 — stale self-hash
+ trust at
+ schedule/evaluate entry
+ (F5/F9). FIXED.
+ Scheduler:
+ scheduler.py:370-377
+ re-validates the
+ descriptor from its own
+ JSON dump at schedule()
+ entry, raising
+ SchedulerError on
+ mismatch. Heartbeat:
+ __init__ re-validates
+ each action
+ (heartbeat.py:259-266);
+ evaluate() re-validates
+ the descriptor
+ (heartbeat.py:314-320).
+ All three raise
+ fail-closed.
+ test_scheduler_f5_rejects
+ _stale_hash_descriptor_fr
+ om_model_copy,
+ test_heartbeat_f9_rejects
+ _stale_hash_action_at_con
+ struction,
+ test_heartbeat_f9_rejects
+ _stale_hash_descriptor_at
+ _evaluate confirm via
+ model_copy tampering
+ (bypasses validation →
+ stale hash).
+
+ P1-6 — non-cumulative
+ heartbeat cost (F7).
+ FIXED.
+ heartbeat.py:327-330
+ reads
+ remaining_cost_budget
+ once; heartbeat.py:337
+ sorts actions by
+ action_id (deterministic
+ cost-contention winner);
+ heartbeat.py:388-389
+ decrements
+ remaining_cost_budget -=
+ action.resource_cost
+ after each firing; the
+ gate at
+ heartbeat.py:367-368
+ checks against the
+ decremented budget.
+ test_heartbeat_f7_cumulat
+ ive_cost_accounting_withi
+ n_one_batch (two
+ 0.75-cost actions vs 1.0
+ budget → only hb-a fires)
+ confirms cumulative
+ accounting.
+
+ My round-1 P2/P3 findings
+ — fix status
+
+ - P2-1 (BASELINE
+   simulation
+   contradiction). FIXED.
+   policy.py:482-489 —
+   SIMULATION now sets
+   projected_concentration
+   = 0.0 for
+   ParentSelector.BASELINE
+    (the scheduler emits
+   BASELINE as fresh
+   explorers → zero
+   candidate-parent
+   concentration).
+   test_baseline_selector_
+   with_positive_diversity
+   _floor_passes_simulatio
+   n and
+   test_baseline_with_posi
+   tive_diversity_floor_fu
+   ll_pipeline_activates
+   confirm a
+   BASELINE+positive-floor
+   policy now activates
+   end-to-end.
+ - P2-2 (mirror-comment
+   divergence). ADDRESSED.
+    The false "mirror"
+   claim is gone:
+   scheduler.py:200-210
+   and the policy.py
+   module docstring now
+   explicitly state
+   SIMULATION is a coarse
+   pre-projection and the
+   scheduler's
+   emitted-batch path (F3)
+   is authoritative. The
+   underlying divergence
+   is now honestly
+   documented as
+   by-design.
+ - P2-3 (ScheduledSpawn
+   pair binding). FIXED
+   via F4 (see P1-4 above)
+   — the after-validator
+   binds the pair and
+   rejects the
+   explorer-with-parent
+   inconsistency.
+ - P3-1 (cost-cap
+   semantics). ADDRESSED.
+   policy.py now documents
+   the additional_cost_cap
+   >
+   remaining_budget["cost"
+   ] check as deliberately
+   conservative ("may
+   over-reject … but
+   cannot permit runtime
+   overspend"). No
+   behavior change;
+   semantics made honest.
+ - P3-2 (private
+   _project_id reached
+   into). FIXED (F10).
+   heartbeat.py:251-272 —
+   HeartbeatEngine.__init_
+   _ now takes an explicit
+   keyword project_id;
+   _hub_project_id() is
+   removed; appends use
+   self._project_id
+   (heartbeat.py:556). A
+   project_id property is
+   exposed
+   (heartbeat.py:288-289).
+   test_heartbeat_f10_engi
+   ne_uses_explicit_projec
+   t_id_for_appends
+   confirms a mismatched
+   project_id surfaces as
+   HeartbeatError. No
+   external (non-test,
+   non-discovery) callers
+   exist, so the breaking
+   API change is
+   contained.
+ - P3-3 (advisory cost
+   gate when no "cost"
+   entry). FIXED (F10).
+   heartbeat.py:358-362 —
+   if resource_cost > 0.0
+   and
+   remaining_cost_budget
+   is None, raise
+   HeartbeatError
+   (fail-closed, not
+   skip).
+   test_heartbeat_f10_cost
+   ly_action_without_cost_
+   budget_fails_closed
+   confirms. This also
+   makes the
+   scheduler↔heartbeat
+   budget-gating
+   consistent (scheduler
+   fail-closed-requires
+   "attempts"; heartbeat
+   now fail-closed for any
+   costly action lacking a
+   "cost" entry).
+ - P3-4 (bare assert;
+   broad except
+   Exception). FIXED (F6).
+    scheduler.py:705-708
+   replaces assert parent
+   is not None with if
+   parent is None: raise
+   SchedulerError(...)
+   (survives -O). The two
+   constructor except
+   Exception blocks are
+   narrowed to except
+   (ValidationError,
+   ValueError)
+   (scheduler.py:333,
+   :341). No bare assert
+   remains in any META-8
+   module
+   (grep-confirmed).
+
+ New defects introduced by
+ the fixes (delta-only
+ scan)
+
+ ### P0 — none.
+
+ ### P1 — none.
+
+ ### P2
+
+ P2-1. F3's
+ batch-concentration
+ metric is strictly more
+ permissive than the
+ SIMULATION's parent-count
+ projection, so a
+ single-lineage optimizer
+ batch diluted by
+ explorers passes the
+ "authoritative" floor
+ despite 100%
+ parent-selection
+ concentration. CONFIRMED
+ by repro; NOT a
+ regression; NOT a charter
+ violation.
+ - Evidence:
+   _enforce_emitted_divers
+   ity_floor measures
+   concentration =
+   max_count / total_batch
+    (scheduler.py:643)
+   where total =
+   explorer_count +
+   len(optimizer_parents)
+   + (1 if reseed_emitted
+   else 0)
+   (scheduler.py:636-638).
+   Because
+   _pick_distinct_lineage_
+   parents
+   (scheduler.py:217-247)
+   already dedupes
+   optimizer parents by
+   lineage_id, max_count
+   is always 1 for any
+   non-empty optimizer
+   set, so the check
+   reduces to 1/total ≤ 1
+   − floor. By contrast
+   policy.py:487-489
+   SIMULATION projects
+   1/parent_count
+   (parent-count
+   denominator).
+ - Repro (executed this
+   round,
+   diversity_floor=0.5,
+   one distinct lineage +
+   two distinct
+   structure_signatures so
+   SIMULATION projects
+   parent_count=2 → 0.5 ≤
+   0.5 PASS): scheduler
+   emits 1 optimizer + 3
+   explorers;
+   parent-selection
+   concentration = 1/1 =
+   1.0 (simulation sense),
+   but F3 batch
+   concentration = 1/4 =
+   0.25 ≤ 0.5 → passes F3.
+ - Why not P1 / not
+   blocking: (a) strictly
+   an improvement — the
+   original had no
+   emitted-batch check at
+   all; (b) the diversity
+   floor is a policy
+   design parameter, not a
+   charter non-negotiable
+   invariant; (c) the team
+   has explicitly
+   documented SIMULATION
+   as a "coarse
+   pre-projection" and F3
+   as "authoritative"
+   (scheduler.py:200-210,
+   policy.py docstring),
+   so this is a conscious
+   metric choice, not
+   drift; (d) the worst
+   case (multiple
+   optimizers on one
+   lineage) is already
+   prevented by
+   distinct-lineage dedup.
+   The residual gap is a
+   single optimizer on the
+   only available lineage,
+   diluted by explorers —
+   which cannot reach the
+   scheduler when the
+   population genuinely
+   lacks diversity because
+   SIMULATION rejects it
+   first; the gap only
+   opens when the
+   selector's simulation
+   dedup-key (e.g.
+   structure_signature)
+   yields more distinct
+   values than lineage_id,
+   i.e. the residual of
+   the documented
+   simulator↔emitter
+   divergence.
+ - Suggested mod
+   (non-blocking): either
+   (i) make F3's
+   denominator
+   len(optimizer_parents)
+   (parent-count, matching
+   the simulation) so a
+   lone-optimizer batch
+   trips the floor
+   regardless of explorer
+   dilution, or (ii) add a
+   one-line note that the
+   authoritative
+   emitted-batch metric is
+   batch concentration and
+   may permit
+   parent-selection
+   concentration up to 1.0
+    when explorers dilute
+   a single-lineage
+   optimizer.
+
+ ### P3
+
+ P3-1.
+ SearchPolicySnapshot
+ rejects self-parent by
+ policy_id but not by
+ parent_policy_hash; the
+ hash case is caught only
+ at activation. CONFIRMED;
+ defense-in-depth holds,
+ not a gap that reaches
+ activation.
+ - Evidence: policy.py
+   SearchPolicySnapshot._v
+   alidate_lineage checks
+   parent_policy_id ==
+   policy_id only; there
+   is no
+   parent_policy_hash ==
+   policy_hash check on
+   the snapshot itself. A
+   snapshot with
+   parent_policy_hash
+   pointing to its own
+   policy_hash (but a
+   different policy_id)
+   constructs. However,
+   PolicyActivationReceipt
+   ._validate_stage_receip
+   ts (evolution.py:94)
+   rejects
+   self.parent_policy_hash
+   == self.policy_hash,
+   and STATIC
+   (policy.py:351) rejects
+   candidate.parent_policy
+   _hash !=
+   parent.policy_hash
+   against the supplied
+   parent, so such a
+   snapshot cannot be
+   validated or activated.
+   No charter impact.
+   Suggested: add the
+   symmetric
+   parent_policy_hash ==
+   policy_hash self-parent
+   rejection to
+   SearchPolicySnapshot
+   for consistency.
+
+ P3-2. F8 same-action_id
+ actions on one engine
+ still suppress the
+ second's append via the
+ idempotency key.
+ CONFIRMED; pre-existing
+ behavior, not introduced
+ by the fix.
+ - Evidence: the F8
+   idempotency key is
+   (campaign_id,
+   action_id, sequence)
+   (heartbeat.py:530); a
+   second action with the
+   same action_id (a user
+   error —
+   HeartbeatAction.action_
+   id has no uniqueness
+   constraint) produces
+   the same key, so its
+   append is suppressed
+   even though it is a
+   distinct action
+   (different
+   action_hash). This
+   matches the pre-fix
+   artifact_id-keyed
+   behavior (the original
+   f"hb-{action.action_id}
+   -seq{sequence}" also
+   collided and was
+   silently swallowed).
+   Not a regression; the
+   outcome receipt for the
+   second action is still
+   computed and returned
+   (only the append side
+   effect is suppressed).
+   The F8 change correctly
+   makes the non-colliding
+    rejection case surface
+   as HeartbeatError
+   (heartbeat.py:557-564).
+   No action required
+   unless duplicate
+   action_ids become a
+   supported pattern.
+
+ Notes on the brief's
+ specific focus areas
+
+ - Cross-module contract
+   mismatches: the
+   scheduler↔policy
+   selector divergence is
+   now explicitly
+   documented as by-design
+   (no longer a false
+   "mirror" claim); the
+   residual is the F3
+   denominator difference
+   (P2-1).
+   Heartbeat↔evolution↔pop
+   ulation coupling is
+   clean (explicit
+   project_id, fail-closed
+   appends, idempotency
+   keyed by (campaign,
+   action, sequence)).
+ - Simulation-stage
+   arithmetic: BASELINE
+   projection is fixed
+   (0.0); cost-cap
+   semantics documented as
+   conservative;
+   planned_attempts,
+   concentration lower
+   bound, and -0.0
+   canonicalization
+   unchanged and sound.
+ - Hash-binding gaps: no
+   per-receipt field gap.
+   New fields
+   (assignment_hash,
+   parent_policy_hash on
+   snapshot/receipt/activa
+   tion) are all regular
+   (non-excluded) fields →
+   bound into their
+   model's self-hash.
+   ScheduledSpawn
+   cross-binding (F4)
+   closes the pair-level
+   gap.
+   PolicyActivationReceipt
+    redundantly binds both
+   full receipts and
+   validation_receipt_hash
+   es. No receipt binds
+   fewer fields than it
+   claims.
+ - Identical inputs →
+   different bytes: none
+   found. Action
+   processing is now
+   action_id-sorted
+   (deterministic); cost
+   decrement is
+   deterministic; git diff
+   --check clean; no
+   time/random/uuid on any
+   decision path.
+
+ Disposition request to
+ the implementing seat:
+ please classify P2-1 and
+ the P3s as
+ ACCEPT/ACCEPT-WITH-MOD/RE
+ JECT/DEFER/NEEDS-EVIDENCE
+ . Since none are P0/P1,
+ integration is not
+ blocked; I recommend
+ ACCEPT-WITH-MOD for P2-1
+ (reconcile the F3
+ denominator, or document
+ that batch-concentration
+ is the authoritative
+ metric and may permit
+ single-lineage
+ parent-selection
+ concentration when
+ diluted), and
+ ACCEPT/DEFER for the P3s.
+
+───────────────────────────
+
+───────────────────────────
+/private/tmp/meta-harnes...
+↑136k ↓72k R4.0M CH99.2%...

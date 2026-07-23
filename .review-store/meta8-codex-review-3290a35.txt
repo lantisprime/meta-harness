@@ -1,0 +1,74 @@
+# Verdict: REJECT
+
+No P0 findings. Six confirmed P1 findings block integration. Two P2 findings also require correction.
+
+## Findings
+
+1. **P1 — Simulation approves a diversity floor the scheduler violates. CONFIRMED.**  
+   [policy.py:435](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:435) calculates concentration using every dry-run parent, while [scheduler.py:365](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:365) can use only the optimizer slots. Repro: 10 distinct candidates, `max_concurrency=2`, 50/50 roles, and `diversity_floor=0.5` passes simulation with `parents=10, explorers=1, optimizers=1`; scheduling selects one optimizer parent, producing actual parent concentration `1.0`, above the allowed `0.5`.
+
+2. **P1 — `stop_rules.max_attempts` is not enforced during scheduling. CONFIRMED.**  
+   Simulation caps `planned_attempts` at the policy stop rule in [policy.py:464](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:464), but scheduler width ignores that bound in [scheduler.py:328](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:328). A policy with `max_attempts=4`, `max_width=max_concurrency=10` received all four PASSED receipts, then emitted 10 assignments in its first batch.
+
+3. **P1 — Baseline reseeding can exceed width, concurrency, and remaining attempts. CONFIRMED.**  
+   [scheduler.py:415](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:415) appends a reseed and unconditionally decrements `explorer_count`; it does not replace an optimizer when the original explorer count is zero. With width/remaining attempts `2`, optimizer fraction `1.0`, and sequence `0`, the scheduler returned three spawns—one explorer and two optimizers—each claiming width/concurrency `2`.
+
+4. **P1 — The decision receipt is not bound to its assignment. CONFIRMED.**  
+   `SearchDecisionReceipt` contains no assignment ID/hash at [scheduler.py:93](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:93), and `ScheduledSpawn` has no cross-object validator at [scheduler.py:145](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:145). A valid campaign-1/sequence-1 receipt was accepted when paired with a separately self-hashed foreign-campaign/sequence-99 assignment. Both hashes remain valid, so the receipt cannot prove which assignment the scheduler issued.
+
+5. **P1 — Scheduler and heartbeat paths trust stale self-hashes. CONFIRMED.**  
+   `schedule()` consumes a descriptor without round-trip validation at [scheduler.py:303](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:303). `HeartbeatEngine` similarly stores actions unchanged at [heartbeat.py:246](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:246) and trusts the descriptor/action fields at [heartbeat.py:287](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:287). Repros:
+
+   - Two descriptors with the same stale `descriptor_hash` produced gains `0.6` and `0.1` and different receipts.
+   - An action copied from `resource_cost=5.0` to `0.0` retained the original `action_hash` and fired against a remaining cost of `1.0`; its outcome therefore binds a hash representing different behavior.
+
+6. **P1 — Heartbeat resource accounting is not cumulative. CONFIRMED.**  
+   Remaining cost is read once before the action loop and never decremented in [heartbeat.py:287](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:287). With remaining cost `1.0`, two firing actions costing `0.75` each both passed, committing `1.5` of declared resource cost.
+
+7. **P2 — Heartbeat append idempotency collides across campaigns and fails silently. CONFIRMED.**  
+   Artifact identity is only `(action_id, sequence)` at [heartbeat.py:464](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:464), and all append rejections are swallowed at [heartbeat.py:488](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:488). Evaluating the same action/sequence for two campaigns on one project hub returned outcomes for both, but campaign 2 received no artifact because campaign 1 already occupied `hb-same-seq5`.
+
+8. **P2 — Policy validation/activation does not bind the exact parent hash. CONFIRMED.**  
+   Snapshots carry only `parent_policy_id`; static validation checks that ID but emits a receipt containing only the candidate hash, and `PolicyActivationReceipt` also omits the parent hash ([policy.py:310](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:310), [evolution.py:107](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/evolution.py:107)). Two parents with the same ID but different policy hashes both validated the same child and produced byte-identical PASSED STATIC receipts. The activation proof therefore cannot establish which immutable parent was checked.
+
+No P3 findings.
+
+The focused suite passed unchanged: `113 passed in 0.23s`. The worktree remained clean at `3290a35dbdb93501bf7cb8646610314526faeacf`. I found no separate same-input randomness path, but finding 5 means the same claimed input hash can produce different decision bytes, defeating hash-level determinism.
+tokens used
+174,633
+# Verdict: REJECT
+
+No P0 findings. Six confirmed P1 findings block integration. Two P2 findings also require correction.
+
+## Findings
+
+1. **P1 — Simulation approves a diversity floor the scheduler violates. CONFIRMED.**  
+   [policy.py:435](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:435) calculates concentration using every dry-run parent, while [scheduler.py:365](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:365) can use only the optimizer slots. Repro: 10 distinct candidates, `max_concurrency=2`, 50/50 roles, and `diversity_floor=0.5` passes simulation with `parents=10, explorers=1, optimizers=1`; scheduling selects one optimizer parent, producing actual parent concentration `1.0`, above the allowed `0.5`.
+
+2. **P1 — `stop_rules.max_attempts` is not enforced during scheduling. CONFIRMED.**  
+   Simulation caps `planned_attempts` at the policy stop rule in [policy.py:464](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:464), but scheduler width ignores that bound in [scheduler.py:328](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:328). A policy with `max_attempts=4`, `max_width=max_concurrency=10` received all four PASSED receipts, then emitted 10 assignments in its first batch.
+
+3. **P1 — Baseline reseeding can exceed width, concurrency, and remaining attempts. CONFIRMED.**  
+   [scheduler.py:415](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:415) appends a reseed and unconditionally decrements `explorer_count`; it does not replace an optimizer when the original explorer count is zero. With width/remaining attempts `2`, optimizer fraction `1.0`, and sequence `0`, the scheduler returned three spawns—one explorer and two optimizers—each claiming width/concurrency `2`.
+
+4. **P1 — The decision receipt is not bound to its assignment. CONFIRMED.**  
+   `SearchDecisionReceipt` contains no assignment ID/hash at [scheduler.py:93](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:93), and `ScheduledSpawn` has no cross-object validator at [scheduler.py:145](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:145). A valid campaign-1/sequence-1 receipt was accepted when paired with a separately self-hashed foreign-campaign/sequence-99 assignment. Both hashes remain valid, so the receipt cannot prove which assignment the scheduler issued.
+
+5. **P1 — Scheduler and heartbeat paths trust stale self-hashes. CONFIRMED.**  
+   `schedule()` consumes a descriptor without round-trip validation at [scheduler.py:303](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/scheduler.py:303). `HeartbeatEngine` similarly stores actions unchanged at [heartbeat.py:246](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:246) and trusts the descriptor/action fields at [heartbeat.py:287](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:287). Repros:
+
+   - Two descriptors with the same stale `descriptor_hash` produced gains `0.6` and `0.1` and different receipts.
+   - An action copied from `resource_cost=5.0` to `0.0` retained the original `action_hash` and fired against a remaining cost of `1.0`; its outcome therefore binds a hash representing different behavior.
+
+6. **P1 — Heartbeat resource accounting is not cumulative. CONFIRMED.**  
+   Remaining cost is read once before the action loop and never decremented in [heartbeat.py:287](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:287). With remaining cost `1.0`, two firing actions costing `0.75` each both passed, committing `1.5` of declared resource cost.
+
+7. **P2 — Heartbeat append idempotency collides across campaigns and fails silently. CONFIRMED.**  
+   Artifact identity is only `(action_id, sequence)` at [heartbeat.py:464](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:464), and all append rejections are swallowed at [heartbeat.py:488](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/heartbeat.py:488). Evaluating the same action/sequence for two campaigns on one project hub returned outcomes for both, but campaign 2 received no artifact because campaign 1 already occupied `hb-same-seq5`.
+
+8. **P2 — Policy validation/activation does not bind the exact parent hash. CONFIRMED.**  
+   Snapshots carry only `parent_policy_id`; static validation checks that ID but emits a receipt containing only the candidate hash, and `PolicyActivationReceipt` also omits the parent hash ([policy.py:310](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/policy.py:310), [evolution.py:107](/private/tmp/meta-harness-meta-8/src/metaharness/discovery/evolution.py:107)). Two parents with the same ID but different policy hashes both validated the same child and produced byte-identical PASSED STATIC receipts. The activation proof therefore cannot establish which immutable parent was checked.
+
+No P3 findings.
+
+The focused suite passed unchanged: `113 passed in 0.23s`. The worktree remained clean at `3290a35dbdb93501bf7cb8646610314526faeacf`. I found no separate same-input randomness path, but finding 5 means the same claimed input hash can produce different decision bytes, defeating hash-level determinism.
