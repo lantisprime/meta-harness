@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 99,
+  "revision": 102,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2913,6 +2913,43 @@
             "branch": "dev/meta-17-workflow-compilation",
             "head": "28c4b6b7ad1297879ea7603c29ccc2641b8dd934"
           }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 99,
+          "revisionTo": 100,
+          "at": "2026-07-23T14:35:40.404Z",
+          "evidence": {
+            "reason": "Gate 5 on 28c4b6b (APPROVE-WITH-MOD, no P0/P1) surfaced a confirmed pre-existing control-character path escape that bypasses the containment check; closed in 5d2fb52, which must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 100,
+          "revisionTo": 101,
+          "at": "2026-07-23T14:35:40.475Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Gate 5 on 28c4b6b (APPROVE-WITH-MOD, no P0/P1) surfaced a confirmed pre-existing control-character path escape that bypasses the containment check; closed in 5d2fb52, which must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 101,
+          "revisionTo": 102,
+          "at": "2026-07-23T14:35:40.561Z",
+          "evidence": {
+            "branch": "dev/meta-17-workflow-compilation",
+            "head": "5d2fb52117a53618a0a8fb172efdff4b064a6370"
+          }
         }
       ],
       "claimSnapshot": {
@@ -2952,10 +2989,10 @@
       },
       "reviewFreeze": {
         "branch": "dev/meta-17-workflow-compilation",
-        "head": "28c4b6b7ad1297879ea7603c29ccc2641b8dd934",
-        "revisionFrom": 98,
-        "revisionTo": 99,
-        "at": "2026-07-23T14:03:00.194Z"
+        "head": "5d2fb52117a53618a0a8fb172efdff4b064a6370",
+        "revisionFrom": 101,
+        "revisionTo": 102,
+        "at": "2026-07-23T14:35:40.561Z"
       }
     }
   ]
