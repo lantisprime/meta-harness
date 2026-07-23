@@ -408,6 +408,7 @@ def make_activation_receipt(**overrides) -> PolicyActivationReceipt:
         activated_for_window="window-1",
         activated_sequence=1,
         actor_label="policy-validation-gate",
+        is_root=False,
     )
     defaults.update(overrides)
     return PolicyActivationReceipt(**defaults)

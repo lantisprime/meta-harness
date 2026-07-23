@@ -266,6 +266,20 @@ class HeartbeatEngine:
                     f"failed self-hash revalidation: {exc}"
                 ) from exc
         self._actions: tuple[HeartbeatAction, ...] = tuple(validated)
+        # ITEM 2: reject duplicate action_ids at construction. Two distinct
+        # actions sharing an action_id would collide on the (campaign_id,
+        # action_id, sequence) idempotency key, silently treating the second
+        # artifact as a replay of the first — a deterministic-order-dependent
+        # loss of evidence. Fail closed at construction instead.
+        seen_action_ids: set[str] = set()
+        for action in self._actions:
+            if action.action_id in seen_action_ids:
+                raise HeartbeatError(
+                    f"duplicate action_id {action.action_id!r} across distinct "
+                    "actions is rejected (would collide on the append "
+                    "idempotency key and silently mask an artifact)"
+                )
+            seen_action_ids.add(action.action_id)
         self._hub = hub
         if not project_id:
             raise HeartbeatError("project_id must be a non-empty string")

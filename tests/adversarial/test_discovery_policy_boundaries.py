@@ -103,7 +103,7 @@ def _search_decision_receipt() -> SearchDecisionReceipt:
         make_sched_snapshot(),
         campaign_budgets=make_budgets(),
     )
-    return scheduler.schedule(descriptor, sequence=1)[0].receipt
+    return scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)[0].receipt
 
 
 def _without_self_hash(model):
@@ -366,7 +366,7 @@ def test_scheduler_receipt_binds_policy_descriptor_and_rejects_tampering():
     receipt = PopulationScheduler(
         snapshot,
         campaign_budgets=make_budgets(),
-    ).schedule(descriptor, sequence=2)[0].receipt
+    ).schedule(descriptor, sequence=2, window_attempts_used=0)[0].receipt
 
     assert receipt.descriptor_hash == descriptor.descriptor_hash
     assert receipt.policy_hash == snapshot.policy_hash
@@ -396,7 +396,7 @@ def test_tamper_sweep_over_real_schedule_heartbeat_policy_pipeline():
     root = make_parent()
 
     scheduler = PopulationScheduler(root, campaign_budgets=make_budgets())
-    spawn = scheduler.schedule(descriptor, sequence=1)[0]
+    spawn = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)[0]
 
     hub = make_real_hub(project_id="meta-harness")
     action = make_heartbeat_action(
@@ -472,6 +472,99 @@ def test_forged_receipt_or_activation_with_mismatched_parent_hash_is_rejected():
     ]
     with pytest.raises(ValidationError):
         PolicyActivationReceipt(**activation_payload)
+
+
+def test_forged_non_root_activation_with_no_parent_is_rejected():
+    receipts = make_passed_validation_receipts()
+
+    receipts_with_no_parent = tuple(
+        receipt.model_copy(update={"parent_policy_hash": None})
+        if receipt is receipts[index]
+        else receipt
+        for index in range(len(receipts))
+        for receipt in [receipts[index]]
+    )
+    forged = tuple(
+        receipt.model_copy(update={"parent_policy_hash": None})
+        for receipt in receipts
+    )
+    with pytest.raises(ValidationError):
+        PolicyActivationReceipt(
+            policy_hash=receipts[0].policy_hash,
+            parent_policy_hash=None,
+            validation_receipts=forged,
+            validation_receipt_hashes=[
+                receipt.receipt_hash for receipt in forged
+            ],
+            activated_for_window="window-1",
+            activated_sequence=1,
+            actor_label="policy-validation-gate",
+            is_root=False,
+        )
+
+    non_root_no_parent = [
+        receipt.model_copy(update={"parent_policy_hash": None})
+        if receipt is receipts[1] else receipt
+        for receipt in receipts
+    ]
+    with pytest.raises(ValidationError):
+        PolicyActivationReceipt(
+            policy_hash=receipts[0].policy_hash,
+            parent_policy_hash=receipts[0].parent_policy_hash,
+            validation_receipts=non_root_no_parent,
+            validation_receipt_hashes=[
+                receipt.receipt_hash for receipt in non_root_no_parent
+            ],
+            activated_for_window="window-1",
+            activated_sequence=1,
+            actor_label="policy-validation-gate",
+            is_root=False,
+        )
+
+    non_root_mismatched = [
+        receipt.model_copy(update={"parent_policy_hash": receipts[0].policy_hash})
+        if receipt is receipts[1] else receipt
+        for receipt in receipts
+    ]
+    with pytest.raises(ValidationError):
+        PolicyActivationReceipt(
+            policy_hash=receipts[0].policy_hash,
+            parent_policy_hash=receipts[0].parent_policy_hash,
+            validation_receipts=non_root_mismatched,
+            validation_receipt_hashes=[
+                receipt.receipt_hash for receipt in non_root_mismatched
+            ],
+            activated_for_window="window-1",
+            activated_sequence=1,
+            actor_label="policy-validation-gate",
+            is_root=False,
+        )
+
+
+def test_root_activation_is_the_only_is_root_receipt_and_consider_emits_non_root():
+    parent = make_parent()
+    evolver = SearchPolicyEvolver(parent)
+    root_receipt = evolver.root_activation
+
+    assert root_receipt.is_root is True
+    assert root_receipt.parent_policy_hash is None
+    assert root_receipt.activated_sequence == 0
+    assert root_receipt.policy_hash == parent.policy_hash
+    assert evolver.activation_receipts == ()
+
+    child = evolver.propose_child(
+        make_policy(inspiration_selector=InspirationSelector.NONE),
+        window_id="window-1",
+        sequence=1,
+    )
+    row = evolver.consider(child, window=make_policy_descriptor(), sequence=1)
+    assert row.outcome is StrategyHistoryOutcome.ACTIVATED
+
+    activated = evolver.activation_receipts[0]
+    assert activated.is_root is False
+    assert activated.parent_policy_hash == parent.policy_hash
+    assert activated.policy_hash == child.policy_hash
+    assert activated.activated_sequence == 1
 
 
 def test_baseline_with_positive_diversity_floor_full_pipeline_activates():

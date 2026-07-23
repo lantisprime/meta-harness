@@ -112,6 +112,7 @@ class PolicyActivationReceipt(FrozenModel):
     activated_for_window: BoundedIdentifier
     activated_sequence: int = Field(ge=0)
     actor_label: BoundedIdentifier
+    is_root: bool = False
     activation_hash: str = Field(default="", pattern=SHA256_PATTERN)
 
     @model_validator(mode="wrap")
@@ -174,6 +175,21 @@ class PolicyActivationReceipt(FrozenModel):
         if self.parent_policy_hash == self.policy_hash:
             raise ValueError("an activation cannot name its policy as its parent")
 
+        if self.is_root:
+            if self.parent_policy_hash is not None:
+                raise ValueError(
+                    "an is_root=True activation must carry parent_policy_hash=None"
+                )
+            if self.activated_sequence != 0:
+                raise ValueError(
+                    "an is_root=True activation must have activated_sequence == 0"
+                )
+        else:
+            if self.parent_policy_hash is None:
+                raise ValueError(
+                    "an is_root=False activation must carry a non-None parent_policy_hash"
+                )
+
         receipt_hashes = tuple(
             receipt.receipt_hash for receipt in verified_receipts
         )
@@ -221,6 +237,12 @@ class SearchPolicyEvolver:
         # candidate-population state.  Root is known but is not rollback-
         # eligible until an ACTIVATED history row exists for the target hash.
         self._known_snapshots: tuple[SearchPolicySnapshot, ...] = (root,)
+        # Root bootstrap activation: the only is_root=True receipt this evolver
+        # ever mints. Consider() emits only is_root=False receipts bound to the
+        # then-current policy hash. The root activation is exposed separately
+        # so consider()'s appended activation_receipts sequence stays
+        # unchanged for already-existing tests.
+        self._root_activation = self._build_root_activation(root)
 
     @property
     def current(self) -> SearchPolicySnapshot:
@@ -233,6 +255,71 @@ class SearchPolicyEvolver:
     @property
     def activation_receipts(self) -> tuple[PolicyActivationReceipt, ...]:
         return self._activation_receipts
+
+    @property
+    def root_activation(self) -> PolicyActivationReceipt:
+        """The single is_root=True activation minted at construction.
+
+        Stored separately from `activation_receipts` (which only collects
+        non-root consider() activations) so historical test contracts on
+        `activation_receipts` remain valid without modification.
+        """
+
+        return self._root_activation
+
+    @staticmethod
+    def _build_root_activation(
+        root: SearchPolicySnapshot,
+    ) -> PolicyActivationReceipt:
+        zero_descriptor = "sha256:" + "0" * 64
+        common = dict(policy_hash=root.policy_hash, parent_policy_hash=None)
+        schema_rcpt = PolicyValidationReceipt(
+            **common,
+            stage=PolicyValidationStage.SCHEMA,
+            verdict=PolicyValidationVerdict.PASSED,
+            reason="schema passed: root policy bootstrap",
+        )
+        static_rcpt = PolicyValidationReceipt(
+            **common,
+            stage=PolicyValidationStage.STATIC,
+            verdict=PolicyValidationVerdict.PASSED,
+            reason="static passed: root policy bootstrap",
+        )
+        simulation_rcpt = PolicyValidationReceipt(
+            **common,
+            stage=PolicyValidationStage.SIMULATION,
+            verdict=PolicyValidationVerdict.PASSED,
+            reason="simulation passed: root policy bootstrap",
+            descriptor_hash=zero_descriptor,
+        )
+        shadow_rcpt = PolicyValidationReceipt(
+            **common,
+            stage=PolicyValidationStage.SHADOW,
+            verdict=PolicyValidationVerdict.PASSED,
+            reason=(
+                "shadow passed: root policy bootstrap grants no "
+                "activation authority"
+            ),
+            descriptor_hash=zero_descriptor,
+        )
+        bootstrap_receipts = (
+            schema_rcpt,
+            static_rcpt,
+            simulation_rcpt,
+            shadow_rcpt,
+        )
+        return PolicyActivationReceipt(
+            policy_hash=root.policy_hash,
+            parent_policy_hash=None,
+            validation_receipts=bootstrap_receipts,
+            validation_receipt_hashes=tuple(
+                receipt.receipt_hash for receipt in bootstrap_receipts
+            ),
+            activated_for_window=root.window_id,
+            activated_sequence=0,
+            actor_label="policy-validation-gate",
+            is_root=True,
+        )
 
     @staticmethod
     def _validated_descriptor(
@@ -485,6 +572,7 @@ class SearchPolicyEvolver:
                 activated_for_window=candidate.window_id,
                 activated_sequence=sequence,
                 actor_label=self._ACTOR_LABEL,
+                is_root=False,
             )
         except ValidationError:
             row = StrategyHistoryRow(

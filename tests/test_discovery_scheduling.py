@@ -353,7 +353,7 @@ def _explorer_spawns(spawns: tuple[ScheduledSpawn, ...]) -> list[ScheduledSpawn]
 def test_scheduler_receipt_completeness_records_every_required_field():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
-    spawns = scheduler.schedule(make_descriptor(), sequence=1)
+    spawns = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
 
     assert spawns, "scheduler must emit at least one spawn"
     for spawn in spawns:
@@ -399,14 +399,14 @@ def test_scheduler_diversity_floor_forces_non_elite_parents_on_concentrated_desc
 
     # Not concentrated (0.3 <= 0.7): ELITE selects the frontier elite.
     relaxed = make_diverse_descriptor(concentration=0.3)
-    relaxed_spawns = scheduler.schedule(relaxed, sequence=1)
+    relaxed_spawns = scheduler.schedule(relaxed, sequence=1, window_attempts_used=0)
     relaxed_opt = _optimizer_spawns(relaxed_spawns)
     assert relaxed_opt, "expected at least one optimizer spawn"
     assert relaxed_opt[0].receipt.parent_candidate_id == "cand-elite"
 
     # Concentrated (0.95 > 0.7): forced UNDEREXPLORED picks the non-elite.
     concentrated = make_diverse_descriptor(concentration=0.95)
-    concentrated_spawns = scheduler.schedule(concentrated, sequence=1)
+    concentrated_spawns = scheduler.schedule(concentrated, sequence=1, window_attempts_used=0)
     concentrated_opt = _optimizer_spawns(concentrated_spawns)
     assert concentrated_opt, "expected at least one optimizer spawn"
     forced_parent = concentrated_opt[0].receipt.parent_candidate_id
@@ -422,17 +422,17 @@ def test_scheduler_baseline_reseed_fires_on_the_interval():
     )
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
 
-    reseed_at_zero = scheduler.schedule(make_descriptor(), sequence=0)
+    reseed_at_zero = scheduler.schedule(make_descriptor(), sequence=0, window_attempts_used=0)
     assert any(
         s.receipt.reason.startswith("baseline reseed") for s in reseed_at_zero
     ), "a baseline reseed must fire on a multiple of the interval"
 
-    none_at_one = scheduler.schedule(make_descriptor(), sequence=1)
+    none_at_one = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
     assert not any(
         s.receipt.reason.startswith("baseline reseed") for s in none_at_one
     ), "no baseline reseed should fire off the interval"
 
-    reseed_at_five = scheduler.schedule(make_descriptor(), sequence=5)
+    reseed_at_five = scheduler.schedule(make_descriptor(), sequence=5, window_attempts_used=0)
     assert any(
         s.receipt.reason.startswith("baseline reseed") for s in reseed_at_five
     ), "a baseline reseed must fire again on the next multiple of the interval"
@@ -443,8 +443,8 @@ def test_scheduler_is_deterministic_for_identical_inputs():
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
     descriptor = make_descriptor()
 
-    first = scheduler.schedule(descriptor, sequence=3)
-    second = scheduler.schedule(descriptor, sequence=3)
+    first = scheduler.schedule(descriptor, sequence=3, window_attempts_used=0)
+    second = scheduler.schedule(descriptor, sequence=3, window_attempts_used=0)
 
     assert len(first) == len(second)
     for a, b in zip(first, second):
@@ -460,7 +460,7 @@ def test_scheduler_over_budget_allocation_is_rejected_and_never_over_allocates()
     # Fully exhausted attempts budget -> scheduling is rejected outright.
     exhausted = make_descriptor(remaining_budget={"attempts": 0.0})
     with pytest.raises(SchedulerError):
-        scheduler.schedule(exhausted, sequence=1)
+        scheduler.schedule(exhausted, sequence=1, window_attempts_used=0)
 
     # Partial budget caps width to the remaining attempts (never over).
     cap_snapshot = make_sched_snapshot(
@@ -470,14 +470,14 @@ def test_scheduler_over_budget_allocation_is_rejected_and_never_over_allocates()
         cap_snapshot, campaign_budgets=make_budgets(max_concurrency=10)
     )
     partial = make_descriptor(remaining_budget={"attempts": 2.0})
-    spawns = cap_scheduler.schedule(partial, sequence=1)
+    spawns = cap_scheduler.schedule(partial, sequence=1, window_attempts_used=0)
     assert len(spawns) == 2, "width must be capped to remaining attempts, not exceeded"
 
 
 def test_scheduler_optimizer_needs_parent_explorer_must_not_have_parent():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
-    spawns = scheduler.schedule(make_descriptor(), sequence=1)
+    spawns = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)
 
     optimizers = _optimizer_spawns(spawns)
     explorers = _explorer_spawns(spawns)
@@ -529,7 +529,7 @@ def test_scheduler_binds_policy_and_descriptor_hash_on_every_receipt():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
     descriptor = make_descriptor()
-    spawns = scheduler.schedule(descriptor, sequence=2)
+    spawns = scheduler.schedule(descriptor, sequence=2, window_attempts_used=0)
 
     assert spawns
     for spawn in spawns:
@@ -550,13 +550,13 @@ def test_scheduler_rejects_campaign_mismatch_and_tampered_policy():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
     with pytest.raises(SchedulerError):
-        scheduler.schedule(foreign, sequence=1)
+        scheduler.schedule(foreign, sequence=1, window_attempts_used=0)
 
 
 def test_scheduler_receipt_self_hash_rejects_tampering_and_authority_extras():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
-    spawn = scheduler.schedule(make_descriptor(), sequence=1)[0]
+    spawn = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)[0]
 
     tampered = spawn.receipt.model_dump(mode="json")
     tampered["receipt_hash"] = "sha256:" + "9" * 64
@@ -605,7 +605,7 @@ def test_scheduler_f1_reseed_never_overruns_width_with_optimizer_only():
     scheduler = PopulationScheduler(
         snapshot, campaign_budgets=make_budgets(max_concurrency=10)
     )
-    spawns = scheduler.schedule(make_descriptor(), sequence=0)
+    spawns = scheduler.schedule(make_descriptor(), sequence=0, window_attempts_used=0)
     assert len(spawns) == 2, "reseed must occupy a slot inside width, not add width+1"
     assert any(s.receipt.reason.startswith("baseline reseed") for s in spawns)
 
@@ -626,7 +626,7 @@ def test_scheduler_f2_stop_rules_max_attempts_caps_batch_size():
         snapshot, campaign_budgets=make_budgets(max_concurrency=10)
     )
     descriptor = make_descriptor(remaining_budget={"attempts": 100.0})
-    spawns = scheduler.schedule(descriptor, sequence=1)
+    spawns = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)
     assert len(spawns) <= 4
     assert len(spawns) == 4
 
@@ -675,7 +675,7 @@ def test_scheduler_f3_emitted_batch_respects_diversity_floor():
         parent_selection_concentration=0.5,
         lineage_depth=1,
     )
-    spawns = scheduler.schedule(descriptor, sequence=1)
+    spawns = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)
     assert len(spawns) == 2
     assert _batch_parent_concentration(spawns) <= 0.5 + 1e-12
 
@@ -697,7 +697,7 @@ def test_scheduler_f3_degrades_single_optimizer_under_high_floor():
         snapshot, campaign_budgets=make_budgets(max_concurrency=10)
     )
     descriptor = make_descriptor(lineage_depth=1)
-    spawns = scheduler.schedule(descriptor, sequence=1)
+    spawns = scheduler.schedule(descriptor, sequence=1, window_attempts_used=0)
     assert len(spawns) == 1
     assert spawns[0].receipt.role is DiscoveryRole.EXPLORER
     assert spawns[0].receipt.parent_lineage_id is None
@@ -711,14 +711,14 @@ def test_scheduler_f4_scheduled_spawn_rejects_foreign_campaign_pairing():
     scheduler_one = PopulationScheduler(
         snapshot_one, campaign_budgets=make_budgets()
     )
-    spawn_one = scheduler_one.schedule(make_descriptor(), sequence=1)[0]
+    spawn_one = scheduler_one.schedule(make_descriptor(), sequence=1, window_attempts_used=0)[0]
 
     snapshot_two = make_sched_snapshot(campaign_id="campaign-2")
     scheduler_two = PopulationScheduler(
         snapshot_two, campaign_budgets=make_budgets()
     )
     desc_two = make_descriptor(campaign_id="campaign-2")
-    spawn_two = scheduler_two.schedule(desc_two, sequence=1)[0]
+    spawn_two = scheduler_two.schedule(desc_two, sequence=1, window_attempts_used=0)[0]
 
     with pytest.raises(ValidationError):
         ScheduledSpawn(assignment=spawn_two.assignment, receipt=spawn_one.receipt)
@@ -732,7 +732,7 @@ def test_scheduler_f4_scheduled_spawn_rejects_foreign_campaign_pairing():
 def test_scheduler_f4_receipt_carries_assignment_hash_binding():
     snapshot = make_sched_snapshot()
     scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
-    spawn = scheduler.schedule(make_descriptor(), sequence=1)[0]
+    spawn = scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=0)[0]
     # F4: every receipt binds the paired assignment hash.
     assert spawn.receipt.assignment_hash == spawn.assignment.assignment_hash
     assert spawn.receipt.assignment_hash.startswith("sha256:")
@@ -748,7 +748,7 @@ def test_scheduler_f5_rejects_stale_hash_descriptor_from_model_copy():
         update={"remaining_budget": (("attempts", 1.0),)}
     )
     with pytest.raises(SchedulerError):
-        scheduler.schedule(tampered, sequence=1)
+        scheduler.schedule(tampered, sequence=1, window_attempts_used=0)
 
 
 def test_scheduler_f6_optimizer_build_without_parent_raises_not_assert():
@@ -775,3 +775,67 @@ def test_scheduler_f6_optimizer_build_without_parent_raises_not_assert():
             expected_gain=0.5,
             reason="optimizer without parent",
         )
+
+
+# ---------------------------------------------------------------------------
+# META-8 final fix-round regressions.
+# ---------------------------------------------------------------------------
+
+
+def test_scheduler_final1_window_attempts_used_enforced_cumulatively():
+    # max_attempts=4: two consecutive decisions must not emit 4+4 spawns.
+    # The caller-managed window_attempts_used accumulator caps the second
+    # decision by what the first already emitted, then fails closed once the
+    # window is exhausted.
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "max_width": 10,
+            "max_concurrency": 10,
+            "stop_rules": SearchPolicyStopRules(
+                max_attempts=4, max_cost=50.0, stagnation_window=3
+            ),
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    descriptor = make_descriptor(remaining_budget={"attempts": 100.0})
+
+    first = scheduler.schedule(
+        descriptor, sequence=1, window_attempts_used=0
+    )
+    assert len(first) <= 4, "first decision must respect max_attempts=4"
+    assert len(first) == 4
+
+    # Second decision with the first batch already counted: only 0 attempts
+    # remain in the window, so scheduling must fail closed (no over-allocation).
+    with pytest.raises(SchedulerError):
+        scheduler.schedule(
+            descriptor, sequence=2, window_attempts_used=4
+        )
+
+
+def test_scheduler_final1_window_attempts_used_caps_partial_remaining():
+    # max_attempts=4 with 3 already used -> only 1 spawn remains in the window.
+    snapshot = make_sched_snapshot(
+        policy_overrides={
+            "max_width": 10,
+            "max_concurrency": 10,
+            "stop_rules": SearchPolicyStopRules(
+                max_attempts=4, max_cost=50.0, stagnation_window=3
+            ),
+        }
+    )
+    scheduler = PopulationScheduler(
+        snapshot, campaign_budgets=make_budgets(max_concurrency=10)
+    )
+    descriptor = make_descriptor(remaining_budget={"attempts": 100.0})
+    spawns = scheduler.schedule(descriptor, sequence=2, window_attempts_used=3)
+    assert len(spawns) == 1
+
+
+def test_scheduler_final1_rejects_negative_window_attempts_used():
+    snapshot = make_sched_snapshot()
+    scheduler = PopulationScheduler(snapshot, campaign_budgets=make_budgets())
+    with pytest.raises(SchedulerError):
+        scheduler.schedule(make_descriptor(), sequence=1, window_attempts_used=-1)

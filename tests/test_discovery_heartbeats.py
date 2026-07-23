@@ -601,3 +601,56 @@ def test_heartbeat_f10_engine_uses_explicit_project_id_for_appends():
     descriptor = make_descriptor(steps_since_meaningful_improvement=4)
     with pytest.raises(HeartbeatError):
         engine.evaluate(descriptor, sequence=5, last_fired={})
+
+
+# ---------------------------------------------------------------------------
+# META-8 final fix-round regression (ITEM 2).
+# ---------------------------------------------------------------------------
+
+
+def test_heartbeat_final2_rejects_duplicate_action_ids_at_construction():
+    # Two distinct actions sharing an action_id would collide on the
+    # (campaign_id, action_id, sequence) idempotency key, silently treating
+    # the second artifact as a replay of the first (a deterministic-order-
+    # dependent loss of evidence). Construction must fail closed.
+    action_a = make_action(
+        action_id="hb-dupe",
+        kind=HeartbeatKind.REFLECTION,
+        trigger=HeartbeatTrigger.PLATEAU,
+        improvement_epsilon=0.5,
+        cooldown_sequences=1,
+    )
+    action_b = make_action(
+        action_id="hb-dupe",
+        kind=HeartbeatKind.CONSOLIDATION,
+        trigger=HeartbeatTrigger.EVALUATION,
+        cooldown_sequences=1,
+    )
+    with pytest.raises(HeartbeatError):
+        make_engine((action_a, action_b))
+
+    # Positive control: distinct action_ids are accepted.
+    action_b_distinct = make_action(
+        action_id="hb-other",
+        kind=HeartbeatKind.CONSOLIDATION,
+        trigger=HeartbeatTrigger.EVALUATION,
+        cooldown_sequences=1,
+    )
+    engine = make_engine((action_a, action_b_distinct))
+    assert {a.action_id for a in engine.actions} == {"hb-dupe", "hb-other"}
+
+
+def test_heartbeat_final2_duplicate_action_id_rejected_even_after_hash_revalidate():
+    # The duplicate check runs AFTER per-action hash revalidation (F9), so a
+    # tampered action is still caught as a HeartbeatError — but two valid,
+    # distinct actions with the same action_id are rejected by ITEM 2, not
+    # silently coalesced.
+    base = make_action(action_id="hb-shared", improvement_epsilon=0.5)
+    twin_fields = {
+        k: v for k, v in base.model_dump(mode="json").items() if k != "action_hash"
+    }
+    twin_fields["kind"] = HeartbeatKind.CONSOLIDATION
+    twin = HeartbeatAction(**twin_fields)
+    assert twin.action_hash != base.action_hash, "twin must be a distinct action"
+    with pytest.raises(HeartbeatError):
+        make_engine((base, twin))

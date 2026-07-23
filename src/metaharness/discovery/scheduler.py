@@ -356,11 +356,23 @@ class PopulationScheduler:
     # -- public API ---------------------------------------------------------
 
     def schedule(
-        self, descriptor: PopulationDescriptor, *, sequence: int
+        self, descriptor: PopulationDescriptor, *, sequence: int,
+        window_attempts_used: int
     ) -> tuple[ScheduledSpawn, ...]:
-        """Plan one bounded decision batch; deterministic in all inputs."""
+        """Plan one bounded decision batch; deterministic in all inputs.
+
+        ``window_attempts_used`` is caller-managed exactly like the heartbeat
+        ``last_fired`` mapping: the attempts already emitted under the current
+        policy window (F-final-1). The per-window attempt cap
+        (``dsl.stop_rules.max_attempts``) is enforced *cumulatively across
+        decisions* via this parameter, not per-batch, so two consecutive
+        schedule() calls cannot exceed the window cap together (e.g. 4+4 under
+        max_attempts=4).
+        """
         if sequence < 0:
             raise SchedulerError("sequence must be non-negative")
+        if window_attempts_used < 0:
+            raise SchedulerError("window_attempts_used must be non-negative")
 
         # F5: round-trip re-validate the descriptor from its own JSON dump so
         # a stale in-process hash (model_copy tampering) fails closed before
@@ -383,6 +395,17 @@ class PopulationScheduler:
             )
 
         dsl = policy.policy
+        # F-final-1: the policy's own stop-rule attempt cap is enforced
+        # cumulatively across the window. remaining_window is the budget left
+        # for THIS and later decisions; fail closed when it is exhausted.
+        remaining_window = dsl.stop_rules.max_attempts - window_attempts_used
+        if remaining_window <= 0:
+            raise SchedulerError(
+                "window attempt budget is exhausted (max_attempts="
+                f"{dsl.stop_rules.max_attempts}, window_attempts_used="
+                f"{window_attempts_used}); cannot schedule without over-"
+                "allocating the policy window"
+            )
         remaining = dict(descriptor.remaining_budget)
         if "attempts" not in remaining:
             raise SchedulerError(
@@ -396,14 +419,15 @@ class PopulationScheduler:
             )
 
         # width / concurrency respect DSL maxima, the campaign budget, the
-        # policy's own stop-rule attempt cap (F2), and the descriptor's
+        # policy's own per-window stop-rule attempt cap (F2 + F-final-1: capped
+        # by remaining_window, not max_attempts alone), and the descriptor's
         # remaining attempts budget — never over-allocate.
         width = min(
             dsl.max_width,
             dsl.max_concurrency,
             self._budgets.max_concurrency,
             remaining_attempts,
-            dsl.stop_rules.max_attempts,
+            remaining_window,
         )
         if width < 1:
             raise SchedulerError("scheduler width is non-positive after budget caps")
