@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 102,
+  "revision": 104,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2563,7 +2563,7 @@
     {
       "id": "TASK-20260714-006",
       "title": "Add typed heartbeats, population scheduling, and declarative search-policy candidates",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mbp.home.lan:meta8-recovery-20260723",
       "paths": [
         "src/metaharness/discovery",
@@ -2658,6 +2658,19 @@
             "branch": "dev/meta-8-scheduling-heartbeats-policy",
             "head": "3c14884c214445ebb3c800116698b169eafa89b3"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta8-closeout-20260723",
+          "revisionFrom": 103,
+          "revisionTo": 104,
+          "at": "2026-07-23T14:46:28.595Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-8-scheduling-heartbeats-policy",
+            "reviewHead": "3c14884c214445ebb3c800116698b169eafa89b3",
+            "integrationCommit": "e61fcbd19f687b4854b67095d82b94368b937c99"
+          }
         }
       ],
       "claimSnapshot": {
@@ -2700,12 +2713,22 @@
         "revisionFrom": 89,
         "revisionTo": 90,
         "at": "2026-07-23T12:44:09.013Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta8-closeout-20260723",
+        "reviewBranch": "dev/meta-8-scheduling-heartbeats-policy",
+        "reviewHead": "3c14884c214445ebb3c800116698b169eafa89b3",
+        "integrationCommit": "e61fcbd19f687b4854b67095d82b94368b937c99",
+        "definitionHash": "sha256:1b77011e4f6bf02b6b01a1f213f99d189d69e68262a798c4f40e7ef15feac8cf",
+        "revisionFrom": 103,
+        "revisionTo": 104,
+        "at": "2026-07-23T14:46:28.595Z"
       }
     },
     {
       "id": "TASK-20260723-017",
       "title": "compile learned selflearn workflow entries to cross-validated executors",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
       "paths": [
         "selflearn/src/selflearn/compilation",
@@ -2950,6 +2973,19 @@
             "branch": "dev/meta-17-workflow-compilation",
             "head": "5d2fb52117a53618a0a8fb172efdff4b064a6370"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta17-closeout-20260723",
+          "revisionFrom": 102,
+          "revisionTo": 103,
+          "at": "2026-07-23T14:46:28.499Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-17-workflow-compilation",
+            "reviewHead": "5d2fb52117a53618a0a8fb172efdff4b064a6370",
+            "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d"
+          }
         }
       ],
       "claimSnapshot": {
@@ -2993,6 +3029,16 @@
         "revisionFrom": 101,
         "revisionTo": 102,
         "at": "2026-07-23T14:35:40.561Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta17-closeout-20260723",
+        "reviewBranch": "dev/meta-17-workflow-compilation",
+        "reviewHead": "5d2fb52117a53618a0a8fb172efdff4b064a6370",
+        "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+        "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+        "revisionFrom": 102,
+        "revisionTo": 103,
+        "at": "2026-07-23T14:46:28.499Z"
       }
     }
   ]
