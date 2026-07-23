@@ -600,3 +600,46 @@ def test_executor_approval_step_raises_approvalrequired():
 
     # Should raise ApprovalRequired, not StepCheckFailed
     assert "ApprovalRequired" in type(exc_info.value).__name__
+
+
+# =============================================================================
+# F2-12 citing test: injection probe stays inert after exec
+# =============================================================================
+
+def test_compiler_injection_probe_execs_inert():
+    """F2-12: hostile objective compiles to an inert string literal in STEPS."""
+    from selflearn.compilation.compiler import WorkflowCompiler
+
+    malicious_objective = 'do work";\nimport os\nx="'
+    steps = (ProcedureStep(id="step1", objective=malicious_objective,
+                           task_type="code_edit"),)
+    entry = _make_workflow_entry(procedure=steps)
+
+    compiler = WorkflowCompiler()
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+
+    restricted_globals = __import__("selflearn.compilation.runtime", fromlist=["_make_restricted_globals"])._make_restricted_globals()
+    exec(candidate.source, restricted_globals)
+
+    steps_dict = restricted_globals["STEPS"]
+    assert steps_dict["step1"]["objective"] == malicious_objective
+    # No side effect: no os module present in namespace
+    assert "os" not in restricted_globals
+
+
+# =============================================================================
+# F2-18 citing test: non-JSON-serializable check value
+# =============================================================================
+
+def test_compiler_non_json_check_raises():
+    """F2-18: non-JSON-serializable check value raises CompilerError."""
+    from selflearn.compilation.compiler import CompilerError, WorkflowCompiler
+
+    steps = (
+        ProcedureStep(id="step1", objective="x", task_type="code_edit",
+                      check=(("status", object()),)),
+    )
+    entry = _make_workflow_entry(procedure=steps)
+
+    with pytest.raises(CompilerError, match="non-JSON-serializable"):
+        WorkflowCompiler().compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")

@@ -1,21 +1,24 @@
 """Tests for cross-validation gate.
 
 Tests cover:
-- End-to-end happy path with fake ExecutionPort
+- End-to-end happy path with fake ExecutionPort and a real sandbox double
 - Identity collision (author model_id == COMPILER_ID) rejected at construction
+- Suite author identity re-check (F2-8)
 - Suite/spec hash mismatch rejected without sandbox
-- Stale spec rejected
+- Stale spec rejected unconditionally (F2-5)
 - Sandbox fail -> rejected
 - Sandbox pass + no approval -> refused (stays quarantined)
 - Activation swap without baseline.json -> GateError
-- Swap with baseline -> old superseded
+- Swap with baseline -> old superseded AFTER new active (F2-2)
+- Receipt binds record and provenance (F2-3)
 - Receipt tamper detection
 - Every decision journaled
 - No ExecutionPort -> GateError
 """
 import json
+import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,20 +29,24 @@ from selflearn.compilation import (
     CrossValidationGate,
     ExecutorCandidate,
     ExecutorRegistry,
+    ExecutorRuntime,
     ExecutorSpec,
     GateError,
     IndependentTestSuite,
+    WorkflowCompiler,
+    canonical_json,
     canonical_procedure_hash,
     content_hash,
 )
+from selflearn.compilation.gate import COMPILER_ID
 from selflearn.compilation.models import CrossValidationReceipt, ExecutorRecord
 from selflearn.compilation.registry import RegistryError
+from selflearn.compilation.runtime import _make_restricted_globals
 from selflearn.compilation.testgen import TestAuthorError, WorkflowTestAuthor
 from selflearn.contracts import EntrySource, ProcedureStep
 from selflearn.ports import ExecutionPort, ExecutionResult, IdentityPort, ProvenancePort
+from selflearn.store.packstore import PackStore
 
-# Import helper from test_compilation.py
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from test_compilation import _make_workflow_entry
 
@@ -61,6 +68,7 @@ def _create_pack(store_root: Path, pack: str) -> None:
     (pack_dir / "manifest.json").write_text(json.dumps(manifest))
     (pack_dir / "entries").mkdir(parents=True)
 
+
 TEST_SOURCE = EntrySource(
     url="https://test.example.org",
     fetched_at="2024-01-01T00:00:00Z",
@@ -78,6 +86,32 @@ def _make_step(step_id: str, **kwargs) -> ProcedureStep:
         depends_on=kwargs.get("depends_on", ()),
         check=kwargs.get("check", ()),
     )
+
+
+def _make_spec(entry_id: str = "wf-001", pack: str = "test") -> tuple:
+    """Make a test spec and procedure."""
+    steps = (_make_step("step1", objective="do work"),)
+    spec = ExecutorSpec(
+        entry_id=entry_id,
+        pack=pack,
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+    return spec, steps
+
+
+def _seed_entry(store_root: Path, pack: str, entry_id: str = "wf-001") -> tuple[ExecutorSpec, tuple]:
+    """Seed a workflow entry whose procedure hashes to the returned spec.
+
+    The PackStore is created, the entry is added, and the store instance is
+    returned so tests can reuse it.  The registry should be constructed AFTER
+    this call so that registry.store loads the entry.
+    """
+    spec, steps = _make_spec(entry_id, pack)
+    entry = _make_workflow_entry(id=entry_id, pack=pack, procedure=steps)
+    store = PackStore(store_root)
+    store.add_candidate(entry)
+    return spec, steps, store
 
 
 @dataclass
@@ -98,7 +132,7 @@ class FakeIdentity:
         a_id = getattr(worker_a, "model_id", None)
         b_id = getattr(worker_b, "model_id", None)
         if a_id is None or b_id is None:
-            return True  # Treat missing model_id as distinct
+            return True
         return a_id != b_id
 
 
@@ -108,18 +142,17 @@ class FakeModel:
     model_id: str = "test-model"
 
     def complete(self, role: str, prompt: str, context: dict) -> dict:
-        # Return a valid test plan
         return {
             "tests": [
-                {"name": "test_order", "kind": "order", "step_id": "step1", "expect": "step1"},
-                {"name": "test_check", "kind": "check", "step_id": "status", "expect": "ok"},
+                {"name": "test_order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                {"name": "test_check", "kind": "check", "step_id": "step1", "expect": "ok"},
             ]
         }
 
 
 @dataclass
 class FakeExecutionPort:
-    """Fake execution port for testing."""
+    """Fake execution port that records but does not execute checks."""
     should_fail: bool = False
     call_count: int = 0
 
@@ -130,16 +163,40 @@ class FakeExecutionPort:
         return ExecutionResult(ok=True, output="All tests passed")
 
 
-def _make_spec(entry_id: str = "wf-001", pack: str = "test") -> tuple:
-    """Make a test spec and procedure."""
-    steps = (_make_step("step1", objective="do work"),)
-    spec = ExecutorSpec(
-        entry_id=entry_id,
-        pack=pack,
-        spec_hash=canonical_procedure_hash(steps),
-        procedure=steps,
-    )
-    return spec, steps
+class RealSandboxExecutionPort(ExecutionPort):
+    """ExecutionPort double that actually execs the executor + tests.
+
+    F2-11: the sandbox double really executes the generated source and test
+    source, using the same restricted globals helper the runtime uses.
+    """
+
+    def __init__(self):
+        self.call_count = 0
+        self.outputs: list[str] = []
+
+    def run_check(self, check: dict) -> ExecutionResult:
+        self.call_count += 1
+        executor_source = check["executor_source"]
+        test_source = check["test_source"]
+
+        def load_executor():
+            ns = _make_restricted_globals()
+            exec(executor_source, ns)
+            return ns
+
+        ns = {"load_executor": load_executor, "json": __import__("json")}
+        try:
+            exec(test_source, ns)
+            run_tests = ns["run_tests"]
+            results = run_tests(load_executor)
+            ok = all(r[0] == "pass" for r in results)
+            output = json.dumps(results)
+        except Exception as exc:
+            ok = False
+            output = str(exc)
+
+        self.outputs.append(output)
+        return ExecutionResult(ok=ok, output=output)
 
 
 # =============================================================================
@@ -148,9 +205,6 @@ def _make_spec(entry_id: str = "wf-001", pack: str = "test") -> tuple:
 
 def test_test_author_rejects_compiler_identity():
     """Test author rejects model_id == COMPILER_ID."""
-    from selflearn.compilation.compiler import COMPILER_ID
-
-    # Create a fake model with compiler's identity
     class CompilerModel:
         model_id = COMPILER_ID
 
@@ -169,6 +223,18 @@ def test_test_author_accepts_distinct_identity():
     assert author is not None
 
 
+def test_test_author_wraps_identity_error():
+    """F2-17: identity.distinct failure becomes TestAuthorError."""
+    class ExplodingIdentity:
+        basis = "explodes"
+
+        def distinct(self, a, b):
+            raise RuntimeError("identity backend unavailable")
+
+    with pytest.raises(TestAuthorError, match="identity verification failed"):
+        WorkflowTestAuthor(FakeModel(), ExplodingIdentity())
+
+
 # =============================================================================
 # Gate tests
 # =============================================================================
@@ -180,6 +246,7 @@ def test_gate_no_execution_port_raises():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
 
@@ -189,7 +256,6 @@ def test_gate_no_execution_port_raises():
 
         gate = CrossValidationGate(None, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -217,6 +283,7 @@ def test_gate_spec_mismatch_rejects_without_sandbox():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort()
@@ -227,7 +294,6 @@ def test_gate_spec_mismatch_rejects_without_sandbox():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -235,7 +301,6 @@ def test_gate_spec_mismatch_rejects_without_sandbox():
             compiled_at="2024-01-01T00:00:00Z",
             compiler_id="test",
         )
-        # Suite has different spec hash
         suite = IndependentTestSuite(
             spec_hash="d" * 64,
             test_source="def run_tests(x): pass",
@@ -249,7 +314,120 @@ def test_gate_spec_mismatch_rejects_without_sandbox():
 
         assert receipt.verdict == "rejected"
         assert "mismatch" in receipt.reason.lower()
-        assert execution.call_count == 0  # No sandbox run
+        assert execution.call_count == 0
+
+
+def test_gate_suite_author_identity_collision_rejected():
+    """F2-8: suite author_id == COMPILER_ID or empty basis -> rejected, no sandbox."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort()
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        candidate = ExecutorCandidate(
+            spec=spec,
+            source="print('test')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        suite_collision = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="x",
+            suite_hash="b" * 64,
+            author_id=COMPILER_ID,
+            identity_basis="recorded",
+            authored_at="t",
+        )
+        receipt = gate.evaluate(candidate, suite_collision, None, decided_at="t")
+        assert receipt.verdict == "rejected"
+        assert "identity" in receipt.reason.lower()
+
+        suite_no_basis = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="x",
+            suite_hash="c" * 64,
+            author_id="test-model",
+            identity_basis="",
+            authored_at="t2",
+        )
+        receipt2 = gate.evaluate(candidate, suite_no_basis, None, decided_at="t2")
+        assert receipt2.verdict == "rejected"
+        assert execution.call_count == 0
+
+
+def test_gate_stale_spec_entry_deleted_rejected_zero_sandbox():
+    """Entry deleted after compile: evaluate -> rejected, zero sandbox calls.
+
+    F2-5: stale/unreadable entry check is unconditional, regardless of active.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+
+        compiler = WorkflowCompiler()
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+
+        path = registry.write_candidate(candidate)
+        active_record = ExecutorRecord(
+            record_id="",
+            entry_id=spec.entry_id,
+            pack=pack,
+            spec_hash=spec.spec_hash,
+            executor_hash=candidate.executor_hash,
+            status="active",
+            path=str(path.relative_to(store_root)),
+            receipt_id="old_receipt",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry.add_record(active_record)
+
+        # Simulate the entry disappearing from the store's in-memory view
+        # while the registry.json still holds an active record.
+        del registry.store._entries[spec.entry_id]
+
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort()
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
+
+        assert receipt.verdict == "rejected"
+        assert "unverifiable" in receipt.reason.lower()
+        assert execution.call_count == 0
 
 
 def test_gate_sandbox_pass_awaiting_approval():
@@ -259,6 +437,7 @@ def test_gate_sandbox_pass_awaiting_approval():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=False)
@@ -269,7 +448,6 @@ def test_gate_sandbox_pass_awaiting_approval():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -300,6 +478,7 @@ def test_gate_sandbox_fail_rejected():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=True)
@@ -310,7 +489,6 @@ def test_gate_sandbox_fail_rejected():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -335,6 +513,9 @@ def test_gate_sandbox_fail_rejected():
 
         assert receipt.verdict == "rejected"
         assert receipt.sandbox_ok is False
+        rejected_records = registry.record_for(spec.entry_id, status="rejected")
+        assert len(rejected_records) == 1
+        assert rejected_records[0].receipt_id == receipt.receipt_id
 
 
 def test_gate_activation_with_approval():
@@ -344,6 +525,7 @@ def test_gate_activation_with_approval():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=False)
@@ -354,7 +536,6 @@ def test_gate_activation_with_approval():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -382,30 +563,24 @@ def test_gate_activation_with_approval():
         assert receipt.approval is not None
         assert receipt.approval.strict_mode is True
 
+        active = registry.active_for(spec.entry_id)
+        assert active is not None
+        assert active.status == "active"
+        assert active.receipt_id == receipt.receipt_id
+
 
 def test_gate_swap_requires_baseline():
-    """Gate swap with baseline present works correctly.
-    
-    This tests the happy path of swapping executors when baseline exists.
-    The baseline check exists in gate.py but is triggered only when there's
-    an active executor and a new candidate is being activated.
-    """
+    """Gate swap with baseline present activates the new executor."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
         _create_pack(store_root, pack)
 
-        # Create baseline (needed for swap)
         baseline_dir = store_root / pack / "evals"
         baseline_dir.mkdir(parents=True)
         (baseline_dir / "baseline.json").write_text(json.dumps({"score": 0.5}))
 
-        # Add entry to store
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        entry = _make_workflow_entry(pack=pack, procedure=(_make_step("step1", task_type="code_edit"),))
-        store.add_candidate(entry)
-
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=False)
@@ -415,23 +590,139 @@ def test_gate_swap_requires_baseline():
             return datetime(2024, 1, 1)
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
 
-        spec, steps = _make_spec()
+        stored = registry.store.get(spec.entry_id)
+        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        suite1 = IndependentTestSuite(
+            spec_hash=candidate1.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="a" * 64,
+            author_id="test",
+            identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
 
-        # First activation via gate (creates quarantined record, then activates)
-        from selflearn.compilation.compiler import WorkflowCompiler
-        compiler = WorkflowCompiler()
-        candidate1 = ExecutorCandidate(
+        receipt1 = gate.evaluate(candidate1, suite1, approval, decided_at="2024-01-01T00:00:00Z")
+        assert receipt1.verdict == "activated"
+        assert registry.active_for(spec.entry_id) is not None
+
+        # Update the stored entry to a new procedure, producing a new spec hash.
+        steps2 = (_make_step("step1", objective="do work v2"),)
+        stored.cand = replace(stored.cand, procedure=steps2)
+        registry.store._persist_entry(stored)
+
+        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z")
+        suite2 = IndependentTestSuite(
+            spec_hash=candidate2.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="c" * 64,
+            author_id="test",
+            identity_basis="test",
+            authored_at="2024-01-02T00:00:00Z",
+        )
+        receipt2 = gate.evaluate(candidate2, suite2, approval, decided_at="2024-01-02T00:00:00Z")
+        assert receipt2.verdict == "activated"
+
+
+# =============================================================================
+# FIX-2 / FIX-3 citing tests
+# =============================================================================
+
+def test_gate_swap_order_activate_then_supersede():
+    """F2-2: swap activates the new record BEFORE superseding the old."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        baseline_dir = store_root / pack / "evals"
+        baseline_dir.mkdir(parents=True)
+        (baseline_dir / "baseline.json").write_text(json.dumps({"score": 0.5}))
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        stored = registry.store.get(spec.entry_id)
+        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        suite1 = IndependentTestSuite(
+            spec_hash=candidate1.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="a" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+        gate.evaluate(candidate1, suite1, approval, decided_at="2024-01-01T00:00:00Z")
+
+        # Update the entry so the second candidate has a different spec hash.
+        steps2 = (_make_step("step1", objective="do work v2"),)
+        stored.cand = replace(stored.cand, procedure=steps2)
+        registry.store._persist_entry(stored)
+
+        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z")
+        suite2 = IndependentTestSuite(
+            spec_hash=candidate2.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="c" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-02T00:00:00Z",
+        )
+        receipt2 = gate.evaluate(candidate2, suite2, approval, decided_at="2024-01-02T00:00:00Z")
+
+        active = registry.active_for(spec.entry_id)
+        superseded = registry.record_for(spec.entry_id, status="superseded")
+        assert active is not None
+        assert active.executor_hash == candidate2.executor_hash
+        assert active.receipt_id == receipt2.receipt_id
+        assert active.spec_hash == candidate2.spec.spec_hash
+        assert len(superseded) == 1
+        assert superseded[0].receipt_id == receipt2.receipt_id
+        assert superseded[0].spec_hash == candidate1.spec.spec_hash
+
+
+def test_gate_receipt_binds_record_and_provenance():
+    """F2-3: activation receipt id equals active record receipt id; full receipt in provenance."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+        candidate = ExecutorCandidate(
             spec=spec,
-            source="print('test1')",
+            source="print('test')",
             executor_hash="a" * 64,
             compiled_at="2024-01-01T00:00:00Z",
             compiler_id="test",
         )
-        suite1 = IndependentTestSuite(
+        suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
             test_source="def run_tests(x): pass",
-            suite_hash="a" * 64,
+            suite_hash="b" * 64,
             author_id="test",
             identity_basis="test",
             authored_at="2024-01-01T00:00:00Z",
@@ -441,9 +732,17 @@ def test_gate_swap_requires_baseline():
             approved_at="2024-01-01T00:00:00Z"
         )
 
-        receipt1 = gate.evaluate(candidate1, suite1, approval, decided_at="2024-01-01T00:00:00Z")
-        assert receipt1.verdict == "activated"
-        assert registry.active_for(spec.entry_id) is not None
+        receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
+        assert receipt.verdict == "activated"
+
+        active = registry.active_for(spec.entry_id)
+        assert active.receipt_id == receipt.receipt_id
+
+        activated_events = [e for e in provenance.events if e["kind"] == "gate.activated"]
+        assert len(activated_events) == 1
+        assert activated_events[0]["receipt_id"] == receipt.receipt_id
+        assert "receipt" in activated_events[0]
+        assert activated_events[0]["receipt"]["verdict"] == "activated"
 
 
 def test_provenance_journals_every_decision():
@@ -453,6 +752,7 @@ def test_provenance_journals_every_decision():
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=False)
@@ -463,7 +763,6 @@ def test_provenance_journals_every_decision():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
         candidate = ExecutorCandidate(
             spec=spec,
             source="print('test')",
@@ -516,8 +815,6 @@ def test_provenance_journals_every_decision():
 
 def test_receipt_self_verification():
     """Receipt self-verifies its receipt_id."""
-    from selflearn.compilation import canonical_json
-
     approval = ApprovalRecord(
         approver="admin", basis="reviewed", strict_mode=True,
         approved_at="2024-01-01T00:00:00Z"
@@ -561,16 +858,13 @@ def test_receipt_self_verification():
 # =============================================================================
 
 def test_gate_full_happy_path_activates_and_runtime_runs():
-    """Happy path: compile -> evaluate -> active record exists -> runtime runs.
-
-    FIX-3: write_candidate adds quarantined record; evaluate with approval
-    activates it; registry.active_for returns the record; runtime can execute.
-    """
+    """Happy path: compile -> evaluate -> active record exists -> runtime runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
         execution = FakeExecutionPort(should_fail=False)
@@ -581,15 +875,8 @@ def test_gate_full_happy_path_activates_and_runtime_runs():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
-        from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        entry = _make_workflow_entry(pack=pack, procedure=steps)
-        # Add entry to store
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        store.add_candidate(entry)
-        # Compile
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
         candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
 
         suite = IndependentTestSuite(
@@ -605,49 +892,35 @@ def test_gate_full_happy_path_activates_and_runtime_runs():
             approved_at="2024-01-01T00:00:00Z"
         )
 
-        # Evaluate
         receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
         assert receipt.verdict == "activated"
 
-        # FIX-3: active record now exists
         active = registry.active_for(spec.entry_id)
         assert active is not None
         assert active.status == "active"
         assert active.executor_hash == candidate.executor_hash
 
-        # FIX-3: runtime can run it
-        from selflearn.compilation import ExecutorRuntime
-        exec_dir = store_root / pack / "executors" / spec.entry_id
-        exec_dir.mkdir(parents=True, exist_ok=True)
-        exec_path = exec_dir / f"{spec.spec_hash}.py"
-        exec_path.write_text(candidate.source)
-        # Update record path
-        record_path = f"{pack}/executors/{spec.entry_id}/{spec.spec_hash}.py"
-        active_record = registry.record_for(spec.entry_id, status="active")[0]
-        registry.transition(active_record, "active", "rcpt2", updated_at="2024-01-01T00:00:00Z")
-        # Re-read
-        active = registry.active_for(spec.entry_id)
-        runtime = ExecutorRuntime(registry, store, provenance, clock)
-        result = runtime.run(spec.entry_id, task_id="t1", topic="test",
-                           task_type="code_edit",
-                           step_handler=lambda sid, sdata: {"status": "ok"},
-                           now="2024-01-01T00:00:00Z")
+        # Runtime can run it.
+        runtime = ExecutorRuntime(registry, registry.store, provenance, clock)
+        result = runtime.run(
+            spec.entry_id, task_id="t1", topic="test", task_type="code_edit",
+            step_handler=lambda sid, sdata: {"status": "ok"},
+            now="2024-01-01T00:00:00Z",
+        )
         assert result.status == "completed"
 
 
 def test_gate_rejection_leaves_no_active_record():
-    """Rejection: sandbox fail -> record transitions to rejected, no active.
-
-    FIX-3: verdict 'rejected' -> transition to 'rejected'; no active record.
-    """
+    """Rejection: sandbox fail -> record transitions to rejected, no active."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
         _create_pack(store_root, pack)
 
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
-        execution = FakeExecutionPort(should_fail=True)  # sandbox fails
+        execution = FakeExecutionPort(should_fail=True)
 
         def clock():
             from datetime import datetime
@@ -655,21 +928,15 @@ def test_gate_rejection_leaves_no_active_record():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
-        from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        entry = _make_workflow_entry(pack=pack, procedure=steps)
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        store.add_candidate(entry)
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
         candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
 
         suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
             test_source="def run_tests(x): pass",
             suite_hash="b" * 64,
-            author_id="test",
-            identity_basis="test",
+            author_id="test", identity_basis="test",
             authored_at="2024-01-01T00:00:00Z",
         )
         approval = ApprovalRecord(
@@ -680,31 +947,22 @@ def test_gate_rejection_leaves_no_active_record():
         receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
         assert receipt.verdict == "rejected"
 
-        # FIX-3: no active record
         assert registry.active_for(spec.entry_id) is None
-        # But quarantined record exists (still rejected)
         records = registry.record_for(spec.entry_id, status="rejected")
         assert len(records) == 1
 
 
-def test_gate_swap_leaves_one_active_one_superseded():
-    """Swap: new executor activates; old executor becomes superseded.
-
-    FIX-3: old active -> superseded BEFORE new activates; exactly one active.
-    """
+def test_gate_real_sandbox_double_runs_suite():
+    """F2-11: a real ExecutionPort double executes executor + tests end-to-end."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
         _create_pack(store_root, pack)
 
-        # Create baseline (needed for swap)
-        baseline_dir = store_root / pack / "evals"
-        baseline_dir.mkdir(parents=True)
-        (baseline_dir / "baseline.json").write_text(json.dumps({"score": 0.5}))
-
+        spec, steps, _ = _seed_entry(store_root, pack)
         registry = ExecutorRegistry(store_root, pack)
         provenance = FakeProvenance()
-        execution = FakeExecutionPort(should_fail=False)
+        execution = RealSandboxExecutionPort()
 
         def clock():
             from datetime import datetime
@@ -712,196 +970,45 @@ def test_gate_swap_leaves_one_active_one_superseded():
 
         gate = CrossValidationGate(execution, registry, provenance, clock)
 
-        spec, steps = _make_spec()
-        from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        entry = _make_workflow_entry(pack=pack, procedure=steps)
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        store.add_candidate(entry)
-        candidate1 = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
-
-        # First activation
-        suite = IndependentTestSuite(
-            spec_hash=spec.spec_hash,
-            test_source="def run_tests(x): pass",
-            suite_hash="a" * 64,
-            author_id="test", identity_basis="test",
-            authored_at="2024-01-01T00:00:00Z",
-        )
-        approval = ApprovalRecord(
-            approver="admin", basis="reviewed", strict_mode=True,
-            approved_at="2024-01-01T00:00:00Z"
-        )
-        gate.evaluate(candidate1, suite, approval, decided_at="2024-01-01T00:00:00Z")
-
-        # Second activation (swap)
-        candidate2 = compiler.compile(entry, pack=pack, compiled_at="2024-01-02T00:00:00Z")
-        suite2 = IndependentTestSuite(
-            spec_hash=spec.spec_hash,
-            test_source="def run_tests(x): pass",
-            suite_hash="b" * 64,
-            author_id="test", identity_basis="test",
-            authored_at="2024-01-02T00:00:00Z",
-        )
-        gate.evaluate(candidate2, suite2, approval, decided_at="2024-01-02T00:00:00Z")
-
-        # FIX-3: exactly one active, one superseded
-        active_records = registry.record_for(spec.entry_id, status="active")
-        superseded_records = registry.record_for(spec.entry_id, status="superseded")
-        assert len(active_records) == 1
-        assert len(superseded_records) == 1
-
-
-def test_gate_unregistered_candidate_rejected_zero_sandbox_calls():
-    """Unregistered candidate: evaluate without prior write_candidate -> rejected.
-
-    FIX-3: evaluate REQUIRES existing quarantined record; absent -> rejected.
-    
-    Note: gate now calls write_candidate internally, so we simulate by not
-    having the entry in the store (which causes other rejection).
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store_root = Path(tmpdir)
-        pack = "test"
-        _create_pack(store_root, pack)
-
-        registry = ExecutorRegistry(store_root, pack)
-        provenance = FakeProvenance()
-        execution = FakeExecutionPort()  # track call count
-
-        def clock():
-            from datetime import datetime
-            return datetime(2024, 1, 1)
-
-        gate = CrossValidationGate(execution, registry, provenance, clock)
-
-        spec, steps = _make_spec()
-        from selflearn.compilation.compiler import WorkflowCompiler
-        compiler = WorkflowCompiler()
-        entry = _make_workflow_entry(pack=pack, procedure=steps)
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        store.add_candidate(entry)
-
-        # Compile but do NOT call write_candidate first
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
         candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
-        suite = IndependentTestSuite(
-            spec_hash=spec.spec_hash,
-            test_source="def run_tests(x): pass",
-            suite_hash="b" * 64,
-            author_id="test", identity_basis="test",
-            authored_at="2024-01-01T00:00:00Z",
-        )
+
+        # Build a real test suite that asserts completion order.
+        from selflearn.compilation.testgen import WorkflowTestAuthor
+        author = WorkflowTestAuthor(FakeModel(), FakeIdentity())
+        suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
+
         approval = ApprovalRecord(
             approver="admin", basis="reviewed", strict_mode=True,
             approved_at="2024-01-01T00:00:00Z"
         )
 
         receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
-
-        # FIX-3: gate now calls write_candidate internally, so candidate IS registered
-        # The rejection happens for a different reason now (if any)
-        # Just verify sandbox was called
+        assert receipt.verdict == "activated"
+        assert receipt.sandbox_ok is True
         assert execution.call_count == 1
 
 
 # =============================================================================
-# FIX-4 citing test: stale-spec check fails closed
-# =============================================================================
-
-def test_gate_stale_spec_entry_deleted_rejected_zero_sandbox():
-    """Entry deleted after compile: evaluate -> rejected, zero sandbox calls.
-
-    FIX-4: entry missing/unreadable/hash-uncomputable -> rejected, no sandbox.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        store_root = Path(tmpdir)
-        pack = "test"
-        _create_pack(store_root, pack)
-
-        registry = ExecutorRegistry(store_root, pack)
-        provenance = FakeProvenance()
-        execution = FakeExecutionPort()
-
-        def clock():
-            from datetime import datetime
-            return datetime(2024, 1, 1)
-
-        gate = CrossValidationGate(execution, registry, provenance, clock)
-
-        spec, steps = _make_spec()
-        from selflearn.compilation.compiler import WorkflowCompiler
-        compiler = WorkflowCompiler()
-        entry = _make_workflow_entry(pack=pack, procedure=steps)
-        from selflearn.store.packstore import PackStore
-        store = PackStore(store_root)
-        store.add_candidate(entry)
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
-
-        suite = IndependentTestSuite(
-            spec_hash=spec.spec_hash,
-            test_source="def run_tests(x): pass",
-            suite_hash="b" * 64,
-            author_id="test", identity_basis="test",
-            authored_at="2024-01-01T00:00:00Z",
-        )
-        approval = ApprovalRecord(
-            approver="admin", basis="reviewed", strict_mode=True,
-            approved_at="2024-01-01T00:00:00Z"
-        )
-
-        # Create an active executor first (so stale-spec check triggers)
-        path = registry.write_candidate(candidate)
-        from selflearn.compilation.models import ExecutorRecord
-        active_record = ExecutorRecord(
-            record_id="",
-            entry_id=spec.entry_id,
-            pack=pack,
-            spec_hash=spec.spec_hash,
-            executor_hash=candidate.executor_hash,
-            status="active",
-            path=str(path.relative_to(store_root)),
-            receipt_id="old_receipt",
-            updated_at="2024-01-01T00:00:00Z",
-        )
-        registry.add_record(active_record)
-
-        # Delete the entry file AFTER creating active executor
-        entries_dir = store_root / pack / "entries"
-        for f in entries_dir.glob("*.md"):
-            f.unlink()
-
-        receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
-
-        # FIX-4: rejected, zero sandbox calls
-        assert receipt.verdict == "rejected"
-        assert "unverifiable" in receipt.reason.lower() or "missing" in receipt.reason.lower()
-        assert execution.call_count == 0
-
-
-# =============================================================================
-# FIX-5 citing tests: escape everything, validate plan
+# FIX-5 / F2-1 / F2-10 citing tests: test author rendering
 # =============================================================================
 
 def test_testgen_hostile_step_id_renders_as_inert_literal():
-    """Plan with step_id='x\\' or True #' renders as escaped literal.
-
-    FIX-5: every model-supplied string goes through json.dumps; the resulting
-    test source parses without error and contains the safely-escaped form.
-    """
+    """Plan with hostile step_id renders as escaped literal."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class HostileModel:
         model_id = "hostile"
+
         def complete(self, role, prompt, context):
             return {
                 "tests": [
                     {
                         "name": "test order",
                         "kind": "order",
-                        "step_id": "x' or True #",  # SQL/JS injection attempt
-                        "expect": "step2",  # Simplified expect to avoid injection
+                        "step_id": "x' or True #",
+                        "expect": '["step2"]',
                     },
                     {
                         "name": "test check",
@@ -914,7 +1021,9 @@ def test_testgen_hostile_step_id_renders_as_inert_literal():
 
     class FakeIdentity:
         basis = "test"
-        def distinct(self, a, b): return True
+
+        def distinct(self, a, b):
+            return True
 
     steps = (
         ProcedureStep(id="normal_step", objective="do work", task_type="code_edit"),
@@ -929,36 +1038,109 @@ def test_testgen_hostile_step_id_renders_as_inert_literal():
     author = WorkflowTestAuthor(HostileModel(), FakeIdentity())
     suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
 
-    # FIX-5: the generated source must be valid Python (parse without error)
     compile(suite.test_source, "<test>", "exec")
-
-    # FIX-5: the hostile step_id string appears as a JSON-escaped literal
-    # json.dumps escapes single quotes as \'
     assert "x' or True #" not in suite.test_source
 
 
-def test_testgen_nonexistent_step_id_raises():
-    """Plan referencing nonexistent step_id -> TestAuthorError.
+def test_testgen_approval_and_failure_path_render_compile():
+    """F2-1: approval AND failure-path kinds render and compile cleanly."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
 
-    FIX-5: step_id for check/approval/failure-path must be in spec.
-    """
+    class CoverageModel:
+        model_id = "coverage"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                    {"name": "approval", "kind": "approval", "step_id": "step2", "expect": ""},
+                    {"name": "failure", "kind": "failure-path", "step_id": "step1", "expect": ""},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (
+        ProcedureStep(id="step1", objective="do work", task_type="code_edit"),
+        ProcedureStep(id="step2", objective="approve", task_type="approval"),
+    )
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite = WorkflowTestAuthor(CoverageModel(), FakeIdentity()).author_suite(
+        spec, authored_at="2024-01-01T00:00:00Z"
+    )
+    compile(suite.test_source, "<test>", "exec")
+    assert "approval not raised" in suite.test_source
+    assert "no failure" in suite.test_source
+
+
+def test_testgen_order_expect_comma_split_renders():
+    """F2-10: order expect 's1,s2' renders a list literal that compares correctly."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+
+    class CommaModel:
+        model_id = "comma"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": "step1,step2"},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (
+        ProcedureStep(id="step1", objective="one", task_type="code_edit"),
+        ProcedureStep(id="step2", objective="two", task_type="code_edit"),
+    )
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite = WorkflowTestAuthor(CommaModel(), FakeIdentity()).author_suite(
+        spec, authored_at="2024-01-01T00:00:00Z"
+    )
+    compile(suite.test_source, "<test>", "exec")
+    assert '["step1", "step2"]' in suite.test_source
+
+
+def test_testgen_nonexistent_step_id_raises():
+    """Plan referencing nonexistent step_id -> TestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
         model_id = "bad"
+
         def complete(self, role, prompt, context):
             return {
                 "tests": [
                     {"name": "test", "kind": "check",
                      "step_id": "nonexistent_step", "expect": "ok"},
                     {"name": "order", "kind": "order",
-                     "step_id": "normal_step", "expect": "normal_step"},
+                     "step_id": "normal_step", "expect": '["normal_step"]'},
                 ]
             }
 
     class FakeIdentity:
         basis = "test"
-        def distinct(self, a, b): return True
+
+        def distinct(self, a, b):
+            return True
 
     steps = (ProcedureStep(id="normal_step", objective="x", task_type="code_edit"),)
     spec = ExecutorSpec(
@@ -973,14 +1155,12 @@ def test_testgen_nonexistent_step_id_raises():
 
 
 def test_testgen_order_without_expect_raises():
-    """Order test without expect -> TestAuthorError.
-
-    FIX-5: order test requires non-empty expect.
-    """
+    """Order test without expect -> TestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
         model_id = "bad"
+
         def complete(self, role, prompt, context):
             return {
                 "tests": [
@@ -991,7 +1171,9 @@ def test_testgen_order_without_expect_raises():
 
     class FakeIdentity:
         basis = "test"
-        def distinct(self, a, b): return True
+
+        def distinct(self, a, b):
+            return True
 
     steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
     spec = ExecutorSpec(
@@ -1010,18 +1192,13 @@ def test_testgen_order_without_expect_raises():
 # =============================================================================
 
 def test_gate_no_compute_receipt_id_function():
-    """_compute_receipt_id is deleted; models.py is the only hasher.
-
-    FIX-7: gate.py must not have _compute_receipt_id; CrossValidationReceipt
-    always constructed with receipt_id='' and self-hashes.
-    """
+    """_compute_receipt_id is deleted; models.py is the only hasher."""
     import inspect
     from selflearn.compilation import gate
 
     assert not hasattr(gate, '_compute_receipt_id'), \
         "_compute_receipt_id must be deleted (FIX-7)"
 
-    # Verify CrossValidationReceipt with receipt_id='' self-hashes
     receipt = CrossValidationReceipt(
         receipt_id="",
         spec_hash="a" * 64,
@@ -1034,18 +1211,15 @@ def test_gate_no_compute_receipt_id_function():
         reason="test",
         decided_at="2024-01-01T00:00:00Z",
     )
-    assert receipt.receipt_id != ""  # Self-hashed by model
+    assert receipt.receipt_id != ""
 
 
 # =============================================================================
-# FIX-8 citing test: unverifiable entry is a finding
+# FIX-8 / F2-4 citing test: doctor unverifiable entry
 # =============================================================================
 
 def test_doctor_unverifiable_entry_is_finding():
-    """Unverifiable executor entry produces executor.dangling-entry Finding.
-
-    FIX-8: bare except -> Finding(code=executor.dangling-entry, fixable=False).
-    """
+    """F2-4: entry file exists but is unparseable -> executor.unverifiable."""
     from selflearn.doctor import DoctorReport, Finding, _check_executors
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1057,7 +1231,10 @@ def test_doctor_unverifiable_entry_is_finding():
         (pack_dir / "manifest.json").write_text(json.dumps(manifest))
         entries_dir = pack_dir / "entries"
         entries_dir.mkdir()
-        # No entries - unverifiable scenario
+
+        # Write an entry file that exists but is unparseable YAML
+        (entries_dir / "wf-001.md").write_text("---\nnot yaml: [\n---\nbody")
+
         exec_dir = pack_dir / "executors"
         exec_dir.mkdir()
         registry_path = exec_dir / "registry.json"
@@ -1069,7 +1246,7 @@ def test_doctor_unverifiable_entry_is_finding():
                 "spec_hash": "a" * 64,
                 "executor_hash": "b" * 64,
                 "status": "active",
-                "path": "entries/wf-001.md",  # nonexistent
+                "path": "entries/wf-001.md",
                 "receipt_id": "rcpt1",
                 "updated_at": "2024-01-01T00:00:00Z",
             }]
@@ -1078,12 +1255,9 @@ def test_doctor_unverifiable_entry_is_finding():
         report = DoctorReport(root=store_root, fix=False)
         _check_executors(pack_dir, fix=False, report=report)
 
-        # FIX-8: unverifiable entry produces a finding (not silent)
-        # The doctor produces executor.dangling-entry for missing entry files
-        dangling = [f for f in report.findings
-                  if f.code == "executor.dangling-entry"]
-        assert len(dangling) >= 1
-        assert dangling[0].fixable is False
+        unverifiable = [f for f in report.findings if f.code == "executor.unverifiable"]
+        assert len(unverifiable) == 1
+        assert unverifiable[0].fixable is False
 
 
 # =============================================================================
@@ -1091,10 +1265,7 @@ def test_doctor_unverifiable_entry_is_finding():
 # =============================================================================
 
 def test_registry_active_for_no_side_effects():
-    """active_for on empty pack leaves no executors/ directory.
-
-    FIX-9: read paths return empty, never create files.
-    """
+    """active_for on empty pack leaves no executors/ directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
@@ -1102,20 +1273,15 @@ def test_registry_active_for_no_side_effects():
 
         registry = ExecutorRegistry(store_root, pack)
 
-        # active_for on nonexistent pack
         result = registry.active_for("nonexistent-entry")
         assert result is None
 
-        # FIX-9: no executors/ dir created
         exec_dir = store_root / pack / "executors"
         assert not exec_dir.exists()
 
 
-def test_registry_malformed_record_raises():
-    """Hand-corrupted record field -> RegistryError.
-
-    FIX-9: record that fails ExecutorRecord construction -> RegistryError.
-    """
+def test_registry_malformed_file_raises():
+    """Hand-corrupted record field -> RegistryError."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store_root = Path(tmpdir)
         pack = "test"
@@ -1123,7 +1289,6 @@ def test_registry_malformed_record_raises():
 
         registry = ExecutorRegistry(store_root, pack)
 
-        # Add a well-formed record first
         record = ExecutorRecord(
             record_id="",
             entry_id="wf-001",
@@ -1137,11 +1302,98 @@ def test_registry_malformed_record_raises():
         )
         registry.add_record(record)
 
-        # Corrupt the registry file
         data = json.loads(registry._registry_path.read_text())
-        data["records"][0]["status"] = "invalid_status"  # invalid enum
+        data["records"][0]["status"] = "invalid_status"
         registry._registry_path.write_text(json.dumps(data))
 
-        # FIX-9: read raises RegistryError (not silently skipped)
         with pytest.raises(RegistryError, match="Corrupt record"):
             registry.record_for("wf-001")
+
+
+# =============================================================================
+# F2-7 citing tests: provenance on compile / test-author / quarantine
+# =============================================================================
+
+def test_compile_journals_provenance():
+    """F2-7: WorkflowCompiler.compile appends compile event when provenance bound."""
+    from selflearn.compilation.compiler import WorkflowCompiler
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        provenance = FakeProvenance()
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+
+        compiler = WorkflowCompiler()
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
+        compiler.compile(
+            entry, pack=pack, compiled_at="2024-01-01T00:00:00Z",
+            provenance=provenance, clock=clock,
+        )
+
+        compile_events = [e for e in provenance.events if e["kind"] == "compile"]
+        assert len(compile_events) == 1
+        assert compile_events[0]["entry_id"] == spec.entry_id
+
+
+def test_test_author_journals_provenance():
+    """F2-7: WorkflowTestAuthor.author_suite appends test-author event."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+
+    provenance = FakeProvenance()
+
+    def clock():
+        from datetime import datetime
+        return datetime(2024, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+
+    steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite = WorkflowTestAuthor(FakeModel(), FakeIdentity()).author_suite(
+        spec, authored_at="2024-01-01T00:00:00Z",
+        provenance=provenance, clock=clock,
+    )
+
+    author_events = [e for e in provenance.events if e["kind"] == "test-author"]
+    assert len(author_events) == 1
+    assert author_events[0]["suite_hash"] == suite.suite_hash
+
+
+def test_registry_write_candidate_journals_quarantine():
+    """F2-7: ExecutorRegistry.write_candidate journals quarantined event."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+
+        registry = ExecutorRegistry(store_root, pack, provenance=provenance, clock=clock)
+
+        spec, steps = _make_spec()
+        candidate = ExecutorCandidate(
+            spec=spec,
+            source="print('hello')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        registry.write_candidate(candidate)
+
+        quarantine_events = [e for e in provenance.events if e["kind"] == "quarantined"]
+        assert len(quarantine_events) == 1
+        assert quarantine_events[0]["entry_id"] == spec.entry_id

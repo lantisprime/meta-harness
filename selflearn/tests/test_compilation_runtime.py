@@ -756,3 +756,145 @@ def test_completed_steps_fidelity_on_failure():
         # FIX-6: completed_steps reflects what actually ran (only s1)
         assert result.completed_steps == ("s1",)
         assert result.outcomes[0].step_id == "s2"
+
+
+# =============================================================================
+# F2-6 citing test: host handler error is not entry evidence
+# =============================================================================
+
+def test_runtime_handler_error_is_not_entry_evidence():
+    """F2-6: step_handler exception -> RunResult error, outcomes=()."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="do work", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        compiler = WorkflowCompiler()
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+
+        exec_dir = store_root / pack / "executors" / "wf-001"
+        exec_dir.mkdir(parents=True)
+        exec_path = exec_dir / f"{spec_hash}.py"
+        exec_path.write_text(candidate.source)
+
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash=candidate.executor_hash,
+            status="active",
+            path=f"{pack}/executors/wf-001/{spec_hash}.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        def exploding_handler(step_id, step_data):
+            raise RuntimeError("host bug")
+
+        result = runtime.run("wf-001", task_id="t1", topic="test",
+                            task_type="code_edit", step_handler=exploding_handler,
+                            now="2024-01-01T00:00:00Z")
+
+        assert result.status == "error"
+        assert result.outcomes == ()
+        assert any(e["kind"] == "runtime.handler-error" for e in provenance.events)
+
+
+# =============================================================================
+# F2-13 citing test: doctor flags orphan executor source
+# =============================================================================
+
+def test_doctor_flags_orphan_source():
+    """F2-13: doctor reports executor.orphan-source when source has no record."""
+    from selflearn.doctor import DoctorReport, _check_executors
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        (pack_dir / "entries").mkdir()
+
+        orphan_dir = pack_dir / "executors" / "wf-001"
+        orphan_dir.mkdir(parents=True)
+        (orphan_dir / "orphan.py").write_text("print('orphan')")
+
+        registry_path = pack_dir / "executors" / "registry.json"
+        registry_path.write_text(json.dumps({"records": []}))
+
+        report = DoctorReport(root=store_root, fix=False)
+        _check_executors(pack_dir, fix=False, report=report)
+
+        orphans = [f for f in report.findings if f.code == "executor.orphan-source"]
+        assert len(orphans) == 1
+        assert orphans[0].fixable is False
+
+
+# =============================================================================
+# F2-16 citing test: AST preflight rejects dunder escape classes
+# =============================================================================
+
+def test_runtime_ast_preflight_rejects_dunder_escape():
+    """F2-16: source with dunder escape class is refused before exec."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="do work", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        exec_dir = store_root / pack / "executors" / "wf-001"
+        exec_dir.mkdir(parents=True)
+        exec_path = exec_dir / f"{spec_hash}.py"
+        # Source that would otherwise execute a dunder escape and uses no builtins.
+        exec_path.write_text(
+            "def run(handler):\n"
+            "    ().__class__.__bases__[0].__subclasses__()\n"
+            "    return {'completed': []}\n"
+        )
+
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash=content_hash(exec_path.read_text()),
+            status="active",
+            path=f"{pack}/executors/wf-001/{spec_hash}.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="forbidden dunder"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")

@@ -6,6 +6,7 @@ No model in the control spine - pure stdlib code generation.
 from __future__ import annotations
 
 import json
+from typing import Any, Callable, Optional
 
 from selflearn.contracts import CandidateEntry, ContractError, ProcedureStep
 
@@ -15,6 +16,7 @@ from selflearn.compilation.models import (
     canonical_procedure_hash,
     content_hash,
 )
+from selflearn.ports import ProvenancePort
 
 COMPILER_ID = "deterministic-workflow-compiler:v1"
 
@@ -64,14 +66,23 @@ def _generate_step_dict(step: ProcedureStep) -> str:
 class WorkflowCompiler:
     """Compiles workflow entries to executable Python modules."""
 
-    def compile(self, entry: CandidateEntry, *, pack: str,
-                compiled_at: str) -> ExecutorCandidate:
+    def compile(
+        self,
+        entry: CandidateEntry,
+        *,
+        pack: str,
+        compiled_at: str,
+        provenance: Optional[ProvenancePort] = None,
+        clock: Optional[Callable[[], Any]] = None,
+    ) -> ExecutorCandidate:
         """Compile a workflow entry to an ExecutorCandidate.
 
         Args:
             entry: A CandidateEntry with kind == "workflow"
             pack: The pack name
             compiled_at: ISO timestamp
+            provenance: Optional provenance port for compile events (F2-7)
+            clock: Optional clock for timestamps (F2-7)
 
         Returns:
             ExecutorCandidate with generated source code
@@ -87,6 +98,19 @@ class WorkflowCompiler:
             raise CompilerError(
                 "WorkflowCompiler requires non-empty procedure")
 
+        # F2-18: validate that all check values are JSON-serializable before
+        # any hashing or source generation.  Non-serializable values would
+        # otherwise corrupt the canonical procedure hash and generated source.
+        import json as _json
+        for step in entry.procedure:
+            for _, value in step.check:
+                try:
+                    _json.dumps(value)
+                except TypeError as exc:
+                    raise CompilerError(
+                        f"non-JSON-serializable check value in step {step.id!r}: {value!r}"
+                    ) from exc
+
         # Build spec
         spec_hash = canonical_procedure_hash(entry.procedure)
         spec = ExecutorSpec(
@@ -100,13 +124,28 @@ class WorkflowCompiler:
         source = self._generate_source(spec, entry.id)
         executor_hash = content_hash(source)
 
-        return ExecutorCandidate(
+        candidate = ExecutorCandidate(
             spec=spec,
             source=source,
             executor_hash=executor_hash,
             compiled_at=compiled_at,
             compiler_id=COMPILER_ID,
         )
+
+        # F2-7: journal compile event when provenance is bound
+        if provenance is not None:
+            timestamp = clock().isoformat() if clock is not None else compiled_at
+            provenance.append({
+                "kind": "compile",
+                "entry_id": entry.id,
+                "spec_hash": spec_hash,
+                "executor_hash": executor_hash,
+                "compiler_id": COMPILER_ID,
+                "actor": COMPILER_ID,
+                "timestamp": timestamp,
+            })
+
+        return candidate
 
     def _generate_source(self, spec: ExecutorSpec, entry_id: str) -> str:
         """Generate the Python source for the executor."""

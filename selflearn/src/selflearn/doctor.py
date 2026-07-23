@@ -189,6 +189,25 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
     entries_dir = pack_dir / "entries"
     entry_files = {f.stem: f for f in entries_dir.glob("*.md")} if entries_dir.exists() else {}
 
+    # F2-13: orphan-source check — any on-disk executor source not referenced
+    # by any registry record.  True two-file transactions do not exist; this
+    # checks for crash windows where source was written but registry update
+    # did not complete.
+    recorded_paths = {r.get("path", "") for r in records}
+    if exec_dir.exists():
+        for entry_dir in exec_dir.iterdir():
+            if not entry_dir.is_dir():
+                continue
+            for source_file in entry_dir.glob("*.py"):
+                rel_path = str(source_file.relative_to(pack_dir))
+                if rel_path not in recorded_paths:
+                    report.findings.append(Finding(
+                        "executor.orphan-source",
+                        rel_path,
+                        f"Executor source has no registry record: {rel_path}",
+                        fixable=False,
+                    ))
+
     # Check each ACTIVE record
     for record in records:
         if record.get("status") != "active":
@@ -212,11 +231,14 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
             entry_path = entry_files[entry_id]
             front, body, err = _read_front(entry_path)
             if err is not None:
-                continue
+                # F2-4: entry file exists but is unparseable -> unverifiable
+                raise RuntimeError(f"entry file unreadable: {err}")
 
             cand, err = _build_candidate(front, body)
-            if err is not None or not cand.procedure:
-                continue
+            if err is not None:
+                raise RuntimeError(f"entry fields invalid: {err}")
+            if not cand.procedure:
+                raise RuntimeError("entry has no procedure")
 
             current_hash = canonical_procedure_hash(cand.procedure)
             if current_hash != record.get("spec_hash"):
@@ -227,9 +249,14 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
                     f"does not match current procedure hash {current_hash[:16]}...",
                     fixable=False,
                 ))
-        except Exception:
-            # If we can't verify, skip silently
-            pass
+        except Exception as e:
+            # F2-4: unverifiable entry -> Finding with fixable=False
+            report.findings.append(Finding(
+                "executor.unverifiable",
+                f"{pack}/executors/{entry_id}",
+                f"Cannot verify executor: {e}",
+                fixable=False,
+            ))
 
 
 @dataclass

@@ -5,6 +5,7 @@ with a strict whitelist of builtins.
 """
 from __future__ import annotations
 
+import ast
 import builtins
 import json
 
@@ -22,11 +23,39 @@ SAFE_BUILTINS = {
     "True", "False", "None",
     # Functional helpers
     "abs", "all", "any", "bin", "callable", "chr", "divmod", "enumerate",
-    "filter", "getattr", "hasattr", "hash", "hex", "id", "isinstance",
+    "filter", "getattr", "hasattr", "hash", "hex", "isinstance",
     "issubclass", "iter", "len", "map", "max", "min", "next", "oct", "ord",
     "pow", "repr", "reversed", "round", "sorted", "staticmethod", "sum",
     "super", "tuple", "zip", "__build_class__",
+    # NOTE: `id` intentionally omitted (F2-16) — leaks memory addresses and
+    # is unnecessary for generated executors.
 }
+
+
+def _ast_preflight(source: str) -> None:
+    """Reject sources containing dunder escapes or __builtins__ access.
+
+    F2-16: generated executors are machine-templated from escaped contract
+    data and never need dunder attributes (other than __init__) or
+    __builtins__.  This blocks the ().__class__.__bases__[0].__subclasses__()
+    escape class before exec.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise RuntimeCompError(f"executor source is not valid Python: {exc}") from exc
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            # Only __init__ is allowed; all other dunders are forbidden.
+            if node.attr.startswith("__") and node.attr != "__init__":
+                raise RuntimeCompError(
+                    f"executor source contains forbidden dunder access: {node.attr}"
+                )
+        if isinstance(node, ast.Name) and node.id == "__builtins__":
+            raise RuntimeCompError(
+                "executor source contains forbidden __builtins__ reference"
+            )
 
 
 def _make_restricted_globals(extra_globals: dict | None = None) -> dict:
@@ -143,6 +172,9 @@ class ExecutorRuntime:
             raise RuntimeCompError(
                 f"Executor for {entry_id} has been tampered with")
 
+        # F2-16: AST preflight before exec
+        _ast_preflight(source)
+
         # Journal run start
         self.provenance.append({
             "kind": "runtime.start",
@@ -223,16 +255,17 @@ class ExecutorRuntime:
             status = "failed"
 
         except Exception as e:
-            outcomes = (TaskOutcome(
-                task_id=task_id,
-                task_type=task_type,
-                topic=topic,
-                verdict="fail",
-                injected=(entry_id,),
-                implicated=(entry_id,),
-                failure_mode="executor-error",
-            ),)
-            status = "failed"
+            # F2-6: a step_handler exception is a host failure, not entry evidence.
+            outcomes = ()
+            status = "error"
+            self.provenance.append({
+                "kind": "runtime.handler-error",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "reason": str(e),
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
 
         # Journal run finish
         self.provenance.append({

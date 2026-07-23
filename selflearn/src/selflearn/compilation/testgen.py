@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any, Callable, Optional
 
 from selflearn.compilation.models import ExecutorSpec, IndependentTestSuite
 from selflearn.compilation.compiler import COMPILER_ID
 from selflearn.contracts import ContractError
-from selflearn.ports import IdentityPort, ModelPort
+from selflearn.ports import IdentityPort, ModelPort, ProvenancePort
 
 AUTHOR_ROLE = "workflow-test-author"
 
@@ -37,12 +38,28 @@ class WorkflowTestAuthor:
         self.identity = identity
 
         # Enforce identity separation - compiler model_id must be distinct
-        if not identity.distinct(model, _CompilerMarker()):
+        try:
+            if not identity.distinct(model, _CompilerMarker()):
+                raise TestAuthorError(
+                    f"identity violation: test author must be distinct from "
+                    f"compiler (basis: {identity.basis})")
+        except Exception as exc:
+            # F2-17: convert identity-port failures into TestAuthorError,
+            # preserving the underlying cause.
+            if isinstance(exc, TestAuthorError):
+                raise
             raise TestAuthorError(
-                f"identity violation: test author must be distinct from "
-                f"compiler (basis: {identity.basis})")
+                f"identity verification failed: {exc}"
+            ) from exc
 
-    def author_suite(self, spec: ExecutorSpec, *, authored_at: str) -> IndependentTestSuite:
+    def author_suite(
+        self,
+        spec: ExecutorSpec,
+        *,
+        authored_at: str,
+        provenance: Optional[ProvenancePort] = None,
+        clock: Optional[Callable[[], Any]] = None,
+    ) -> IndependentTestSuite:
         """Generate an independent test suite for the executor spec.
 
         Args:
@@ -106,10 +123,23 @@ class WorkflowTestAuthor:
 
             if kind == "order":
                 has_order = True
-                # FIX-5: order test requires non-empty expect listing step ids
+                # F2-10: order expect may be a JSON array or comma-separated ids.
                 if not expect:
                     raise TestAuthorError(
                         f"Test #{i} (order) requires non-empty expect")
+                # Parse order; validate every id belongs to the spec.
+                try:
+                    parsed = json.loads(expect)
+                    if not isinstance(parsed, list):
+                        raise TestAuthorError(
+                            f"Test #{i} (order) expect must be a list")
+                except json.JSONDecodeError:
+                    parsed = [part.strip() for part in expect.split(",")]
+                for ordered_id in parsed:
+                    if ordered_id not in spec_step_ids:
+                        raise TestAuthorError(
+                            f"Test #{i} (order) expect step {ordered_id!r} "
+                            f"not in spec")
             if kind == "approval":
                 has_approval = True
             if kind == "check":
@@ -138,7 +168,7 @@ class WorkflowTestAuthor:
         import hashlib
         suite_hash = hashlib.sha256(test_source.encode()).hexdigest()
 
-        return IndependentTestSuite(
+        suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
             test_source=test_source,
             suite_hash=suite_hash,
@@ -146,6 +176,22 @@ class WorkflowTestAuthor:
             identity_basis=self.identity.basis,
             authored_at=authored_at,
         )
+
+        # F2-7: journal test-author event when provenance is bound
+        if provenance is not None:
+            timestamp = clock().isoformat() if clock is not None else authored_at
+            provenance.append({
+                "kind": "test-author",
+                "entry_id": spec.entry_id,
+                "spec_hash": spec.spec_hash,
+                "suite_hash": suite_hash,
+                "author_id": suite.author_id,
+                "identity_basis": suite.identity_basis,
+                "actor": AUTHOR_ROLE,
+                "timestamp": timestamp,
+            })
+
+        return suite
 
     def _canonical_procedure(self, procedure: tuple) -> list:
         """Convert procedure to canonical list for context."""
@@ -199,13 +245,19 @@ class WorkflowTestAuthor:
 
             lines.append(f"    # Test: {name} (kind={kind})")
             if kind == "order":
-                # FIX-5: expect is comma-separated step ids -> list via json.loads
+                # F2-10: expect is a JSON list or comma-separated ids; render
+                # the parsed list deterministically. Validation above guarantees
+                # it is a list of valid step ids.
+                try:
+                    parsed_order = json.loads(expect)
+                except json.JSONDecodeError:
+                    parsed_order = [part.strip() for part in expect.split(",")]
+                rendered_expect = json.dumps(parsed_order)
                 lines.append(f"    # Expect: step order matches {expect}")
                 lines.append("    try:")
                 lines.append("        executor = load_executor()")
                 lines.append("        result = executor['run'](lambda s, d: {'status': 'ok'})")
-                # FIX-5: parse expect as JSON list to avoid .split() injection
-                lines.append(f"        expected_order = json.loads({safe_expect})")
+                lines.append(f"        expected_order = {rendered_expect}")
                 lines.append("        actual_order = result.get('completed', [])")
                 lines.append("        assert actual_order == expected_order, f'Order mismatch: {actual_order} vs {expected_order}'")
                 lines.append(f"        results.append(('pass', {safe_name}))")
@@ -239,7 +291,7 @@ class WorkflowTestAuthor:
                 lines.append("            if 'ApprovalRequired' in type(e).__name__:")
                 lines.append(f"                results.append(('pass', {safe_name}))")
                 lines.append("            else:")
-                lines.append(f"                results.append(('fail', {safe_name} + ': wrong exception')))")
+                lines.append(f"                results.append(('fail', {safe_name} + ': wrong exception'))")
                 lines.append("    except Exception as e:")
                 lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")
                 lines.append("")
@@ -254,7 +306,7 @@ class WorkflowTestAuthor:
                 lines.append("            return {'status': 'ok'}")
                 lines.append("        try:")
                 lines.append("            executor['run'](fail_handler)")
-                lines.append(f"            results.append(('fail', {safe_name} + ': no failure')))")
+                lines.append(f"            results.append(('fail', {safe_name} + ': no failure'))")
                 lines.append("        except Exception as e:")
                 lines.append(f"            results.append(('pass', {safe_name}))")
                 lines.append("    except Exception as e:")
