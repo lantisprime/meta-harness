@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 80,
+  "revision": 81,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2559,6 +2559,32 @@
         "revisionTo": 80,
         "at": "2026-07-22T12:53:45.338Z"
       }
+    },
+    {
+      "id": "TASK-20260714-006",
+      "title": "Add typed heartbeats, population scheduling, and declarative search-policy candidates",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "src/metaharness/discovery",
+        "tests/test_discovery_heartbeats.py",
+        "tests/test_discovery_scheduling.py",
+        "tests/test_discovery_policy.py",
+        "tests/adversarial/test_discovery_policy_boundaries.py"
+      ],
+      "priority": 1,
+      "trace": "Linear META-8; charter stages 2-4; heartbeats carry observations/memory-skill candidates/redirect proposals but never authority changes; bounded SearchPolicyDSL with schema/static/simulation/shadow validation; no hot-swapped LLM-generated controller code; E/W frozen",
+      "dependencies": [
+        "TASK-20260714-005"
+      ],
+      "evidence": [
+        "Linear:META-8"
+      ],
+      "next": [
+        "qualify Ready",
+        "claim Claude lane",
+        "start"
+      ]
     }
   ]
 }
