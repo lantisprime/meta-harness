@@ -1,0 +1,100 @@
+I now have all evidence needed. The `import time` at `supervisor.py:25` is pre-existing and outside this diff (not in any of the three changed files); the changed files (`evolution.py`, `heartbeat.py`, `scheduler.py`) import no `random`/`time`/`uuid`/`secrets`. I have everything to render an independent verdict.
+
+---
+
+# Independent Frozen-Diff Review — head `3c14884`, base `439321b`
+
+## Tools available to me
+
+**Available: `read`, `grep`, `find`, `ls`.** **Denied: `bash` (every invocation returned `Permission denied: Run destructive shell commands`), and therefore `git`, `python`, `pytest`.** This reproduces the prior reviewer's exact limitation. I did **not** run `git diff`, `python -m pytest`, or `git diff --check` myself; I treat the coordinator's verbatim acceptance output (1837 passed/2 xfailed; 140 passed in the discovery subset; clean `git diff --check`; 7 `is_root` test hits) as supplied evidence, and I verified the code claims independently by reading every changed file in full plus its supporting types (`models.py`, `policy.py`). The **line-diff gap the prior reviewer had on `heartbeat.py`/`scheduler.py` is closed here** by the inline diff plus full-file reads. I never claim to have executed anything I did not.
+
+## Verdict on the prior reviewer's unverified `heartbeat.py`/`scheduler.py` claim: **CONFIRMED**
+
+I read both files end-to-end and the complete inline diff. Direct evidence:
+
+- **`heartbeat.py` — only one hunk** (`heartbeat.py:266-281`, the `seen_action_ids` duplicate-`action_id` guard). It is a pure construction-time guard that raises `HeartbeatError` (a `ValueError` subclass). It adds **no field, no method, no I/O, no authority**. It runs after the F9 per-action hash revalidation (`heartbeat.py:258`) and before `self._hub` assignment. It uses a `set` for membership only — the accept/reject outcome is order-independent, so it is deterministic.
+- **`scheduler.py` — only one hunk** (`scheduler.py:358-360` new required `window_attempts_used` kwarg; `scheduler.py:398-402` `remaining_window = dsl.stop_rules.max_attempts - window_attempts_used`; `scheduler.py:419-434` `width = min(..., remaining_window)` replacing the prior `min(..., dsl.stop_rules.max_attempts)`). Pure arithmetic; no new authority field or method; no wall clock or randomness.
+- **The six `3290a35` Codex P1 fixes are intact and unweakened** (verified in the live files):
+  1. simulation↔scheduler concentration — `scheduler.py` still reads `descriptor.parent_selection_concentration` and forces `UNDEREXPLORED`; `policy.py:_validate_simulation` still projects concentration. Untouched by this diff.
+  2. cumulative `max_attempts` — **strengthened**, not weakened, by F-final-1.
+  3. baseline-reseed slot accounting (F1) — `scheduler.py` reseed still consumes a slot inside `width`. Untouched.
+  4. receipt↔assignment binding (F4) — `ScheduledSpawn._validate_receipt_assignment_binding` intact. Untouched.
+  5. round-trip self-hash revalidation — F5 (`scheduler.py` descriptor revalidation in `schedule()`) and F9 (`heartbeat.py` action revalidation in `__init__`) intact. Untouched.
+  6. cumulative heartbeat cost budget (F7/F10) — intact; the heartbeat hunk only adds the separate ITEM-2 duplicate guard.
+- **No new authority surface, no nondeterminism** in either hunk.
+
+## Does `3c14884` regress anything fixed at `439321b`? **No.**
+
+The diff is purely additive in `evolution.py` (new `is_root` field + validator branch + `root_activation` property + `_build_root_activation`), and the `heartbeat.py`/`scheduler.py` hunks add fail-closed guards / strengthen an existing cap. No fixed behavior is removed or weakened. The `schedule()` signature change (`window_attempts_used` now required keyword-only) is a breaking API change, but **every in-tree caller is a test and all are updated** (grep found 26 `.schedule(` call sites, all in `tests/`, all passing `window_attempts_used=`); **no production caller exists** (Router/TaskExecutor/WorkflowEngine do not touch `PopulationScheduler`). Rollback uses `_strategy_history` ACTIVATED rows (`evolution.py:600` append; `_activated_ancestor_hashes`), not `activation_receipts`, so the genesis being absent from `activation_receipts` leaves rollback behavior unchanged (and rollback-to-root was already unsupported before this diff).
+
+## Findings
+
+### P0 — none. P1 — none. P2 — none.
+
+The prior reviewer's two P2s do not survive independent verification and are **downgraded to P3** below (the genesis-injection vector is cryptographically blocked; the zero-descriptor sentinel is inert).
+
+---
+
+### P3-1 (re-confirmed; coverage) — `evolution.py:178-186` — `is_root=True` validator branch has no counterexample test
+
+The `if self.is_root:` block (`evolution.py:178`) raises if `parent_policy_hash is not None` (`:180-184`) or `activated_sequence != 0` (`:185-186`). The coordinator's `is_root` probe shows 7 test hits; only one (`tests/adversarial/test_discovery_policy_boundaries.py:544-564`) touches `is_root=True`, and it asserts **positively** (`root_receipt.is_root is True`, `parent_policy_hash is None`, `activated_sequence == 0` at `:549-552`) — values that `_build_root_activation` sets by construction, not values the validator enforces. The `else` branch (`is_root=False`, `:187-192`) **is** negative-tested (3 cases at `:477-540`).
+- **Failure scenario:** deleting the two `raise` statements at `evolution.py:180-186` would not fail any test. The constraints are sound today (and `parent_policy_hash is None` is the **sole** guard against a future `is_root=True` receipt minted with a non-None parent — it is *not* redundant with the receipt-to-activation parent binding at `:163-168`, which only enforces *consistency*, not None-ness), but the rejection path is unpinned.
+- **Disposition suggestion:** ACCEPT-WITH-MOD — add a negative test constructing `is_root=True` with a non-None parent and with `activated_sequence != 0` (paired with matching self-hashed receipts) asserting `ValidationError`.
+
+---
+
+### P3-2 (prior P2-2, **downgraded** to P3; defensive) — `evolution.py:274` — zero-descriptor sentinel is byte-identical to `_HASH_PLACEHOLDER`, unpinned
+
+`zero_descriptor = "sha256:" + "0" * 64` (`evolution.py:274`) is byte-equal to `_HASH_PLACEHOLDER = "sha256:" + "0" * 64` (`models.py:35`, also `memory/broker.py:88`). It is bound on the root SIMULATION/SHADOW receipts (`:293`, `:303`).
+- **Cannot collide with / masquerade as a validated population descriptor** — independently verified: `PopulationDescriptor.descriptor_hash` is a `content_hash` over canonical JSON (cryptographic; forging it to all-zeros is infeasible), `validate_policy` re-validates the window via `PopulationDescriptor.model_validate(window.model_dump(mode="json"))` (`policy.py:_validate_simulation`), so a `model_copy(update={"descriptor_hash":...})` tamper fails closed; and **no code path compares a `descriptor_hash` value against `_HASH_PLACEHOLDER`** (the placeholder is module-private and used only transiently on `*_hash` self-hash fields inside `_self_verifying`, never on `descriptor_hash`). The byte-equality is therefore inert.
+- **Disposition suggestion:** DEFER/ACCEPT-WITH-MOD — name a dedicated constant (e.g. `_ROOT_BOOTSTRAP_DESCRIPTOR`) and add a test asserting the root SIM/SHADOW `descriptor_hash` is distinct from a real window's `descriptor_hash` and that an all-zero `descriptor_hash` cannot be forged onto a `PopulationDescriptor`. Cosmetic/defensive, not blocking.
+
+---
+
+### P3-3 (re-confirmed; design clarity) — `evolution.py:260-268` — `root_activation` kept out of `activation_receipts`
+
+The genesis is exposed only via the separate `root_activation` property (`:260-268`); `activation_receipts` (`:256-257`) collects only `consider()` non-root activations.
+- **This is a sound boundary, not test-shaped concealment** — independently verified: grep across the whole repo shows `activation_receipts` / `root_activation` / `PolicyActivationReceipt` are consumed **only** in `evolution.py` and tests (plus the `__init__.py` export). **No production consumer** (Router, TaskExecutor, WorkflowEngine, doctor, audit, provenance, memory-audit) walks `activation_receipts`; `supervisor.py` does not touch the evolver's receipts. Rollback uses `_strategy_history`, not `activation_receipts`. So nothing silently misses the genesis today. The `root_activation` property actually makes the bootstrap *more* discoverable for any future audit consumer.
+- **Residual:** the docstring motivation ("historical test contracts on `activation_receipts` remain valid") is test-shaped. A future audit sweep that walks `activation_receipts` would miss the genesis unless it also reads `root_activation` — none exists today, but the boundary should be documented as a contract.
+- **Disposition suggestion:** ACCEPT-WITH-MOD — extend the `root_activation` docstring to state the audit-consumer contract explicitly (a full activation audit must read both `root_activation` and `activation_receipts`).
+
+---
+
+### P3-4 (re-confirmed; fidelity labeling) — `evolution.py:320` — `actor_label="policy-validation-gate"` on a receipt that bypassed that gate
+
+`_build_root_activation` sets `actor_label="policy-validation-gate"` (`:320`), reusing `SearchPolicyEvolver._ACTOR_LABEL` (`:575` uses the same constant for real `consider()` activations where the gate *did* run). The genesis receipts are synthetic — `validate_policy` never ran for them (genesis bypasses `policy.py:validate_policy`; only `consider()` at `evolution.py:504` calls it, for actual candidates).
+- **Mitigations:** `is_root=True` (`:115`, `:321`) is a structural marker; the reason strings ("root policy bootstrap", SHADOW "grants no activation authority" satisfying `policy.py:318-321`) are textual markers; `actor_label` is a `BoundedIdentifier` carrying **no authority** (and `FrozenModel` `extra='forbid'` blocks any authority-shaped extra). So this is a full-fidelity *labeling* blemish, not an authority leak.
+- **Disposition suggestion:** ACCEPT-WITH-MOD — use a distinct genesis actor label (e.g. `"policy-genesis-bootstrap"`) so a receipt that bypassed the validation gate is never labeled as that gate.
+
+---
+
+### P3-5 (prior P2-1, **downgraded** to P3; verification of blocked injection) — `evolution.py:271-322` — genesis mints synthetic PASSED receipts bypassing `validate_policy`
+
+`_build_root_activation` mints four synthetic PASSED receipts without running `validate_policy`. The prior reviewer judged the replay vector "blocked by per-receipt `policy_hash` + `parent_policy_hash` binding." **Independently confirmed and strengthened:**
+- `PolicyActivationReceipt._validate_stage_receipts` enforces, per receipt: `receipt.policy_hash == self.policy_hash` (`:155-160`) and `receipt.parent_policy_hash == self.parent_policy_hash` (`:163-168`); `validation_receipt_hashes` must exactly equal the receipts' hashes (`:209-213`); each receipt is self-hashed (`PolicyValidationReceipt._verify_hash`, `policy.py`).
+- The genesis receipts carry `parent_policy_hash=None` (from `common=dict(policy_hash=root.policy_hash, parent_policy_hash=None)`). Therefore any activation consuming them must have `parent_policy_hash=None`, which (via the `else` branch at `:187-192`) **forces `is_root=False` to be rejected**, and `is_root=True` forces `parent_policy_hash is None` and `activated_sequence == 0`. So the genesis receipts can be consumed **only** by an `is_root=True, parent=None, sequence==0, policy_hash==root.policy_hash` activation — i.e. the genesis itself. **Replay into a different child is structurally impossible** (a different child has a different `policy_hash`).
+- **Refinement of the prior characterization:** honesty here is **not** "textual only" — there are *two* structural markers (`is_root=True` and `parent_policy_hash is None` plus `activated_sequence==0`), in addition to the reason strings. Residual coverage gap overlaps P3-1.
+- **Disposition suggestion:** ACCEPT-WITH-MOD (folded with P3-1) — add the negative `is_root=True` tests so the structural markers are pinned against regressions.
+
+---
+
+### P3-6 (process/tooling; same as prior P3-5) — git/python/pytest denied to this reviewer
+
+`bash` is denied (`Permission denied: Run destructive shell commands`), so `git`, `python -m pytest`, and `git diff --check` could not be run. I reviewed from the complete inline frozen diff + full reads of `evolution.py`, `heartbeat.py`, `scheduler.py`, `models.py`, `policy.py`, the changed tests, and repo-wide greps. I could not independently reproduce the "1837 passed" count or line-diff via tooling; the coordinator's verbatim output is trusted as supplied. This is the same honest limitation the prior reviewer filed, now with the heartbeat/scheduler line-diff gap closed by the inline material.
+
+---
+
+## Per-invariant statement (charter)
+
+1. **Bounded authority** — **HOLDS.** `PolicyActivationReceipt` carries no authority field; `FrozenModel` `extra='forbid'` blocks authority extras; the genesis grants no activation authority (SHADOW reason + `is_root`). `heartbeat.py` ITEM-2 and `scheduler.py` F-final-1 add only fail-closed guards/arithmetic.
+2. **Evaluator non-self-approval** — **HOLDS.** `consider()` (`evolution.py:504`) still calls `validate_policy(candidate, parent, window)` for every actual candidate; the evolver does not score. The genesis is a marked, authority-free *seed* (root has no parent to validate against), not a proposer self-activating a candidate.
+3. **Fail-closed validation** — **HOLDS.** Candidate validation failures still restore the parent with the candidate population untouched (`consider()` `:518-528`); the genesis is a success path, not a failure path.
+4. **Full-fidelity evidence** — **HOLDS with a P3-4 labeling blemish.** Every receipt binds all fields it claims (policy_hash, parent, stage, verdict, reason, descriptor_hash, receipt_hash; activation binds validation_receipts + hashes + window + sequence + actor + is_root + activation_hash). The `actor_label="policy-validation-gate"` on the bypass-gate genesis (P3-4) is the sole fidelity blemish; it carries no authority and is mitigated by `is_root=True` and the reason strings.
+5. **Determinism** — **HOLDS** for the three changed files. No `random`/`time`/`uuid`/`secrets` import in `evolution.py`, `heartbeat.py`, or `scheduler.py`; `_build_root_activation`, the ITEM-2 `set` guard, and `remaining_window` arithmetic are all pure functions of their inputs. (Pre-existing `supervisor.py:25 import time` is outside this diff and out of scope.)
+6. **E and W frozen; H-only change confined to the owned discovery package** — **HOLDS.** Diff touches only `src/metaharness/discovery/{evolution,heartbeat,scheduler}.py` and tests; no evaluator or weight-training surface; no `src/metaharness/` path outside `discovery/`.
+
+---
+
+## Verdict: **APPROVE-WITH-MOD**
+
+No P0, no P1, and (after independent verification) **no P2** — the genesis-injection vector is cryptographically blocked and the zero-descriptor sentinel is inert. The change is integration-safe and regresses nothing fixed at `439321b`; the `heartbeat.py`/`scheduler.py` Priority-1 claims are **confirmed** with direct file evidence. The four remaining P3s are coverage/clarity/fidelity nits (an unpinned `is_root=True` rejection path, an inert sentinel that should be a named constant, a boundary whose audit contract should be documented, and a bypass-gate receipt mislabeled with the gate's actor label). Per the AGENTS.md gate, none of these block integration; the implementing seat should classify each `ACCEPT`/`ACCEPT-WITH-MOD`/`DEFER`, apply the accepted fixes (at minimum: the `is_root=True` negative tests and the genesis `actor_label` honesty fix), and request a fresh Pi/GLM review of the new frozen commit if any code changes.

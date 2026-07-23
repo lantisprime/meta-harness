@@ -1,0 +1,71 @@
+I now have everything needed. Key confirmed facts:
+
+- **`_escape_string` uses `repr(s)`** (compiler.py:43-46), and `# ENTRY_ID: {entry_id}` / `ENTRY_ID = {repr(entry_id)}` embed raw — Python 3 `repr()` keeps printable non-ASCII as-is. So executor source **can be non-ASCII**, making the utf-8 pin material.
+- **doctor.py has no provenance import / event reader** — it scans the filesystem and emits `Finding` objects. So no runtime→doctor feedback loop.
+- **`TestAuthorError` alias removed clean** — never in `compilation/__init__.py` `__all__` nor top-level `selflearn/__init__.py`; only `WorkflowTestAuthorError` is exported. No in-repo consumer.
+- **bash is DENIED** (probe failed twice) — same as prior reviewers. I relied on the inline frozen diff and inline acceptance output.
+- The kind `executor.missing-source` is overloaded across schemas (doctor Finding code vs runtime journal kind), but this matches the **pre-existing pattern** (`executor.unverifiable`, `executor.stale-spec` already shared), and tests assert them on **separate streams** (gate test :2048 doctor side; runtime test :1324 journal side).
+
+---
+
+# Independent Frozen-Diff Review — head `28c4b6b` (fifth gate)
+
+## 1. Verdict: **APPROVE-WITH-MOD**
+
+The **P1 from gate 4 is fixed and genuinely closed** within the reviewed walk-scope, and the three deferred findings are applied honestly. The remaining findings are evidence/consistency/follow-up gaps, not correctness defects introduced by this diff, and none breach a charter invariant *as a regression of 28c4b6b*. No P0/P1 blocks integration; the MODs should be addressed (one via a follow-up card) before this code is considered fully hardened.
+
+## 2. Findings
+
+### P1 (gate 4) — RESOLVED. Raw-`OSError` escape from `exists()` is closed.
+`runtime.py:218-227` wraps `missing = not exec_path_resolved.exists()` in `try/except OSError`, journals `executor.path-unreadable`, and normalizes to `RuntimeCompError`. Walk from `exec_path` construction (`runtime.py:187`) to hash comparison (`runtime.py:253`):
+- `Path(...) / active.path` — pure arithmetic, no syscall.
+- `resolve()` ×2 and `is_relative_to()` — guarded by `except OSError` (`runtime.py:196-206`); `is_relative_to` is pure-string, cannot raise OSError.
+- `exists()` — **now guarded** ✓.
+- `read_text(encoding="utf-8")` — guarded by `except (OSError, UnicodeDecodeError)` (`runtime.py:242-248`).
+- `hashlib.sha256(source.encode())` — `str.encode()` defaults to utf-8 and, because the read just succeeded as utf-8, `source` is surrogate-free → cannot raise `UnicodeEncodeError`.
+
+The citing test `test_runtime_stat_failure_is_journalled` (`tests/test_compilation_runtime.py:1304-1389`) **genuinely constrains the guard**: the monkeypatch *replaces* `Path.exists` with a raiser, so on **every** version the guard branch executes (including 3.13+, where the real `exists()` would swallow `PermissionError`). If the guard were removed, a raw `PermissionError` would escape → no `executor.path-unreadable` event and no `RuntimeCompError`, so both assertions fail. This is **not** a mock artifact. The monkeypatch is correctly scoped to `self.name == "deadbeef.py"` and delegates real `exists` for registry.json / entry files, so it does not corrupt earlier `run()` syscalls. Correct call, well-justified by the docstring.
+
+### P2-1 — Pre-existing sibling: unjournaled `ValueError` escape on an embedded-null-byte tampered `registry.path`.
+This is the site prior gates missed, but it is **not the `OSError` class** those gates were closing, and it is **pre-existing** (the `resolve`/`exists`/`read_text` guards catch `OSError`[+`UnicodeDecodeError`] only; breadth unchanged by 28c4b6b). The bounded-authority comment at `runtime.py:185-194` explicitly contemplates "a tampered registry.path", so this is in the threat model.
+
+- `executor.missing-source` test (`tests/test_compilation_runtime.py:1281`) constructs `path=f"{pack}/executors/wf-001/absent.py"`; a tampered `registry.json` could instead carry `path` containing `\x00`.
+- `resolve(strict=False)` (`runtime.py:198`) on such a path reaches `os.lstat`/`os.readlink`, which raise `ValueError("embedded null byte")` — **not** `OSError`, so `except OSError` (`runtime.py:203`) does not catch it; `is_relative_to` is never reached (containment check bypassed) and the raw `ValueError` escapes `run()` unjournaled.
+- `exists()` (`runtime.py:219`) and `read_text()` (`runtime.py:244`) have the same shape: `os.stat`/`open` raise `ValueError` on `\x00`, not caught by `except (OSError, …)`. `read_text` does not catch `ValueError` on **any** version (incl. 3.13+), so this part is live even on the runner that passed CI.
+- **Failure scenario:** operator/attacker edits `registry.json` so an active record's `path` contains `\x00`; the run aborts with a raw `ValueError`, no provenance event, no `RuntimeCompError` — silent swallow, and the containment check was skipped entirely.
+
+**Disposition:** not a 28c4b6b regression, not the diff's claimed scope → **does not block this gate**. Recommend a **follow-up card**: empirically verify null-byte `Path` behaviour on 3.10–3.12 (I could not — `bash` denied), then validate `active.path`/`store.root` for control characters *before* `resolve()` (reject as `executor.path-escape` / new `executor.malformed-path`), which is cleaner than broadening `except`. I am flagging it because the brief demanded adversarial exhaustiveness ("two of them missed a site").
+
+### P2-2 — Missing positive citing test for the utf-8 pin's actual value proposition.
+The pin's own comment (`registry.py:219-221`, `runtime.py:244` context) justifies itself as preventing a hash-contract break "for any non-ASCII source under a non-utf-8 locale." Non-ASCII executor source is **reachable** — `compiler.py:43-46` (`_escape_string` = `repr`) and `compiler.py:167-168` (`# ENTRY_ID: {entry_id}`, `ENTRY_ID = {repr(entry_id)}`) embed non-ASCII raw. Yet the only non-ASCII test, `test_runtime_undecodable_source_is_journalled` (`tests/test_compilation_runtime.py:1391+`), asserts the **negative** (invalid utf-8 fails closed). No test proves a **valid** non-ASCII executor (e.g. `café` in `entry_id`/objective) round-trips write→read→hash→run **successfully**. Without it, a future refactor could silently break non-ASCII lineage and green CI. **MOD:** add a positive citing test. (The negative test itself is now strictly *more* correct — its updated docstring correctly notes it used to pass for the wrong reason on latin-1/cp1252 locales.)
+
+### P3-1 — `registry.json` I/O left locale-dependent (defensible today, latent gap).
+`registry.py` (methods `_ensure_registry`, `record_for`, `_write_registry` — the `:70,:72,:80,:92` sites) still use bare `read_text()`/`write_text()`. **Defensible**: `json.dumps` defaults to `ensure_ascii=True`, so `registry.json` is always pure ASCII and decodes identically under any locale. **Latent gap**: any future `ensure_ascii=False` (or a non-JSON non-ASCII field) would corrupt under locale-dependent read, and the asymmetry with the just-pinned executor source is smelly. **MOD:** pin these four calls to `encoding="utf-8"` for consistency/defense-in-depth (trivial, no behaviour change today). Non-blocking.
+
+### P3-2 — Stylistic asymmetry: `runtime.py:253` `source.encode()` vs `models.py:26` `text.encode("utf-8")`.
+Not a bug (`str.encode()` is utf-8 deterministically, locale-independent). For symmetry with the hard-won `content_hash` contract and to resist future drift, pin explicitly. Non-blocking.
+
+### P3-3 — Identical refusal message for stat-fail and read-fail.
+`runtime.py:227` (`"Cannot read executor path {active.path!r}"` from the exists-guard) and `runtime.py:248` (same message from the read-guard) collide. The journal **kind** and `reason` carry the distinction (and both are honestly `executor.path-unreadable`), so this is cosmetic, but the exists one could say "Cannot stat executor path" for precision. Non-blocking.
+
+### P3-4 — `executor.missing-source` kind/finding-code overloading: **no collision confirmed**.
+`doctor.py:271` emits it as a **Finding code**; `runtime.py:234` emits it as a **journal kind**. Doctor has **no provenance import and does not read runtime events** (grep of `doctor.py` for `provenance`/`events` returns only imports) → no runtime→doctor feedback loop. The two describe the **same semantic condition**, so the shared string is a *feature* (consistent vocabulary), not dishonest conflation (unlike gate 3's escape-vs-unreadable concern). It extends a **pre-existing, accepted pattern** (`executor.unverifiable`: doctor Finding at `doctor.py:313` + runtime journal at `runtime.py` refusal + asserted on separate streams in `tests/test_compilation_gate.py:1263` vs `tests/test_compilation_runtime.py:1120`; likewise `executor.stale-spec`). A single missing source can yield 1 Finding + N journal events, but those are distinct observations (scan vs per-run refusal), not a double-count. **No regression.** Optional: document the kind↔finding-code sharing convention. Non-blocking.
+
+### P3-5 — `TestAuthorError` alias removal: clean, narrow out-of-tree risk.
+Grep confirms **no in-repo consumer** of the bare alias (all matches are `WorkflowTestAuthorError`). It was never in `compilation/__init__.py` `__all__` nor `selflearn/__init__.py` (both export only `WorkflowTestAuthorError`) — the removed comment itself said it was "preserved outside the public `__all__`." Out-of-tree breakage is limited to code importing the alias directly from the `selflearn.compilation.testgen` *module*. Acceptable cleanup of a deliberately-private alias. P3, non-blocking.
+
+## 3. Per-invariant statements
+
+- **Bounded authority** — **HOLDS** for the diff. `resolve→is_relative_to→exists→read_text` all operate on the same contained resolved path; the new exists-guard does not widen any read surface. (The P2-1 null-byte path escapes *before* `is_relative_to` runs, but it escapes as a `ValueError` abort — **no out-of-root read occurs** — so bounded authority is not breached; the gap is full-fidelity, not read-surface.)
+- **Evaluator non-self-approval** — **HOLDS**, untouched by this diff (no change to test-author/compiler identity; executor bytes are still not passed to the author).
+- **Full-fidelity evidence** — **HOLDS for the `OSError` class** (the diff's stated scope): every stat/read failure is now journalled under an honest kind (`executor.path-unreadable` / `executor.missing-source`), and the escape-vs-unreadable taxonomy from gate 3 is preserved. The P2-1 null-byte `ValueError` sibling is a **pre-existing** silent-swallow gap — recommended for a follow-up card, **not attributed to 28c4b6b**.
+- **Honest termination** — **HOLDS**. Stat-denied → `path-unreadable`; genuinely-absent → `missing-source`; undecodable → `path-unreadable`. None dishonestly labelled.
+- **Reversible lineage** — **HOLDS** for the diff. `content_hash` (`models.py:26`) is utf-8; `write_candidate` (`registry.py:211,219`) and runtime read (`runtime.py:244`) are now both utf-8 → the binding round-trips deterministically. Narrow behavioural note: an executor previously written under a **non-utf-8 locale with non-ASCII content** would now fail-closed on utf-8 read rather than succeed by locale coincidence — this is *honest termination*, not a lineage break. Mitigated by adding the P2-2 positive test.
+
+## 4. Regression / escape-class statement
+
+**`28c4b6b` regresses nothing.** It fixes the gate-4 P1 (the `exists()` site left outside both guards). Within the reviewed walk-scope (`exec_path` construction → hash comparison), the **raw-`OSError`-escape class is now closed** on all supported versions (3.10–3.12 via the new guard; 3.13+ where `exists` swallows it). A **separate, pre-existing** unjournaled-`ValueError`-escape class (embedded-null-byte tampered `registry.path`) remains open across `resolve`/`exists`/`read_text`; it is **not** the class the five gates have been closing, is **not** introduced or claimed-closed by 28c4b6b, and is routed to a follow-up card rather than blocking this gate.
+
+## 5. Tools available / verification limits
+
+**Had:** `read`, `grep`, `find`, `ls` against `/private/tmp/meta-harness-meta-17/`. **Denied:** `bash` (two probes rejected: "Permission denied: Run bash commands") and therefore `git` — identical to every prior reviewer on this card. **Could not verify myself and relied on the inline acceptance block for:** the `git diff bd9b79d..28c4b6b` contents (taken as the verbatim frozen diff above), the pytest results (1697/2 xfailed root; 338 selflearn), the `git diff --check` cleanliness, the `TestAuthorError` sweep, and the `Path.exists()` behaviour on 3.14.4 vs pre-3.13. The P2-1 `ValueError`-on-null-byte reasoning is by **type analysis** (`except OSError` ≠ catches `ValueError`; `read_text`→`open` raises `ValueError("embedded null byte")`; `str.encode` utf-8 default) and was **not** empirically confirmed on 3.10–3.12 — the brief explicitly asks that this be scrutinized, and the recommended follow-up card includes that empirical step. No mutating command was run.

@@ -1,0 +1,28 @@
+{
+  "sourceRevision": "git:e487dba361ccb382eb9ab4bc29754367289ab39d;Linear:META-8@2026-07-23T05:02:58.372Z;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;baseline:1697-passed;RETROSPECTIVE-REQUALIFICATION:original-definition-destroyed-2026-07-23-control-root-incident;reconstructed-from:.review-store/meta8-glm-gate-brief.md",
+  "worktreePath": "/private/tmp/meta-harness-meta-8",
+  "branch": "dev/meta-8-scheduling-heartbeats-policy",
+  "baseCommit": "e487dba361ccb382eb9ab4bc29754367289ab39d",
+  "currentHead": "3c14884c214445ebb3c800116698b169eafa89b3",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "H-only extension of the META-7 discovery kernel, confined to src/metaharness/discovery/ and its four owned test modules. Implement frozen self-hashed population descriptors/fingerprints; a deterministic PopulationScheduler emitting SearchDecisionReceipts (parent/role/variation/briefing/budget/alternatives/expected gain) under diversity floors and baseline reseeding; typed HeartbeatEngine checkpoints (reflection/consolidation/redirection on event/evaluation/time/plateau triggers with epsilon + cooldown) whose outputs are only untrusted CANDIDATE artifacts or queued proposals; a declarative SearchPolicyDSL + SearchPolicySnapshot with strict SCHEMA->STATIC->SIMULATION->SHADOW validation; and a SearchPolicyEvolver with frozen windows, strategy history, four-receipt-gated activation, and parent fallback that preserves the candidate population. No hot-swapped LLM-generated controller code. E and W remain frozen; no live prompt wiring and no changes to existing product files outside the owned discovery package.",
+  "stopCondition": "Stop and fail closed on any need to edit outside the owned discovery package and its four test modules; any heartbeat, scheduler, policy, or evolver path minting or carrying promotion, deploy, evaluator-write, memory-activation, weight-training, or permission-expansion authority; any component suppressing protected capture or activating its own output; a policy proposer scoring, approving, or activating itself; any validation-stage failure that does not restore the parent policy with the candidate population untouched; any SearchPolicyDSL construct able to carry executable code, imports, tool calls, evaluator logic, permissions, or pointer mutations; any receipt binding fewer fields than it claims; any decision path where identical inputs yield different bytes, or that reads a wall clock or randomness; E/W drift; dishonest termination or limitation docstrings; failing acceptance commands; or unresolved independent-review P0/P1 findings.",
+  "evaluatorAuthority": "No heartbeat, scheduler, policy, or evolver path may mint or carry promotion, deployment, evaluator-write, memory-activation, weight-training, or permission-expansion authority. Heartbeat outputs are untrusted CANDIDATE artifacts or queued proposals only. A policy proposer may not score, approve, or activate itself; activation requires four independent validation receipts (SCHEMA/STATIC/SIMULATION/SHADOW). Pi/NeuralWatt GLM-5.2 reviews the frozen diff read-only; a distinct coordinator verifies and accepts the integrated commit. No component may self-approve.",
+  "acceptanceCommands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_discovery_scheduling.py tests/test_discovery_policy.py tests/test_discovery_heartbeats.py tests/adversarial/test_discovery_policy_boundaries.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+  ],
+  "nextCheckpoint": "The owned discovery package and its disjoint tests prove deterministic population scheduling under diversity floors and enforced stop rules, typed heartbeat checkpoints whose outputs carry no authority and whose resource accounting is cumulative, a SearchPolicyDSL structurally unable to carry code or authority, strict SCHEMA->STATIC->SIMULATION->SHADOW validation that fails closed to the parent policy, and receipts whose self-hashes bind every field they claim -- with identical inputs producing identical bytes on every decision path.",
+  "allowedOwnerNamespaces": [
+    "claude"
+  ],
+  "definitionHash": "sha256:1b77011e4f6bf02b6b01a1f213f99d189d69e68262a798c4f40e7ef15feac8cf"
+}

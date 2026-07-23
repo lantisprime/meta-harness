@@ -1,0 +1,136 @@
+Bash/git are fully denied to this read-only reviewer (even `mkdir`/`echo` are blocked), so I cannot persist the review to `.review-store/` myself — that persistence step belongs to the coordinator/implementing seat per AGENTS.md (the reviewer runs read-only). Below is the verbatim review for them to persist.
+
+---
+
+# META-17 Independent Frozen-Diff Review — head `4a8069b`
+
+**Reviewer:** Pi / read-only independent reviewer.
+**Base (last APPROVED):** `89572ff` · **Head (reviewed):** `4a8069b` · branch `dev/meta-17-workflow-compilation`.
+**Scope note / honesty disclosure:** git and **all** bash execution were denied by the harness to this reviewer (every `git …`, `python --version`, `echo probe`, and `mkdir` call returned "Permission denied"). I therefore could **not** run `git diff 89572ff..4a8069b`, could **not** execute the selflearn/root suites, and did **not** independently reproduce the claimed counts (107 / 331 / 1631). I reviewed the immutable working tree at the head commit by reading the files the brief identifies, tracing control flow statically, and counting test functions via grep. The NEW `test_runtime_path_escape_blocked` was verified by reading its logic, not by running it. Findings below rest on file:line evidence only.
+
+## Verdict: **REJECT**
+
+One unresolved **P1** (Finding A) blocks integration per the AGENTS.md gate. It is narrow and trivially fixable; after the fix the relevant suites must be rerun and a fresh Pi/GLM frozen-diff review requested. The change is not fundamentally unsound — it is an under-delivered security control, not a design flaw.
+
+---
+
+## Findings
+
+### A. **P1 — `Path.resolve()` calls are outside the guard's `try/except OSError`, so an OSError during path validation is neither journalled nor normalized to `RuntimeCompError`.**
+
+**Evidence** — `selflearn/src/selflearn/compilation/runtime.py`:
+```
+188:        store_root_resolved = Path(self.store.root).resolve()   # OUTSIDE try
+189:        exec_path_resolved = exec_path.resolve()               # OUTSIDE try
+190:        try:
+191:            if not exec_path_resolved.is_relative_to(store_root_resolved):
+192:                self._journal_refusal(entry_id, "executor.path-escape", ...)
+195:                raise RuntimeCompError(f"Executor path {active.path!r} escapes store root")
+197:        except OSError as exc:
+198:            self._journal_refusal(entry_id, "executor.path-escape", ...)
+201:            raise RuntimeCompError(f"Cannot validate executor path {active.path!r}") from exc
+```
+- The `except OSError` at :197 can only catch an OSError raised **inside** the `try` at :190. The only statement inside that `try` is `exec_path_resolved.is_relative_to(...)` (:191), which is a pure in-memory comparison (`self == other or other in self.parents`) and **cannot raise OSError**. So the `except OSError` branch, as written, catches nothing reachable — it is effectively dead.
+- The two operations that **can** raise OSError during validation — `Path(self.store.root).resolve()` (:188) and `exec_path.resolve()` (:189) — sit **above** the `try` and are therefore **unprotected**. If either raises, the exception propagates out of `ExecutorRuntime.run` as a **raw `OSError`** (e.g. `PermissionError`, or ELOOP `OSError`) — **before** any `_journal_refusal("executor.path-escape", …)` call and **not** as `RuntimeCompError`.
+
+**Failure scenario (reachable, PLausible; exact propagation is CPython/OS-version-dependent and I could not execute it):** a tampered `registry.path` of `"/proc/1/root/x.py"` (absolute, overrides the store root under `Path(root) / abs`). `exec_path = Path("/proc/1/root/x.py")`; `exec_path.resolve()` traverses `/proc/1/root`, a symlink that requires ptrace privileges → `os.readlink` raises `PermissionError` (a subclass of `OSError`) at :189, **before** the `try` at :190. Result: raw `PermissionError` escapes `run()`, no `executor.path-escape` journal event is written. A symlink loop (`os.symlink("l","l")`) is another candidate ELOOP trigger. (I could not empirically confirm which CPython 3.10–3.13 combinations propagate vs. swallow these; but the **structural** defect — handler placed below the operations it claims to guard — is CONFIRMED by reading the code.)
+
+**Why P1:**
+1. It directly violates a charter invariant — **Full-fidelity evidence: refusals are journalled, not silently swallowed** — for exactly the escape-attempt class the guard exists to catch. The brief explicitly directed me to "confirm the refusal path cannot itself raise before journalling" and "the raise is fail-closed in every branch"; the resolve calls **do** raise before any journalling, and not every branch normalizes to `RuntimeCompError`.
+2. It breaks the method's documented contract — `runtime.py:152` docstring "Raises: RuntimeCompError". A raw `OSError` escaping `run()` would bypass any caller that catches `RuntimeCompError` to normalize to `RunResult(status="error")` (no such host caller exists in-tree today — grep found `ExecutorRuntime`/`RuntimeCompError` only in `selflearn/` + tests — but the API contract is still breached).
+3. It is **new** code introduced by `4a8069b` (the guard + `test_runtime_path_escape_blocked` are the commit's additions) and was **not** covered by the `89572ff` approval.
+
+**Mitigating fact (does not remove the P1):** the run still **fails closed** — `resolve()` raising at :188/:189 happens before `exec_path.read_text()` at :207, so no executor bytes are read; **bounded authority is preserved**, only the evidence/journaling guarantee and the exception-type contract are broken.
+
+**Fix (one-line):** move both `.resolve()` calls **inside** the `try` so the existing `except OSError` actually covers them:
+```python
+try:
+    store_root_resolved = Path(self.store.root).resolve()
+    exec_path_resolved = exec_path.resolve()
+    if not exec_path_resolved.is_relative_to(store_root_resolved):
+        self._journal_refusal(entry_id, "executor.path-escape",
+                              f"executor path {active.path!r} escapes store root", now=now)
+        raise RuntimeCompError(f"Executor path {active.path!r} escapes store root")
+except OSError as exc:
+    self._journal_refusal(entry_id, "executor.path-escape",
+                          f"cannot validate executor path {active.path!r}: {exc}", now=now)
+    raise RuntimeCompError(f"Cannot validate executor path {active.path!r}") from exc
+```
+(See Finding B/F for extending the same `try` over the read step and reading from the resolved path.)
+
+---
+
+### B. **P2 — TOCTOU: the containment check runs on `exec_path_resolved` but the read runs on the unresolved `exec_path`.**
+
+**Evidence** — `runtime.py:189` (`exec_path_resolved = exec_path.resolve()`), `:204` (`if not exec_path.exists()`), `:207` (`source = exec_path.read_text()`). The `exists()`/`read_text()` operate on `exec_path` (`Path(self.store.root) / active.path`, :184), **not** on the path the guard actually validated (`exec_path_resolved`). Check and use are therefore on different path objects.
+
+**Failure scenario:** against the guard's stated threat model (a **statically** tampered `registry.path`, no concurrent filesystem mutation) this is harmless — `resolve()` is deterministic, so the checked path and the read path coincide. Under a stronger threat (an attacker able to mutate the store filesystem **during** the run), a directory component along `exec_path` could be swapped for a symlink between :191 (check) and :207 (read), causing `read_text()` to read one external file, which is then SHA-256-hashed at :208-216. The content-hash check then refuses with `executor.tampered` (external bytes ≠ `active.executor_hash`), so **no execution and no exfiltration** occurs — only one external file's bytes are read into memory and discarded.
+
+**Why P2 not P1:** the brief flagged TOCTOU explicitly, and check-vs-read on different path objects is a real wart with a trivial fix, but it requires a stronger threat than the guard's own model and is heavily backstopped by the content-hash binding (so bounded authority is not materially breached). Non-blocking.
+**Fix:** read from the path the guard validated — `source = exec_path_resolved.read_text()` (and `.exists()` on it) — ideally `os.open(exec_path_resolved, …)` once and read from the fd with an `fstat` identity check (`O_NOFOLLOW` on the final component) for a fully race-free check. At minimum, reuse `exec_path_resolved` for the read.
+
+---
+
+### C. **P3 — `doctor.py` constructs an executor path from `record.path` without a containment check (completeness gap, not a runtime regression).**
+
+**Evidence** — `selflearn/src/selflearn/doctor.py:270`: `abs_source_path = pack_dir.parent / record_path` (where `record_path = record.get("path", "")`), then `abs_source_path.exists()` at :271. A tampered `record.path` (e.g. `"../../etc/passwd"`) is joined and `stat`'d without a `is_relative_to(store_root)` check.
+
+**Impact:** the doctor only calls `.exists()` (a `stat`/access check) — it **does not read executor bytes by `record.path`** — so no content leaves the disk; the worst case is existence-disclosure of one path by a diagnostic tool. The runtime guard's stated invariant ("the runtime must never widen its own read surface") is not implicated because the doctor is not the runtime and reads no executor content. This code is pre-existing (not introduced by `4a8069b`) and is **not a regression**.
+**Fix (consistency follow-up, optional):** apply the same `resolve()`+`is_relative_to()` guard in `_check_executors` before using `record_path`, so the store-root contract is uniform across consumers.
+
+---
+
+### D. **P3 — The backward-compatible alias `TestAuthorError` is unreferenced by any shipped code or test.**
+
+**Evidence** — `selflearn/src/selflearn/compilation/testgen.py:25`: `TestAuthorError = WorkflowTestAuthorError` (with comment "Backward-compatible alias preserved outside the public `__all__`"). A whole-repo grep for `TestAuthorError` finds the alias **definition** at testgen.py:25 and **only** prose mentions in `.agents/meta17-*.md` planning briefs — **no** `except TestAuthorError`, `raise TestAuthorError`, or `import TestAuthorError` anywhere in `src/` or `tests/`. The package `__all__`s list only `WorkflowTestAuthorError` (`compilation/__init__.py:68`, `selflearn/__init__.py:144`), and neither `__init__` imports `TestAuthorError`, so it is reachable only as `selflearn.compilation.testgen.TestAuthorError` (submodule attribute), not via the package namespace.
+
+**Assessment:** because the alias is the **same class object**, there is **no** `except`-clause-missing risk (`except TestAuthorError` and `except WorkflowTestAuthorError` catch the identical set). The split ("kept in testgen, omitted from package `__all__`") is **coherent** as a deprecation posture. It is, however, effectively dead code in-tree. Benign; non-blocking.
+**Fix (optional):** either drop the alias, or keep it and add a one-line deprecation note (`# Kept for out-of-tree callers; will be removed in a future version.`) so its presence is intentional rather than accidental.
+
+---
+
+### E. **P3 — Stale `TestAuthorError` references in internal planning docs.**
+
+**Evidence** — `.agents/meta17-fix-brief-1.md:72,75`, `meta17-fix-brief-2.md:68,99`, `meta17-fix-brief-3.md:48,49`, `meta17-build-spec.md:158,162,168,169,170` still use the old name `TestAuthorError` in prose. These are historical planning briefs for this very card, not shipped API docs or runtime strings (no docstring/comment/error-message in `src/` uses the old name — the rename inside `testgen.py`, `compilation/__init__.py`, `selflearn/__init__.py`, and `tests/test_compilation_gate.py` is **complete**).
+**Impact:** none at runtime; documentation drift only. Leave as historical record, or sweep if the team prefers. Non-blocking.
+
+---
+
+### F. **P3 (pre-existing, not a regression) — The read step itself is not wrapped; a contained-but-invalid `active.path` surfaces a raw OSError.**
+
+**Evidence** — `runtime.py:204` `if not exec_path.exists():` and `:207` `source = exec_path.read_text()`. A contained-but-invalid path passes the guard but then raises an uncaught, unjournalled OSError, e.g. `active.path == "."` ⇒ `exec_path == store_root` ⇒ `is_relative_to` is True (a path is relative to itself) ⇒ `exists()` True (it's a dir) ⇒ `read_text()` raises `IsADirectoryError` (subclass of `OSError`) out of `run()`, with no `RuntimeCompError` and no journal event. `active.path == ""` is rejected earlier by `ExecutorRecord` validation (`models.py:220` `_require(bool(self.path), …)`) and would surface as `RegistryError` at `active_for`, so that case is handled.
+**Assessment:** this code path existed at `89572ff` (the guard is additive above it) and is **out of scope** per the no-re-litigation rule; I surface it only because the brief asks whether "the raise is fail-closed in every branch." The guard's **own** branches (the `is_relative_to=False` refusal and the `except OSError` branch) are fail-closed; the subsequent read step is not, and is not the guard's responsibility.
+**Fix (optional, consolidation with A+B):** wrap the whole `resolve → is_relative_to → exists → read_text → hash` block in one `try/except OSError` that journals `executor.path-escape` (or a distinct `executor.unreadable`) and raises `RuntimeCompError`, reading from the resolved path. This single change addresses A, B, and F together.
+
+---
+
+## Test-quality assessment (focus area 6)
+
+`test_runtime_path_escape_blocked` (`selflearn/tests/test_compilation_runtime.py:1127`) uses `path="../../etc/hostile.py"` — a **genuinely escaping** path (it resolves above the store root regardless of tempdir depth) — and asserts **both** `pytest.raises(RuntimeCompError, match="escapes store root")` **and** `any(e["kind"] == "executor.path-escape" for e in provenance.events)`. The guard's refusal message and journal kind are **distinct** from the `"Executor source missing"` / `executor.tampered` paths, so the test proves the **containment** guard fired (not the existence or hash check). 
+**Would it fail if the guard were deleted?** Yes — without the guard, the flow reaches `if not exec_path.exists()` (:204); `/…/../../etc/hostile.py` does not exist → raises `RuntimeCompError("Executor source missing: …")` (different message) and emits **no** `executor.path-escape` event; both assertions would fail. **Adequate.** (Minor hardening: also add a case with an **existing** file outside the root to prove the guard fires *before* the hash check; not required.)
+
+I could **not** run the suite (bash denied), so I cannot confirm the claimed 107 / 331+1 / 1631 counts. By grep, `test_compilation_runtime.py` has 24 `def test_` functions (incl. the new path-escape test).
+
+---
+
+## Charter-invariant statements
+
+- **Bounded authority** (executors quarantined by default; runtime must never widen its read surface): **HOLDS.** Quarantine-by-default is registry-level (`registry.py` `write_candidate` → status `quarantined`), untouched. The guard is **additive** and only **narrows** the read surface. The TOCTOU (Finding B) is a residual, hash-backstopped window, not a widening introduced here.
+- **Evaluator non-self-approval** (test author identity-distinct from compiler; never sees executor bytes): **HOLDS.** `testgen.py:43-57` still enforces `identity.distinct(model, _CompilerMarker())` and raises `WorkflowTestAuthorError` on collision; the gate (`gate.py:114-130`) blocks `approval.approver == COMPILER_ID`. Neither the path guard nor the rename touches this; the test author never reads the executor file.
+- **Full-fidelity evidence** (refusals journalled, not silently swallowed): **BREACHED (narrowly)** by Finding A in the plausible `resolve()`-raises branch.
+- **Honest termination** (fail closed on ambiguity): **HOLDS for reads** — every guard branch, and the resolve-raises branch, aborts **before** `read_text()`; no executor bytes are read on any refusal path. The residual (Finding F, pre-existing) is that the read step can surface a raw OSError, but it never proceeds to execution.
+- **Reversible lineage** (executors content-hash-bound to their procedure): **HOLDS.** Content-hash binding (`runtime.py:208-216`, `active.executor_hash`) and spec-hash drift check (`:167-179`) are unchanged; the path guard is orthogonal to and does not weaken hash binding.
+
+---
+
+## Regression vs `89572ff`
+
+**No.** `4a8069b` is strictly additive in behavior: it adds the path-containment guard + `executor.path-escape` journalling + the new test, performs a mechanical rename (`TestAuthorError` → `WorkflowTestAuthorError`) with the two names being the same class object, and keeps a benign backward-compatible alias. It does **not** remove or weaken any behavior that was approved at `89572ff`. The P1 (Finding A) is a **new control that under-delivers on its own stated contract** (raw `OSError` not normalized/journalled when `resolve()` raises), not a regression of any previously-approved behavior — the "weird path → raw OSError" surface predates `89572ff` (Finding F). 
+
+## Required follow-up before integration
+
+1. Apply Finding A's fix (move `.resolve()` calls inside the `try`, or wrap the full load+verify block per Finding F). Recommended: also address B (read from the resolved path) in the same edit.
+2. Rerun `selflearn/tests` (compile + runtime + gate) and the root suite; post the actual counts.
+3. Request a fresh Pi/GLM frozen-diff review of the new head commit (per AGENTS.md second-opinion gate).
+
+— end of review —

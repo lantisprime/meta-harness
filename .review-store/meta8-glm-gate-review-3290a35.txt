@@ -1,0 +1,998 @@
+ sorts by (candidate_id,
+ lineage_id). So in
+ _select_parent_ids, ELITE
+ picks the lowest
+ candidate_ids (no tier).
+ In scheduler's
+ _rank_candidates, ELITE
+ ranks by tier then
+ candidate_id. Different
+ selection. Confirmed.
+
+ Now I'm ready to write
+ the final review. Let me
+ compose it precisely with
+ file:line evidence.
+
+ Let me also reconsider:
+ the brief said "State
+ explicitly if there are
+ no P0/P1 findings." I'll
+ state it.
+
+ And I should note I could
+ not execute the suite (no
+ pydantic, read-only
+ constraint forbids
+ install), so I verified
+ statically and relied on
+ the brief's acceptance
+ evidence.
+
+ Let me write the final
+ review now.
+
+ Actually, one more
+ consideration for
+ completeness regarding
+ determinism (brief's 4th
+ focus: "any decision path
+ where identical inputs
+ could yield different
+ bytes"). I verified:
+ - No time/random/uuid
+   imports.
+ - created_at=sequence
+   (int).
+ - All float formatting
+   uses fixed precision
+   (.4f) or json.dumps
+   (deterministic).
+ - -0.0 canonicalized in
+   score_window.
+ - Sets are only used for
+   membership, never
+   iterated into a
+   hash/receipt.
+ - max(dsl.variation_weigh
+   ts, key=lambda vw:
+   (vw[1], vw[0].value)) —
+   deterministic tie-break
+   by class value.
+ - dict(descriptor.remaini
+   ng_budget) from sorted
+   tuple — insertion order
+   = sorted order, but
+   only used for lookups.
+ - _appended set — side
+   effect idempotency,
+   outcomes recomputed
+   deterministically.
+
+ So no determinism
+ violation. I'll state
+ determinism holds (no
+ P-finding).
+
+ For hash-binding (brief's
+ 3rd focus): per-model
+ binding is complete
+ (_self_verifying excludes
+ only the hash field; all
+ other fields bound).
+ External references
+ (descriptor_hash,
+ policy_hash, action_hash,
+ score_hash) are
+ hash-bound and
+ transitively complete.
+ PolicyActivationReceipt
+ redundantly binds both
+ full receipts and their
+ hashes. No per-receipt
+ binding gap. The only
+ binding-completeness
+ concern is
+ ScheduledSpawn's
+ pair-level (Finding 3).
+ I'll state per-model
+ binding is sound.
+
+ Final verdict:
+ APPROVE-WITH-MOD. No
+ P0/P1. P2s and P3s as
+ listed.
+
+ Let me write it up.
+
+ I have completed a
+ thorough static review of
+ the frozen diff
+ e487dba...3290a35. Note
+ on execution: this
+ worktree's interpreter
+ has no pydantic/project
+ deps installed, and the
+ brief's read-only
+ constraint (no mutating
+ commands, nothing written
+ to disk) forbids uv
+ sync/venv creation, so I
+ could not re-run the
+ suite myself; I verified
+ every code path by
+ reading the frozen source
+ and cross-checking
+ against the tests and the
+ _self_verifying/content_h
+ ash helpers, and relied
+ on the brief's acceptance
+ evidence (113/409/1810
+ passing) for runtime
+ confirmation.
+
+ ─────────────────────────
+
+ META-8 Independent
+ Frozen-Diff Review (Pi /
+ GLM-5.2 gate)
+
+ Frozen commits: base
+ e487dba (main), head
+ 3290a35
+ (dev/meta-8-scheduling-he
+ artbeats-policy)
+ Scope reviewed: git diff
+ e487dba...3290a35 — 10
+ files, 4726 insertions
+ (population.py,
+ scheduler.py, policy.py,
+ heartbeat.py,
+ evolution.py,
+ discovery/__init__.py,
+ and 4 test modules).
+ Read-only: no edits, no
+ staging, no mutating
+ commands run.
+
+ Verdict: APPROVE-WITH-MOD
+
+ All charter
+ non-negotiable invariants
+ hold at this commit.
+ There are no P0 and no P1
+ findings, so integration
+ is not blocked by the
+ AGENTS.md gate (which
+ blocks only on unresolved
+ P0/P1). Three P2 and four
+ P3 findings follow; they
+ are fail-closed or
+ contract-fidelity issues
+ that do not violate
+ bounded authority,
+ evaluator
+ non-self-approval,
+ determinism, fail-closed
+ validation, frozen E/W,
+ or honest termination,
+ but should be tracked and
+ addressed.
+
+ Summary of invariant
+ checks (passed)
+
+ - Bounded authority:
+   every new model
+   subclasses FrozenModel
+   (extra="forbid",
+   frozen=True);
+   authority-shaped extras
+   (can_promote/can_deploy
+   /can_activate_memory)
+   are rejected at
+   construction
+   (tests/adversarial/test
+   _discovery_policy_bound
+   aries.py:131
+   test_every_new_public_m
+   odel_rejects_authority_
+   smuggling);
+   HeartbeatAction.protect
+   ed_capture_immutable:
+   Literal[True] makes
+   False unconstructable
+   (heartbeat.py). No
+   heartbeat/scheduler/pol
+   icy/evolver path mints
+   promotion, deploy,
+   evaluator-write,
+   memory-activation,
+   weight-training, or
+   permission-expansion
+   authority.
+ - Evaluator
+   non-self-approval:
+   SearchPolicyEvolver.con
+   sider never scores its
+   own candidate; it
+   delegates to
+   validate_policy and
+   requires four PASSED
+   stage receipts
+   (PolicyActivationReceip
+   t._validate_stage_recei
+   pts, evolution.py).
+   score_window is a
+   separate pure function;
+   consideration uses a
+   zero-delta window
+   score. No self-approval
+   path.
+ - Fail-closed validation:
+    validate_policy stops
+   at the first failing
+   stage (policy.py);
+   consider appends a
+   rejection row and
+   leaves self._current
+   unchanged on any
+   failure; the evolver
+   holds no
+   candidate-population
+   state, so a failed
+   policy cannot touch the
+   population
+   (evolution.py,
+   tests/adversarial/…:259
+
+   test_simulation_rejecti
+   on_preserves_active_pol
+   icy_and_population_evid
+   ence).
+ - Determinism (identical
+   inputs → identical
+   bytes): no
+   time/random/uuid
+   imports on any decision
+   path (grep-confirmed);
+   created_at=sequence is
+   an integer
+   (scheduler.py:567);
+   float formatting uses
+   fixed precision (.4f)
+   or
+   json.dumps(sort_keys=Tr
+   ue); -0.0 is
+   canonicalized in
+   evolution.score_window;
+   sets are used only for
+   membership, never
+   iterated into a hash or
+   receipt;
+   max(variation_weights,
+   key=(weight,
+   class.value)) has a
+   deterministic
+   tie-break. No decision
+   path yields different
+   bytes for identical
+   inputs.
+ - Hash-binding
+   completeness
+   (per-model):
+   _self_verifying
+   (discovery/models.py:38
+   ) computes the
+   self-hash over
+   model_dump(mode="json",
+   exclude={hash_field}),
+   binding every field
+   except the hash itself;
+   normalization
+   (_sort_submodels/_sort_
+   unique_scalars/_sort_pa
+   ir_entries) runs inside
+   the wrap handler before
+   hashing, so the
+   canonical sorted form
+   is what is hashed.
+   External references
+   (descriptor_hash,
+   policy_hash,
+   action_hash,
+   score_hash,
+   window_score_hash) are
+   first-class fields and
+   therefore bound; they
+   are transitively
+   complete because each
+   referenced artifact is
+   itself self-hashed over
+   its full content.
+   PolicyActivationReceipt
+    redundantly binds both
+   the full stage receipts
+   and their explicit hash
+   tuple. No per-receipt
+   field-binding gap
+   found.
+ - Honest
+   termination/limitation
+   docstrings:
+   scheduler.py and
+   heartbeat.py explicitly
+   state MVP limitations
+   (no live worker
+   interruption;
+   redirection is a queued
+   proposal only).
+
+ Findings (ordered P0 →
+ P3)
+
+ ### P0 — none.
+
+ ### P1 — none.
+
+ ### P2
+
+ P2-1. BASELINE
+ parent_selector is
+ structurally rejected by
+ SIMULATION for any
+ diversity_floor > ~1e-12
+ (concentration projection
+ mishandles the "baseline"
+ pseudo-parent).
+ CONFIRMED, fail-closed.
+ - Evidence:
+   policy.py:348-349 if
+   policy.parent_selector
+   is
+   ParentSelector.BASELINE
+   : return ("baseline",)
+   → parent_count = 1
+   (policy.py:436);
+   projected_concentration
+   =
+   max(window.parent_selec
+   tion_concentration,
+   1.0/1) = 1.0
+   (policy.py:437-439);
+   maximum_concentration =
+   1.0 -
+   policy.diversity_floor
+   (policy.py:443);
+   failure test
+   projected_concentration
+   > maximum_concentration
+   + 1e-12 (policy.py:444)
+   reduces to
+   diversity_floor >
+   1e-12, which is true
+   for every positive
+   diversity floor.
+ - Failure scenario: a
+   policy with
+   parent_selector=BASELIN
+   E, diversity_floor=0.2
+   passes STATIC (only
+   ELITE requires a
+   positive floor;
+   policy.py:_validate_sta
+   tic), then is always
+   rejected at SIMULATION,
+   even though the
+   scheduler itself treats
+   BASELINE as "all fresh
+   explorers, zero
+   candidate
+   concentration"
+   (scheduler.py:519-521
+   if dsl.parent_selector
+   is
+   ParentSelector.BASELINE
+   : explorer_count +=
+   optimizer_count;
+   optimizer_count = 0) —
+   i.e., maximum
+   diversity. The
+   simulation's 1.0/1
+   treats the "baseline"
+   pseudo-parent as a
+   100%-concentrated
+   parent, contradicting
+   the executor's actual
+   behavior. No test
+   constructs
+   parent_selector=BASELIN
+   E in a DSL
+   (grep-confirmed), so
+   this is uncovered.
+ - Charter impact: none
+   (fail-closed
+   over-rejection). It
+   makes the BASELINE
+   selector unusable with
+   any meaningful
+   diversity_floor; with
+   diversity_floor == 0 it
+   passes. Recommend the
+   simulation skip
+   concentration
+   projection (or project
+   0) for BASELINE,
+   mirroring the
+   scheduler.
+
+ P2-2. Scheduler selector
+ semantics diverge from
+ the policy.py simulation
+ it claims to mirror
+ (cross-module contract
+ mismatch). CONFIRMED
+ divergence; PLAUSIBLE
+ runtime diversity-floor
+ overrun under contrived
+ populations.
+ - Evidence:
+   scheduler.py:177
+   _selector_sort_key
+   comment claims
+   "Deterministic ordering
+   key per selector,
+   mirroring policy.py
+   semantics," and
+   scheduler.py:_rank_cand
+   idates orders by that
+   key, but:
+     1. ELITE: simulation
+        _select_parent_ids
+
+        (policy.py:356-376
+        ) iterates nodes
+        (already sorted by
+        candidate_id via
+        population.py
+        _normalize) and
+        picks the first
+        min(max_width,
+        ceil(node_count*(1
+        -diversity_floor))
+        ) with no tier
+        sorting; the
+        scheduler's ELITE
+        key is
+        (-_tier_priority(n
+        ode.score_tier),
+        node.candidate_id)
+
+        (scheduler.py:182-
+        183), i.e., it
+        tier-sorts.
+        Different parents
+        selected.
+     2. Dedup field:
+        simulation dedupes
+        by the selector's
+        key field
+        (structure_signatu
+        re for DIVERSE,
+        lineage_id for
+        UNDEREXPLORED,
+        score_tier for
+        SCORE_TIER,
+        candidate_id for
+        ELITE/PARETO —
+        policy.py:351-376)
+        ; the scheduler's
+        _pick_distinct_lin
+        eage_parents
+        always dedupes by
+        lineage_id
+        regardless of
+        selector
+        (scheduler.py:235-
+        239). So for
+        DIVERSE the
+        simulation's
+        parent_count
+        counts distinct
+        structure_signatur
+        es while the
+        scheduler emits
+        distinct
+        lineage_ids.
+     3. Count cap:
+        simulation caps at
+        min(max_width,
+        selector-specific
+        limit)
+        (policy.py:378);
+        scheduler caps
+        optimizer parents
+        at optimizer_count
+
+        (scheduler.py:_pic
+        k_distinct_lineage
+        _parents(...
+        optimizer_count)).
+ - Failure scenario
+   (PLAUSIBLE): a
+   population with fewer
+   distinct lineage_ids
+   than distinct
+   structure_signatures
+   (multiple lineages
+   share a structure)
+   under DIVERSE with
+   diversity_floor=0.6
+   (max concentration 0.4)
+   and a descriptor whose
+   parent_selection_concen
+   tration ≤ 0.4 (so the
+   scheduler does not
+   force UNDEREXPLORED).
+   SIMULATION projects
+   parent_count = distinct
+   structures (say 3 → 1/3
+   ≈ 0.33 ≤ 0.4 → PASS),
+   but the scheduler emits
+   only the distinct
+   lineages (say 2 →
+   actual batch
+   concentration 0.5 >
+   0.4). The scheduler
+   never recomputes
+   concentration from its
+   own batch (it keys off
+   the descriptor's
+   historical
+   parent_selection_concen
+   tration at
+   scheduler.py:498-503),
+   so the certified floor
+   is overrun.
+ - Charter impact: none
+   directly (the diversity
+   floor is a policy
+   design contract, not a
+   charter non-negotiable
+   invariant; determinism
+   is intact). Recommend
+   either making
+   _select_parent_ids a
+   faithful projection of
+   _pick_distinct_lineage_
+   parents, or documenting
+   the simulation as a
+   deliberately coarse
+   lower bound and
+   reconciling the
+   "mirror" comment.
+
+ P2-3. ScheduledSpawn does
+ not cryptographically
+ bind its assignment to
+ its receipt; the receipt
+ enforces an
+ explorer/no-parent
+ invariant the assignment
+ itself does not.
+ CONFIRMED
+ binding-completeness gap.
+ - Evidence:
+   ScheduledSpawn
+   (scheduler.py:145-152)
+   is a FrozenModel
+   pairing assignment:
+   DiscoveryAssignment and
+   receipt:
+   SearchDecisionReceipt
+   with no self-hash field
+   and no
+   cross-consistency
+   validator. Each member
+   is individually
+   self-hashed, but
+   nothing binds the pair:
+   assignment_hash covers
+   only assignment fields
+   (discovery/models.py:28
+   6-292) and receipt_hash
+    covers only receipt
+   fields
+   (scheduler.py:88-107).
+   The ScheduledSpawn
+   docstring
+   (scheduler.py:147-151)
+   claims "receipt is the
+   honest decision receipt
+   that explains the
+   assignment's
+   parent/role/variation/b
+   udget/briefing," but
+   this relationship is
+   unenforced.
+ - Aggravating divergence:
+   the receipt's
+   _validate_role_parent_c
+   onsistency
+   (scheduler.py:109-125)
+   forbids an explorer
+   from naming a parent
+   (EXPLORER and
+   parent_lineage_id is
+   not None → reject), but
+   DiscoveryAssignment._va
+   lidate
+   (discovery/models.py:29
+   4-301) does not — it
+   only requires an
+   optimizer to have a
+   parent and that
+   lineage/attempt be set
+   together. So an
+   explorer assignment
+   that carries a parent
+   is a valid
+   DiscoveryAssignment,
+   and pairing it with an
+   explorer receipt (no
+   parent) yields an
+   internally inconsistent
+   ScheduledSpawn that
+   neither member's hash
+   detects. The scheduler
+   always builds
+   consistent pairs
+   (_build_spawn,
+   scheduler.py:525-572),
+   but a consumer
+   reconstructing
+   ScheduledSpawn from
+   JSON is unprotected.
+ - Failure scenario:
+   ScheduledSpawn(assignme
+   nt=<explorer with
+   parent_lineage_id="X">,
+   receipt=<explorer,
+   parent=None>)
+   constructs
+   successfully; the
+   assignment is valid per
+   DiscoveryAssignment,
+   the receipt is valid
+   per
+   SearchDecisionReceipt,
+   yet the receipt does
+   not explain the
+   assignment's parentage.
+ - Charter impact:
+   ScheduledSpawn is an
+   H-plane planning
+   artifact, not
+   evaluation evidence, a
+   memory, weight,
+   evaluator, release, or
+   deployment pointer, so
+   invariants 2 and 8 are
+   not directly violated.
+   Recommend adding a
+   ScheduledSpawn
+   after-validator
+   asserting
+   assignment.role ==
+   receipt.role,
+   assignment.parent_linea
+   ge_id ==
+   receipt.parent_lineage_
+   id, and
+   assignment.parent_attem
+   pt_id ==
+   receipt.parent_candidat
+   e_id (or a single
+   spawn_hash over both),
+   and reconciling the
+   explorer-parent
+   invariant between
+   DiscoveryAssignment and
+   SearchDecisionReceipt.
+
+ ### P3
+
+ P3-1. Simulation
+ cost-budget arithmetic
+ appears inverted relative
+ to feasibility
+ (fail-closed,
+ test-enshrined).
+ CONFIRMED logic concern;
+ no safety impact.
+ - Evidence: policy.py:484
+    additional_cost_cap =
+   policy.stop_rules.max_c
+   ost -
+   window.cost_so_far (the
+   policy's remaining cost
+   ceiling); policy.py:485
+    if additional_cost_cap
+   >
+   remaining_budget["cost"
+   ]: FAIL "additional
+   cost cap exceeds
+   remaining budget". This
+   rejects any policy
+   whose cost ceiling
+   exceeds the campaign's
+   remaining cost budget
+   (the common
+   generous-policy case;
+   once max_cost >
+   cost_so_far +
+   remaining_cost ≈
+   max_cost > total
+   campaign budget). The
+   test
+   tests/test_discovery_po
+   licy.py:212
+   test_simulation_rejects
+   _budget_arithmetic_over
+   _remaining_budget (case
+   {"attempts": 10.0,
+   "cost": 1.0}) enshrines
+   this.
+ - Why not higher
+   severity: it is
+   fail-closed
+   (over-rejects, never
+   accepts an unsafe
+   policy), and the
+   scheduler never
+   actually charges cost
+   at runtime
+   (BudgetAllocation(attem
+   pts=1, cost=0.0) per
+   spawn,
+   scheduler.py:540), so
+   no overspend is
+   possible. The only true
+   unsafe cost condition
+   (cost_so_far >
+   max_cost) is separately
+   caught at
+   policy.py:476.
+   Recommend documenting
+   the intended semantics
+   or inverting to reject
+   only when
+   remaining_budget["cost"
+   ] <= 0 (overspent
+   campaign).
+
+ P3-2. HeartbeatEngine
+ reaches into the hub's
+ private _project_id
+ attribute. CONFIRMED
+ fragility.
+ - Evidence:
+   heartbeat.py:497-501
+   def
+   _hub_project_id(self):
+   ... return
+   getattr(self._hub,
+   "_project_id"). The
+   heartbeat appends via
+   hub.append(project_id=s
+   elf._hub_project_id(),
+   ...)
+   (heartbeat.py:476).
+   This couples the engine
+   to an implementation
+   attribute of
+   DiscoveryKnowledgeHub
+   (set at
+   knowledge.py:338), with
+   no public accessor. The
+   test helper
+   _read_artifact
+   (tests/test_discovery_h
+   eartbeats.py) reaches
+   into the same
+   attribute.
+   Deterministic, but a
+   hub rename silently
+   routes appends to
+   None/wrong project.
+   Recommend a public
+   project_id accessor on
+   the hub.
+
+ P3-3. Heartbeat budget
+ gate silently disables
+ when the descriptor omits
+ a "cost" entry, unlike
+ the scheduler which
+ fail-closed requires
+ "attempts". CONFIRMED
+ inconsistency.
+ - Evidence:
+   heartbeat.py:288
+   remaining_cost =
+   remaining.get("cost",
+   None);
+   heartbeat.py:289-292
+   only enforces
+   resource_cost >
+   remaining_cost + 1e-12
+   if remaining_cost is
+   not None. The default
+   make_descriptor in
+   tests/test_discovery_he
+   artbeats.py uses
+   remaining_budget={"atte
+   mpts": 9.0} (no cost),
+   so the cost gate is a
+   no-op there. By
+   contrast
+   scheduler.py:484-489
+   raises SchedulerError
+   if "attempts" is
+   absent. No runtime
+   overspend results
+   (heartbeat appends are
+   idempotent CANDIDATE
+   artifacts,
+   heartbeat.py:447-495),
+   but the gate is
+   inconsistent and
+   effectively advisory
+   when the budget entry
+   is absent. Recommend
+   fail-closed: require
+   the "cost" entry or
+   document that the
+   heartbeat resource_cost
+   is advisory in this
+   MVP.
+
+ P3-4. assert parent is
+ not None is a real assert
+  (no-op under python -O);
+ two except Exception
+ re-raise paths are
+ untested. CONFIRMED minor
+ robustness.
+ - Evidence:
+   scheduler.py:546 assert
+   parent is not None  #
+   invariant guaranteed by
+   schedule() — under
+   python -O this is
+   stripped; the invariant
+   holds by construction
+   (schedule() only passes
+   a non-None parent for
+   optimizer spawns), so
+   there is no behavioral
+   risk, but a raise-style
+   guard would be robust
+   under -O. Separately,
+   scheduler.py:278 and
+   :286 are except
+   Exception as exc: #
+   pragma: no cover -
+   re-raise path blocks
+   re-raising as
+   SchedulerError; the
+   broad except Exception
+   is acceptable for a
+   constructor guard but
+   those branches are
+   explicitly untested.
+ - Charter impact: none.
+
+ Notes on the brief's
+ specific focus areas
+
+ - Cross-module contract
+   mismatches
+   (scheduler/heartbeat vs
+
+   policy/evolution/popula
+   tion): P2-2
+   (scheduler↔policy
+   selector divergence)
+   and P2-3
+   (receipt↔assignment
+   explorer-parent
+   invariant divergence)
+   are the substantive
+   findings here. The
+   scheduler's
+   _selector_sort_key/_pic
+   k_distinct_lineage_pare
+   nts and
+   policy._select_parent_i
+   ds were built by
+   different seats and do
+   not faithfully mirror
+   each other despite the
+   comment claiming so.
+   Heartbeat↔evolution/pop
+   ulation coupling is
+   clean and bounded
+   (PRIVATE/UNTRUSTED/CAND
+   IDATE appends;
+   idempotent; no
+   activation).
+ - Simulation-stage
+   arithmetic: P2-1
+   (BASELINE concentration
+   projection) and P3-1
+   (cost-cap direction)
+   are the arithmetic
+   findings.
+   planned_attempts =
+   min(max_attempts,
+   max_width*max_depth)
+   (policy.py:464-468) and
+   the concentration lower
+   bound max(conc,
+   1/parent_count) are
+   otherwise sound; the
+   -0.0 canonicalization
+   in
+   evolution.score_window
+   is correctly handled.
+ - Hash-binding gaps: no
+   per-receipt field gap
+   (per-model binding is
+   complete via
+   _self_verifying). The
+   only
+   binding-completeness
+   gap is the pair-level
+   ScheduledSpawn (P2-3).
+   No receipt binds fewer
+   fields than it claims
+   at the field level.
+ - Identical inputs
+   yielding different
+   bytes: none found.
+   Determinism holds on
+   every decision path
+   (see invariant checks
+   above).
+
+ Disposition request to
+ the implementing seat:
+ please classify P2-1,
+ P2-2, P2-3 (and the P3s)
+ as ACCEPT,
+ ACCEPT-WITH-MOD, REJECT,
+ DEFER, or NEEDS-EVIDENCE.
+ Since none are P0/P1,
+ they do not block
+ integration under the
+ AGENTS.md gate; I
+ recommend
+ ACCEPT/ACCEPT-WITH-MOD
+ for P2-1 and P2-2
+ (cross-module selector
+ fidelity and BASELINE
+ projection should be
+ reconciled or the
+ "mirror" comment
+ corrected) and P2-3 (add
+ a ScheduledSpawn
+ cross-validator or paired
+ hash), with follow-up
+ cards.
+
+───────────────────────────
+
+───────────────────────────
+/private/tmp/meta-harnes...
+↑53k ↓42k R1.1M CH99.5% ...
