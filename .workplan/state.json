@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 109,
+  "revision": 110,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3124,7 +3124,7 @@
     {
       "id": "TASK-20260724-018",
       "title": "Repair validateIntegrationReceipt so a card integrated before another card's board transition can still be accepted, while still rejecting an integrationReceipt ahead of the board",
-      "status": "in_progress",
+      "status": "review",
       "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
       "paths": [
         "scripts/workplan.mjs",
@@ -3201,6 +3201,18 @@
           "revisionFrom": 108,
           "revisionTo": 109,
           "at": "2026-07-23T23:44:59.724Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 109,
+          "revisionTo": 110,
+          "at": "2026-07-23T23:53:33.837Z",
+          "evidence": {
+            "branch": "fix/workplan-integration-receipt-revision",
+            "head": "84734f8d1f30d34e954f7603176b4bc8df74e261"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3231,6 +3243,13 @@
         "revisionFrom": 107,
         "revisionTo": 108,
         "at": "2026-07-23T23:44:59.650Z"
+      },
+      "reviewFreeze": {
+        "branch": "fix/workplan-integration-receipt-revision",
+        "head": "84734f8d1f30d34e954f7603176b4bc8df74e261",
+        "revisionFrom": 109,
+        "revisionTo": 110,
+        "at": "2026-07-23T23:53:33.837Z"
       }
     }
   ]
