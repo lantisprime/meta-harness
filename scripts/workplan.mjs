@@ -19,6 +19,31 @@ import { pathToFileURL } from "node:url";
 import { hostname } from "node:os";
 import process from "node:process";
 
+/**
+ * Additional names this same host is known by.
+ *
+ * macOS commonly resolves to more than one name depending on network state
+ * (e.g. a Bonjour/local hostname and a DHCP-assigned name), and that name can
+ * flap between sessions. A card claimed under one name can therefore fail a
+ * later submit/integrate/accept whose `--owner` host is checked against the
+ * *current* `os.hostname()`. Operators list the host's accepted aliases in the
+ * `WORKPLAN_HOST_ALIASES` environment variable (comma-separated) so any of
+ * them is treated as "this host" for owner/actor/lock-host validation. The
+ * frozen card owner string still pins the namespace:session identity exactly;
+ * aliases only relax the host-equality precondition.
+ */
+function hostAliases() {
+  const raw = process.env.WORKPLAN_HOST_ALIASES ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function isThisHost(host) {
+  return host === hostname() || hostAliases().includes(host);
+}
+
 const VALID_STATUSES = [
   "backlog",
   "ready",
@@ -145,7 +170,7 @@ function parseReadyFlags(flags, positionals) {
     fail("owner must be coordinator:<host>:<session>");
   }
   const ownerHost = owner.slice("coordinator:".length).split(":")[0];
-  if (ownerHost !== hostname()) {
+  if (!isThisHost(ownerHost)) {
     fail("owner host must match this host");
   }
   const definitionJson = requireFlag(flags, "--definition-json");
@@ -169,7 +194,7 @@ function parseClaimOwner(owner) {
     fail("owner must be codex:<host>:<session> or claude:<host>:<session>");
   }
   const [, namespace, host, session] = match;
-  if (host !== hostname()) {
+  if (!isThisHost(host)) {
     fail("owner host must match this host");
   }
   if (session.length === 0) {
@@ -183,7 +208,7 @@ function parseCoordinatorActor(actor) {
     fail("actor must be coordinator:<host>:<session>");
   }
   const actorHost = actor.slice("coordinator:".length).split(":")[0];
-  if (actorHost !== hostname()) {
+  if (!isThisHost(actorHost)) {
     fail("actor host must match this host");
   }
 }
@@ -746,7 +771,7 @@ async function classifyLock(lockPath, allowedOwners) {
   if (
     metadata.schemaVersion !== 1 ||
     typeof metadata.host !== "string" ||
-    metadata.host !== hostname() ||
+    !isThisHost(metadata.host) ||
     typeof metadata.owner !== "string" ||
     metadata.owner.length === 0 ||
     !allowedOwners.includes(metadata.owner) ||
