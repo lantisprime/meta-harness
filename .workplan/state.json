@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 96,
+  "revision": 99,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2876,6 +2876,43 @@
             "branch": "dev/meta-17-workflow-compilation",
             "head": "bd9b79d4f113661ba70cbd626f2d53edcebcdd09"
           }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 96,
+          "revisionTo": 97,
+          "at": "2026-07-23T14:03:00.037Z",
+          "evidence": {
+            "reason": "GLM-5.2 gate on bd9b79d found a P1 regression (exists() left outside both guards by the P2-1 restructure); fixed in e312f68 plus remaining P2/P3 closures in 28c4b6b, which must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 97,
+          "revisionTo": 98,
+          "at": "2026-07-23T14:03:00.109Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "GLM-5.2 gate on bd9b79d found a P1 regression (exists() left outside both guards by the P2-1 restructure); fixed in e312f68 plus remaining P2/P3 closures in 28c4b6b, which must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 98,
+          "revisionTo": 99,
+          "at": "2026-07-23T14:03:00.194Z",
+          "evidence": {
+            "branch": "dev/meta-17-workflow-compilation",
+            "head": "28c4b6b7ad1297879ea7603c29ccc2641b8dd934"
+          }
         }
       ],
       "claimSnapshot": {
@@ -2915,10 +2952,10 @@
       },
       "reviewFreeze": {
         "branch": "dev/meta-17-workflow-compilation",
-        "head": "bd9b79d4f113661ba70cbd626f2d53edcebcdd09",
-        "revisionFrom": 95,
-        "revisionTo": 96,
-        "at": "2026-07-23T13:26:17.758Z"
+        "head": "28c4b6b7ad1297879ea7603c29ccc2641b8dd934",
+        "revisionFrom": 98,
+        "revisionTo": 99,
+        "at": "2026-07-23T14:03:00.194Z"
       }
     }
   ]
