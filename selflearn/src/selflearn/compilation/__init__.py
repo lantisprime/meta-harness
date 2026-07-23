@@ -33,7 +33,7 @@ from selflearn.compilation.runtime import (
     _make_restricted_globals,
 )
 from selflearn.compilation.testgen import (
-    TestAuthorError,
+    WorkflowTestAuthorError,
     WorkflowTestAuthor,
     AUTHOR_ROLE,
 )
@@ -65,7 +65,7 @@ __all__ = [
     "_make_restricted_globals",
     "ExecutorRuntime",
     "RunResult",
-    "TestAuthorError",
+    "WorkflowTestAuthorError",
     "WorkflowTestAuthor",
     "AUTHOR_ROLE",
     "CrossValidationGate",

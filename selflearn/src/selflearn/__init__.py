@@ -95,7 +95,7 @@ from selflearn.compilation import (
     GateError,
     RegistryError,
     RuntimeCompError,
-    TestAuthorError,
+    WorkflowTestAuthorError,
     canonical_procedure_hash,
     content_hash,
 )
@@ -141,7 +141,7 @@ __all__ = [
     "GateError",
     "RegistryError",
     "RuntimeCompError",
-    "TestAuthorError",
+    "WorkflowTestAuthorError",
     "canonical_procedure_hash",
     "content_hash",
     "__version__",

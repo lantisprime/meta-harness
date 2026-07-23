@@ -16,9 +16,13 @@ from selflearn.ports import IdentityPort, ModelPort, ProvenancePort
 AUTHOR_ROLE = "workflow-test-author"
 
 
-class TestAuthorError(RuntimeError):
+class WorkflowTestAuthorError(RuntimeError):
     """Error during test generation."""
     pass
+
+
+# Backward-compatible alias preserved outside the public __all__.
+TestAuthorError = WorkflowTestAuthorError
 
 
 # Marker to represent the compiler identity for distinctness check
@@ -40,15 +44,15 @@ class WorkflowTestAuthor:
         # Enforce identity separation - compiler model_id must be distinct
         try:
             if not identity.distinct(model, _CompilerMarker()):
-                raise TestAuthorError(
+                raise WorkflowTestAuthorError(
                     f"identity violation: test author must be distinct from "
                     f"compiler (basis: {identity.basis})")
         except Exception as exc:
-            # F2-17: convert identity-port failures into TestAuthorError,
+            # F2-17: convert identity-port failures into WorkflowTestAuthorError,
             # preserving the underlying cause.
-            if isinstance(exc, TestAuthorError):
+            if isinstance(exc, WorkflowTestAuthorError):
                 raise
-            raise TestAuthorError(
+            raise WorkflowTestAuthorError(
                 f"identity verification failed: {exc}"
             ) from exc
 
@@ -71,7 +75,7 @@ class WorkflowTestAuthor:
             IndependentTestSuite with generated test source
 
         Raises:
-            TestAuthorError: If the model returns invalid output
+            WorkflowTestAuthorError: If the model returns invalid output
         """
         # Build context - NEVER includes executor source (asserted in tests)
         context = {
@@ -96,7 +100,7 @@ class WorkflowTestAuthor:
 
         # Schema validation
         if not isinstance(plan, list) or not plan:
-            raise TestAuthorError("Test author returned no tests")
+            raise WorkflowTestAuthorError("Test author returned no tests")
 
         # FIX-5: validate test plan
         valid_kinds = {"order", "check", "approval", "failure-path"}
@@ -106,67 +110,67 @@ class WorkflowTestAuthor:
 
         for i, test in enumerate(plan):
             if not isinstance(test, dict):
-                raise TestAuthorError(f"Test #{i} is not a dict")
+                raise WorkflowTestAuthorError(f"Test #{i} is not a dict")
             kind = test.get("kind", "")
             if kind not in valid_kinds:
-                raise TestAuthorError(f"Test #{i} has invalid kind {kind!r}")
+                raise WorkflowTestAuthorError(f"Test #{i} has invalid kind {kind!r}")
 
             # FIX-5: name/step_id/expect must be strings
             name = test.get("name", "")
             step_id = test.get("step_id", "")
             expect = test.get("expect", "")
             if not isinstance(name, str):
-                raise TestAuthorError(f"Test #{i} name must be a string")
+                raise WorkflowTestAuthorError(f"Test #{i} name must be a string")
             if not isinstance(step_id, str):
-                raise TestAuthorError(f"Test #{i} step_id must be a string")
+                raise WorkflowTestAuthorError(f"Test #{i} step_id must be a string")
             if not isinstance(expect, str):
-                raise TestAuthorError(f"Test #{i} expect must be a string")
+                raise WorkflowTestAuthorError(f"Test #{i} expect must be a string")
 
             if kind == "order":
                 has_order = True
                 # F2-10: order expect may be a JSON array or comma-separated ids.
                 if not expect:
-                    raise TestAuthorError(
+                    raise WorkflowTestAuthorError(
                         f"Test #{i} (order) requires non-empty expect")
                 # Parse order; validate every id belongs to the spec.
                 try:
                     parsed = json.loads(expect)
                     if not isinstance(parsed, list):
-                        raise TestAuthorError(
+                        raise WorkflowTestAuthorError(
                             f"Test #{i} (order) expect must be a list")
                 except json.JSONDecodeError:
                     parsed = [part.strip() for part in expect.split(",")]
                 for ordered_id in parsed:
                     if ordered_id not in spec_step_ids:
-                        raise TestAuthorError(
+                        raise WorkflowTestAuthorError(
                             f"Test #{i} (order) expect step {ordered_id!r} "
                             f"not in spec")
             if kind == "approval":
                 has_approval = True
                 # F3-4: approval step_id must be non-empty and a real spec step
                 if not step_id:
-                    raise TestAuthorError(
+                    raise WorkflowTestAuthorError(
                         f"Test #{i} (approval) requires a step_id")
                 if step_id not in spec_step_ids:
-                    raise TestAuthorError(
+                    raise WorkflowTestAuthorError(
                         f"Test #{i} (approval) step_id {step_id!r} not in spec")
             if kind == "check":
                 # FIX-5: check/failure-path step_id must be in spec
                 if step_id and step_id not in spec_step_ids:
-                    raise TestAuthorError(
+                    raise WorkflowTestAuthorError(
                         f"Test #{i} step_id {step_id!r} not in spec")
             if kind == "failure-path":
                 if step_id and step_id not in spec_step_ids:
-                    raise TestAuthorError(
+                    raise WorkflowTestAuthorError(
                         f"Test #{i} step_id {step_id!r} not in spec")
 
         # Coverage floor: need order test
         if not has_order:
-            raise TestAuthorError("Test plan must include at least one 'order' test")
+            raise WorkflowTestAuthorError("Test plan must include at least one 'order' test")
 
         # Coverage floor: need approval test if spec has approval steps
         if self._has_approval_step(spec.procedure) and not has_approval:
-            raise TestAuthorError(
+            raise WorkflowTestAuthorError(
                 "Test plan must include at least one 'approval' test "
                 "since the spec has approval steps")
 
@@ -240,6 +244,7 @@ class WorkflowTestAuthor:
         # F4-2: do not emit `import json`.  The sandbox harness injects `json`
         # directly into the restricted execution namespace; keeping imports out
         # of model-rendered code closes __import__ injection paths.
+
         lines.append("def run_tests(load_executor):")
         lines.append('    """Run the test suite against an executor."""')
         lines.append("    results = []")

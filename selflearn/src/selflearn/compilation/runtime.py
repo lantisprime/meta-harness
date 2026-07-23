@@ -182,6 +182,25 @@ class ExecutorRuntime:
         # Load and verify executor source
         from pathlib import Path
         exec_path = Path(self.store.root) / active.path
+
+        # Bounded-authority check: a tampered registry.path cannot widen the
+        # read surface outside the store root.
+        store_root_resolved = Path(self.store.root).resolve()
+        exec_path_resolved = exec_path.resolve()
+        try:
+            if not exec_path_resolved.is_relative_to(store_root_resolved):
+                self._journal_refusal(entry_id, "executor.path-escape",
+                                     f"executor path {active.path!r} escapes store root",
+                                     now=now)
+                raise RuntimeCompError(
+                    f"Executor path {active.path!r} escapes store root")
+        except OSError as exc:
+            self._journal_refusal(entry_id, "executor.path-escape",
+                                 f"cannot validate executor path {active.path!r}: {exc}",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Cannot validate executor path {active.path!r}") from exc
+
         if not exec_path.exists():
             raise RuntimeCompError(f"Executor source missing: {active.path}")
 

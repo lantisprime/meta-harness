@@ -42,7 +42,7 @@ from selflearn.compilation.gate import COMPILER_ID
 from selflearn.compilation.models import CrossValidationReceipt, ExecutorRecord
 from selflearn.compilation.registry import RegistryError
 from selflearn.compilation.runtime import _make_restricted_globals
-from selflearn.compilation.testgen import TestAuthorError, WorkflowTestAuthor
+from selflearn.compilation.testgen import WorkflowTestAuthorError, WorkflowTestAuthor
 from selflearn.contracts import EntrySource, ProcedureStep
 from selflearn.ports import ExecutionPort, ExecutionResult, IdentityPort, ProvenancePort
 from selflearn.store.packstore import PackStore
@@ -215,7 +215,7 @@ def test_test_author_rejects_compiler_identity():
 
     identity = FakeIdentity()
 
-    with pytest.raises(TestAuthorError, match="distinct from compiler"):
+    with pytest.raises(WorkflowTestAuthorError, match="distinct from compiler"):
         WorkflowTestAuthor(CompilerModel(), identity)
 
 
@@ -229,14 +229,14 @@ def test_test_author_accepts_distinct_identity():
 
 
 def test_test_author_wraps_identity_error():
-    """F2-17: identity.distinct failure becomes TestAuthorError."""
+    """F2-17: identity.distinct failure becomes WorkflowTestAuthorError."""
     class ExplodingIdentity:
         basis = "explodes"
 
         def distinct(self, a, b):
             raise RuntimeError("identity backend unavailable")
 
-    with pytest.raises(TestAuthorError, match="identity verification failed"):
+    with pytest.raises(WorkflowTestAuthorError, match="identity verification failed"):
         WorkflowTestAuthor(FakeModel(), ExplodingIdentity())
 
 
@@ -1125,7 +1125,7 @@ def test_testgen_order_expect_comma_split_renders():
 
 
 def test_testgen_nonexistent_step_id_raises():
-    """Plan referencing nonexistent step_id -> TestAuthorError."""
+    """Plan referencing nonexistent step_id -> WorkflowTestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
@@ -1155,12 +1155,12 @@ def test_testgen_nonexistent_step_id_raises():
     )
 
     author = WorkflowTestAuthor(BadModel(), FakeIdentity())
-    with pytest.raises(TestAuthorError, match="nonexistent_step"):
+    with pytest.raises(WorkflowTestAuthorError, match="nonexistent_step"):
         author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
 
 def test_testgen_order_without_expect_raises():
-    """Order test without expect -> TestAuthorError."""
+    """Order test without expect -> WorkflowTestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
@@ -1188,7 +1188,7 @@ def test_testgen_order_without_expect_raises():
     )
 
     author = WorkflowTestAuthor(BadModel(), FakeIdentity())
-    with pytest.raises(TestAuthorError, match="non-empty expect"):
+    with pytest.raises(WorkflowTestAuthorError, match="non-empty expect"):
         author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
 
@@ -1458,7 +1458,7 @@ def test_gate_activation_binds_matching_registry_record():
 # =============================================================================
 
 def test_testgen_approval_nonexistent_step_id_raises():
-    """F3-4: approval step_id not in spec -> TestAuthorError."""
+    """F3-4: approval step_id not in spec -> WorkflowTestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
@@ -1488,14 +1488,14 @@ def test_testgen_approval_nonexistent_step_id_raises():
         procedure=steps,
     )
 
-    with pytest.raises(TestAuthorError, match="nonexistent"):
+    with pytest.raises(WorkflowTestAuthorError, match="nonexistent"):
         WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
             spec, authored_at="t", provenance=FakeProvenance()
         )
 
 
 def test_testgen_approval_empty_step_id_raises():
-    """F3-4: approval step_id empty -> TestAuthorError."""
+    """F3-4: approval step_id empty -> WorkflowTestAuthorError."""
     from selflearn.compilation.testgen import WorkflowTestAuthor
 
     class BadModel:
@@ -1525,7 +1525,7 @@ def test_testgen_approval_empty_step_id_raises():
         procedure=steps,
     )
 
-    with pytest.raises(TestAuthorError, match="requires a step_id"):
+    with pytest.raises(WorkflowTestAuthorError, match="requires a step_id"):
         WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
             spec, authored_at="t", provenance=FakeProvenance()
         )
