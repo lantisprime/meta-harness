@@ -72,7 +72,7 @@ class WorkflowCompiler:
         *,
         pack: str,
         compiled_at: str,
-        provenance: Optional[ProvenancePort] = None,
+        provenance: ProvenancePort,
         clock: Optional[Callable[[], Any]] = None,
     ) -> ExecutorCandidate:
         """Compile a workflow entry to an ExecutorCandidate.
@@ -81,8 +81,8 @@ class WorkflowCompiler:
             entry: A CandidateEntry with kind == "workflow"
             pack: The pack name
             compiled_at: ISO timestamp
-            provenance: Optional provenance port for compile events (F2-7)
-            clock: Optional clock for timestamps (F2-7)
+            provenance: Provenance port for compile events (F3-6)
+            clock: Optional clock for timestamps
 
         Returns:
             ExecutorCandidate with generated source code
@@ -132,18 +132,17 @@ class WorkflowCompiler:
             compiler_id=COMPILER_ID,
         )
 
-        # F2-7: journal compile event when provenance is bound
-        if provenance is not None:
-            timestamp = clock().isoformat() if clock is not None else compiled_at
-            provenance.append({
-                "kind": "compile",
-                "entry_id": entry.id,
-                "spec_hash": spec_hash,
-                "executor_hash": executor_hash,
-                "compiler_id": COMPILER_ID,
-                "actor": COMPILER_ID,
-                "timestamp": timestamp,
-            })
+        # F3-6: always journal compile event (provenance is required)
+        timestamp = clock().isoformat() if clock is not None else compiled_at
+        provenance.append({
+            "kind": "compile",
+            "entry_id": entry.id,
+            "spec_hash": spec_hash,
+            "executor_hash": executor_hash,
+            "compiler_id": COMPILER_ID,
+            "actor": COMPILER_ID,
+            "timestamp": timestamp,
+        })
 
         return candidate
 

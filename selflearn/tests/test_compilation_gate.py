@@ -382,7 +382,7 @@ def test_gate_stale_spec_entry_deleted_rejected_zero_sandbox():
 
         compiler = WorkflowCompiler()
         entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         path = registry.write_candidate(candidate)
         active_record = ExecutorRecord(
@@ -596,7 +596,7 @@ def test_gate_swap_requires_baseline():
         )
 
         stored = registry.store.get(spec.entry_id)
-        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
         suite1 = IndependentTestSuite(
             spec_hash=candidate1.spec.spec_hash,
             test_source="def run_tests(x): pass",
@@ -615,7 +615,7 @@ def test_gate_swap_requires_baseline():
         stored.cand = replace(stored.cand, procedure=steps2)
         registry.store._persist_entry(stored)
 
-        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z")
+        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z", provenance=FakeProvenance())
         suite2 = IndependentTestSuite(
             spec_hash=candidate2.spec.spec_hash,
             test_source="def run_tests(x): pass",
@@ -659,7 +659,7 @@ def test_gate_swap_order_activate_then_supersede():
         )
 
         stored = registry.store.get(spec.entry_id)
-        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
         suite1 = IndependentTestSuite(
             spec_hash=candidate1.spec.spec_hash,
             test_source="def run_tests(x): pass",
@@ -674,7 +674,7 @@ def test_gate_swap_order_activate_then_supersede():
         stored.cand = replace(stored.cand, procedure=steps2)
         registry.store._persist_entry(stored)
 
-        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z")
+        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z", provenance=FakeProvenance())
         suite2 = IndependentTestSuite(
             spec_hash=candidate2.spec.spec_hash,
             test_source="def run_tests(x): pass",
@@ -877,7 +877,7 @@ def test_gate_full_happy_path_activates_and_runtime_runs():
 
         compiler = WorkflowCompiler()
         entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
@@ -930,7 +930,7 @@ def test_gate_rejection_leaves_no_active_record():
 
         compiler = WorkflowCompiler()
         entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
@@ -972,12 +972,12 @@ def test_gate_real_sandbox_double_runs_suite():
 
         compiler = WorkflowCompiler()
         entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         # Build a real test suite that asserts completion order.
         from selflearn.compilation.testgen import WorkflowTestAuthor
         author = WorkflowTestAuthor(FakeModel(), FakeIdentity())
-        suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
+        suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         approval = ApprovalRecord(
             approver="admin", basis="reviewed", strict_mode=True,
@@ -1036,7 +1036,7 @@ def test_testgen_hostile_step_id_renders_as_inert_literal():
     )
 
     author = WorkflowTestAuthor(HostileModel(), FakeIdentity())
-    suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
+    suite = author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     compile(suite.test_source, "<test>", "exec")
     assert "x' or True #" not in suite.test_source
@@ -1075,7 +1075,7 @@ def test_testgen_approval_and_failure_path_render_compile():
     )
 
     suite = WorkflowTestAuthor(CoverageModel(), FakeIdentity()).author_suite(
-        spec, authored_at="2024-01-01T00:00:00Z"
+        spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance()
     )
     compile(suite.test_source, "<test>", "exec")
     assert "approval not raised" in suite.test_source
@@ -1113,7 +1113,7 @@ def test_testgen_order_expect_comma_split_renders():
     )
 
     suite = WorkflowTestAuthor(CommaModel(), FakeIdentity()).author_suite(
-        spec, authored_at="2024-01-01T00:00:00Z"
+        spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance()
     )
     compile(suite.test_source, "<test>", "exec")
     assert '["step1", "step2"]' in suite.test_source
@@ -1151,7 +1151,7 @@ def test_testgen_nonexistent_step_id_raises():
 
     author = WorkflowTestAuthor(BadModel(), FakeIdentity())
     with pytest.raises(TestAuthorError, match="nonexistent_step"):
-        author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
+        author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
 
 def test_testgen_order_without_expect_raises():
@@ -1184,7 +1184,7 @@ def test_testgen_order_without_expect_raises():
 
     author = WorkflowTestAuthor(BadModel(), FakeIdentity())
     with pytest.raises(TestAuthorError, match="non-empty expect"):
-        author.author_suite(spec, authored_at="2024-01-01T00:00:00Z")
+        author.author_suite(spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
 
 # =============================================================================
@@ -1397,3 +1397,241 @@ def test_registry_write_candidate_journals_quarantine():
         quarantine_events = [e for e in provenance.events if e["kind"] == "quarantined"]
         assert len(quarantine_events) == 1
         assert quarantine_events[0]["entry_id"] == spec.entry_id
+
+
+# =============================================================================
+# F3-2 citing test: activation is bound to a matching registry record
+# =============================================================================
+
+def test_gate_activation_binds_matching_registry_record():
+    """F3-2: active record's spec_hash and executor_hash match the candidate."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        compiler = WorkflowCompiler()
+        entry = _make_workflow_entry(id=spec.entry_id, pack=pack, procedure=steps)
+        candidate = compiler.compile(
+            entry, pack=pack, compiled_at="2024-01-01T00:00:00Z",
+            provenance=FakeProvenance(),
+        )
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        receipt = gate.evaluate(candidate, suite, approval, decided_at="2024-01-01T00:00:00Z")
+        assert receipt.verdict == "activated"
+
+        active = registry.active_for(spec.entry_id)
+        assert active is not None
+        assert active.spec_hash == candidate.spec.spec_hash
+        assert active.executor_hash == candidate.executor_hash
+
+
+# =============================================================================
+# F3-4 citing tests: approval step_id validation
+# =============================================================================
+
+def test_testgen_approval_nonexistent_step_id_raises():
+    """F3-4: approval step_id not in spec -> TestAuthorError."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+
+    class BadModel:
+        model_id = "bad"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                    {"name": "approval", "kind": "approval", "step_id": "nonexistent", "expect": ""},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (
+        ProcedureStep(id="step1", objective="x", task_type="code_edit"),
+        ProcedureStep(id="step2", objective="a", task_type="approval"),
+    )
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    with pytest.raises(TestAuthorError, match="nonexistent"):
+        WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
+            spec, authored_at="t", provenance=FakeProvenance()
+        )
+
+
+def test_testgen_approval_empty_step_id_raises():
+    """F3-4: approval step_id empty -> TestAuthorError."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+
+    class BadModel:
+        model_id = "bad"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                    {"name": "approval", "kind": "approval", "step_id": "", "expect": ""},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (
+        ProcedureStep(id="step1", objective="x", task_type="code_edit"),
+        ProcedureStep(id="step2", objective="a", task_type="approval"),
+    )
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    with pytest.raises(TestAuthorError, match="requires a step_id"):
+        WorkflowTestAuthor(BadModel(), FakeIdentity()).author_suite(
+            spec, authored_at="t", provenance=FakeProvenance()
+        )
+
+
+# =============================================================================
+# F3-5 citing test: rendered check test is spec-aware
+# =============================================================================
+
+def test_testgen_check_test_honors_declared_checks():
+    """F3-5: check-kind test satisfies the step's declared check pairs."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+    from selflearn.compilation.runtime import _make_restricted_globals
+
+    class CheckModel:
+        model_id = "check"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1", "step2"]'},
+                    {"name": "status check", "kind": "check", "step_id": "step2", "expect": "ignored"},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (
+        ProcedureStep(id="step1", objective="x", task_type="code_edit"),
+        ProcedureStep(
+            id="step2", objective="checked", task_type="code_edit",
+            check=(("status", "pass"),),
+        ),
+    )
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite = WorkflowTestAuthor(CheckModel(), FakeIdentity()).author_suite(
+        spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance()
+    )
+    compile(suite.test_source, "<test>", "exec")
+
+    # Compile the executor
+    compiler = WorkflowCompiler()
+    entry = _make_workflow_entry(id="wf-001", pack="test", procedure=steps)
+    candidate = compiler.compile(
+        entry, pack="test", compiled_at="2024-01-01T00:00:00Z",
+        provenance=FakeProvenance(),
+    )
+
+    def load_executor():
+        ns = _make_restricted_globals()
+        exec(candidate.source, ns)
+        return ns
+
+    test_ns = {"load_executor": load_executor, "json": json}
+    exec(suite.test_source, test_ns)
+    results = test_ns["run_tests"](load_executor)
+    assert all(r[0] == "pass" for r in results), results
+
+
+# =============================================================================
+# F3-10 citing test: suite_hash binds author identity
+# =============================================================================
+
+def test_suite_hash_binds_author_identity():
+    """F3-10: mutating author_id or identity_basis changes suite_hash."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+
+    class ModelA:
+        model_id = "model-a"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                ]
+            }
+
+    class ModelB:
+        model_id = "model-b"
+
+        def complete(self, role, prompt, context):
+            return ModelA().complete(role, prompt, context)
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite_a = WorkflowTestAuthor(ModelA(), FakeIdentity()).author_suite(
+        spec, authored_at="t", provenance=FakeProvenance()
+    )
+    suite_b = WorkflowTestAuthor(ModelB(), FakeIdentity()).author_suite(
+        spec, authored_at="t", provenance=FakeProvenance()
+    )
+
+    assert suite_a.suite_hash != suite_b.suite_hash
+    assert suite_a.test_source == suite_b.test_source

@@ -6,6 +6,7 @@ Tests for:
 - generated executor behavior
 """
 import json
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -21,6 +22,16 @@ from selflearn.compilation import (
 )
 from selflearn.compilation.models import CrossValidationReceipt
 from selflearn.contracts import CandidateEntry, ContractError, EntrySource, ProcedureStep
+
+
+@dataclass
+class FakeProvenance:
+    """In-memory provenance port for tests."""
+    events: list = field(default_factory=list)
+
+    def append(self, event: dict) -> None:
+        self.events.append(event)
+
 
 # Test helper: minimal source for workflow entries
 TEST_SOURCE = EntrySource(
@@ -384,7 +395,7 @@ def test_compiler_generates_three_step_procedure():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     # Check source contains step definitions
     assert "init" in candidate.source
@@ -432,7 +443,7 @@ def test_compiler_generated_source_injection_probe():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     # The dangerous code should NOT be executable
     # It should appear as a string literal
@@ -449,7 +460,7 @@ def test_compiler_stdlib_only():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     # Should only have json import
     import_lines = [l for l in candidate.source.split('\n')
@@ -466,7 +477,7 @@ def test_compiler_generates_stepcheckfailed():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     assert "StepCheckFailed" in candidate.source
 
@@ -479,7 +490,7 @@ def test_compiler_generates_approval_required():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     assert "ApprovalRequired" in candidate.source
     assert "step_id" in candidate.source
@@ -497,7 +508,7 @@ def test_compiler_rejects_non_workflow():
 
     compiler = WorkflowCompiler()
     with pytest.raises(CompilerError, match="workflow"):
-        compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+        compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
 
 def test_compiler_rejects_empty_procedure():
@@ -524,7 +535,7 @@ def test_executor_run_stub_handler():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     # Execute the generated code in a sandbox
     execution_order = []
@@ -559,7 +570,7 @@ def test_executor_check_failure_raises_stepcheckfailed():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     # Handler returns status != expected
     def stub_handler(step_id, step_data):
@@ -586,7 +597,7 @@ def test_executor_approval_step_raises_approvalrequired():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     def stub_handler(step_id, step_data):
         return {"status": "ok"}
@@ -616,7 +627,7 @@ def test_compiler_injection_probe_execs_inert():
     entry = _make_workflow_entry(procedure=steps)
 
     compiler = WorkflowCompiler()
-    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+    candidate = compiler.compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
     restricted_globals = __import__("selflearn.compilation.runtime", fromlist=["_make_restricted_globals"])._make_restricted_globals()
     exec(candidate.source, restricted_globals)
@@ -642,4 +653,43 @@ def test_compiler_non_json_check_raises():
     entry = _make_workflow_entry(procedure=steps)
 
     with pytest.raises(CompilerError, match="non-JSON-serializable"):
+        WorkflowCompiler().compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
+
+
+# =============================================================================
+# F3-6 citing tests: provenance is required and events are always journaled
+# =============================================================================
+
+def test_compiler_requires_provenance():
+    """F3-6: compile without provenance raises TypeError."""
+    from selflearn.compilation.compiler import WorkflowCompiler
+
+    steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+    entry = _make_workflow_entry(procedure=steps)
+
+    with pytest.raises(TypeError):
         WorkflowCompiler().compile(entry, pack="test", compiled_at="2024-01-01T00:00:00Z")
+
+
+def test_compiler_journals_compile_event():
+    """F3-6: compile with provenance appends a compile event."""
+    from selflearn.compilation.compiler import WorkflowCompiler
+    from datetime import datetime, timezone
+
+    steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+    entry = _make_workflow_entry(procedure=steps)
+
+    provenance = FakeProvenance()
+
+    def clock():
+        return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    candidate = WorkflowCompiler().compile(
+        entry, pack="test", compiled_at="2024-01-01T00:00:00Z",
+        provenance=provenance, clock=clock,
+    )
+
+    compile_events = [e for e in provenance.events if e["kind"] == "compile"]
+    assert len(compile_events) == 1
+    assert compile_events[0]["entry_id"] == entry.id
+    assert compile_events[0]["executor_hash"] == candidate.executor_hash

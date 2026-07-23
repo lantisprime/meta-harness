@@ -23,12 +23,13 @@ SAFE_BUILTINS = {
     "True", "False", "None",
     # Functional helpers
     "abs", "all", "any", "bin", "callable", "chr", "divmod", "enumerate",
-    "filter", "getattr", "hasattr", "hash", "hex", "isinstance",
+    "filter", "hash", "hex", "isinstance",
     "issubclass", "iter", "len", "map", "max", "min", "next", "oct", "ord",
     "pow", "repr", "reversed", "round", "sorted", "staticmethod", "sum",
     "super", "tuple", "zip", "__build_class__",
-    # NOTE: `id` intentionally omitted (F2-16) — leaks memory addresses and
-    # is unnecessary for generated executors.
+    # NOTE: `id` intentionally omitted (F2-16) — leaks memory addresses.
+    # NOTE: `getattr`/`hasattr` intentionally omitted (F3-3) — they can be
+    # used to access dunder attributes by string (e.g. getattr(obj, '__bases__')).
 }
 
 
@@ -107,8 +108,16 @@ from selflearn.store.packstore import PackStore
 
 @dataclass(frozen=True)
 class RunResult:
-    """Result of running an executor."""
-    status: str  # "completed" | "failed" | "awaiting_approval"
+    """Result of running an executor.
+
+    status vocabulary:
+    - completed: all steps finished and checks passed
+    - failed: a step check failed (produces a fail TaskOutcome)
+    - awaiting_approval: blocked at an approval step (no outcome produced)
+    - error: host handler failure or runtime precondition refusal
+             (entry not implicated; outcomes = ())
+    """
+    status: str  # "completed" | "failed" | "awaiting_approval" | "error"
     completed_steps: tuple[str, ...]
     outcomes: tuple[TaskOutcome, ...]
     at_step: str = ""  # For awaiting_approval status
@@ -145,6 +154,9 @@ class ExecutorRuntime:
         # Activation enforcement: must have ACTIVE record
         active = self.registry.active_for(entry_id)
         if active is None:
+            self._journal_refusal(entry_id, "executor.no-active",
+                                 f"no active executor for {entry_id}",
+                                 now=now)
             raise RuntimeCompError(
                 f"No active executor for entry {entry_id}")
 
@@ -153,7 +165,8 @@ class ExecutorRuntime:
         current_hash = canonical_procedure_hash(entry.cand.procedure)
         if active.spec_hash != current_hash:
             self._journal_refusal(entry_id, "executor.stale-spec",
-                                 f"active spec {active.spec_hash} != current {current_hash}")
+                                 f"active spec {active.spec_hash} != current {current_hash}",
+                                 now=now)
             raise RuntimeCompError(
                 f"Executor for {entry_id} is stale (spec hash mismatch)")
 
@@ -168,7 +181,8 @@ class ExecutorRuntime:
         actual_hash = hashlib.sha256(source.encode()).hexdigest()
         if actual_hash != active.executor_hash:
             self._journal_refusal(entry_id, "executor.tampered",
-                                 f"hash mismatch: {actual_hash} != {active.executor_hash}")
+                                 f"hash mismatch: {actual_hash} != {active.executor_hash}",
+                                 now=now)
             raise RuntimeCompError(
                 f"Executor for {entry_id} has been tampered with")
 
@@ -284,12 +298,12 @@ class ExecutorRuntime:
             at_step=at_step,
         )
 
-    def _journal_refusal(self, entry_id: str, kind: str, reason: str) -> None:
-        """Journal a runtime refusal."""
+    def _journal_refusal(self, entry_id: str, kind: str, reason: str, *, now: str) -> None:
+        """Journal a runtime refusal using the run's injected clock."""
         self.provenance.append({
             "kind": kind,
             "entry_id": entry_id,
             "actor": "executor-runtime",
             "reason": reason,
-            "timestamp": self.clock().isoformat(),
+            "timestamp": now,
         })

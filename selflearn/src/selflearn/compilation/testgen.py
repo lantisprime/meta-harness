@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from selflearn.compilation.models import ExecutorSpec, IndependentTestSuite
+from selflearn.compilation.models import ExecutorSpec, IndependentTestSuite, canonical_json
 from selflearn.compilation.compiler import COMPILER_ID
 from selflearn.contracts import ContractError
 from selflearn.ports import IdentityPort, ModelPort, ProvenancePort
@@ -57,7 +57,7 @@ class WorkflowTestAuthor:
         spec: ExecutorSpec,
         *,
         authored_at: str,
-        provenance: Optional[ProvenancePort] = None,
+        provenance: ProvenancePort,
         clock: Optional[Callable[[], Any]] = None,
     ) -> IndependentTestSuite:
         """Generate an independent test suite for the executor spec.
@@ -65,6 +65,7 @@ class WorkflowTestAuthor:
         Args:
             spec: The executor specification to test
             authored_at: ISO timestamp
+            provenance: Provenance port for test-author events (F3-6)
 
         Returns:
             IndependentTestSuite with generated test source
@@ -142,8 +143,15 @@ class WorkflowTestAuthor:
                             f"not in spec")
             if kind == "approval":
                 has_approval = True
+                # F3-4: approval step_id must be non-empty and a real spec step
+                if not step_id:
+                    raise TestAuthorError(
+                        f"Test #{i} (approval) requires a step_id")
+                if step_id not in spec_step_ids:
+                    raise TestAuthorError(
+                        f"Test #{i} (approval) step_id {step_id!r} not in spec")
             if kind == "check":
-                # FIX-5: check/approval/failure-path step_id must be in spec
+                # FIX-5: check/failure-path step_id must be in spec
                 if step_id and step_id not in spec_step_ids:
                     raise TestAuthorError(
                         f"Test #{i} step_id {step_id!r} not in spec")
@@ -166,30 +174,37 @@ class WorkflowTestAuthor:
         test_source = self._render_tests(spec, plan)
 
         import hashlib
-        suite_hash = hashlib.sha256(test_source.encode()).hexdigest()
+
+        author_id = getattr(self.model, "model_id", "unknown")
+        identity_basis = self.identity.basis
+
+        # F3-10: suite_hash binds test source + author identity so mutating
+        # authorship invalidates the hash.
+        suite_hash = hashlib.sha256(
+            canonical_json([test_source, author_id, identity_basis]).encode()
+        ).hexdigest()
 
         suite = IndependentTestSuite(
             spec_hash=spec.spec_hash,
             test_source=test_source,
             suite_hash=suite_hash,
-            author_id=getattr(self.model, "model_id", "unknown"),
-            identity_basis=self.identity.basis,
+            author_id=author_id,
+            identity_basis=identity_basis,
             authored_at=authored_at,
         )
 
-        # F2-7: journal test-author event when provenance is bound
-        if provenance is not None:
-            timestamp = clock().isoformat() if clock is not None else authored_at
-            provenance.append({
-                "kind": "test-author",
-                "entry_id": spec.entry_id,
-                "spec_hash": spec.spec_hash,
-                "suite_hash": suite_hash,
-                "author_id": suite.author_id,
-                "identity_basis": suite.identity_basis,
-                "actor": AUTHOR_ROLE,
-                "timestamp": timestamp,
-            })
+        # F3-6: always journal test-author event (provenance is required)
+        timestamp = clock().isoformat() if clock is not None else authored_at
+        provenance.append({
+            "kind": "test-author",
+            "entry_id": spec.entry_id,
+            "spec_hash": spec.spec_hash,
+            "suite_hash": suite_hash,
+            "author_id": suite.author_id,
+            "identity_basis": suite.identity_basis,
+            "actor": AUTHOR_ROLE,
+            "timestamp": timestamp,
+        })
 
         return suite
 
@@ -256,7 +271,17 @@ class WorkflowTestAuthor:
                 lines.append(f"    # Expect: step order matches {expect}")
                 lines.append("    try:")
                 lines.append("        executor = load_executor()")
-                lines.append("        result = executor['run'](lambda s, d: {'status': 'ok'})")
+                lines.append("        def order_handler(sid, sdata):")
+                lines.append("            result = {'status': 'ok', 'checks': {}}")
+                lines.append("            for ck, cv in sdata.get('check', []):")
+                lines.append("                if ck == 'approval':")
+                lines.append("                    continue")
+                lines.append("                if ck == 'status':")
+                lines.append("                    result['status'] = cv")
+                lines.append("                else:")
+                lines.append("                    result['checks'][ck] = cv")
+                lines.append("            return result")
+                lines.append("        result = executor['run'](order_handler)")
                 lines.append(f"        expected_order = {rendered_expect}")
                 lines.append("        actual_order = result.get('completed', [])")
                 lines.append("        assert actual_order == expected_order, f'Order mismatch: {actual_order} vs {expected_order}'")
@@ -266,13 +291,27 @@ class WorkflowTestAuthor:
                 lines.append("")
 
             elif kind == "check":
+                # F3-5: render a spec-aware check handler.  The executor evaluates
+                # the step's declared check pairs, so the handler must satisfy them.
                 lines.append(f"    # Expect: check {expect}")
                 lines.append("    try:")
                 lines.append("        executor = load_executor()")
+                lines.append("        step_id = " + safe_step_id)
+                lines.append("        step_data = executor['STEPS'][step_id]")
                 lines.append("        def check_handler(sid, sdata):")
-                lines.append("            return {'status': 'ok', 'checks': {" + safe_step_id + ": " + safe_expect + "}}")
+                lines.append("            if sid != step_id:")
+                lines.append("                return {'status': 'ok'}")
+                lines.append("            result = {'status': 'ok', 'checks': {}}")
+                lines.append("            for ck, cv in sdata.get('check', []):")
+                lines.append("                if ck == 'approval':")
+                lines.append("                    continue")
+                lines.append("                if ck == 'status':")
+                lines.append("                    result['status'] = cv")
+                lines.append("                else:")
+                lines.append("                    result['checks'][ck] = cv")
+                lines.append("            return result")
                 lines.append("        result = executor['run'](check_handler)")
-                lines.append("        assert " + safe_step_id + " in result.get('completed', [])")
+                lines.append("        assert step_id in result.get('completed', [])")
                 lines.append(f"        results.append(('pass', {safe_name}))")
                 lines.append("    except Exception as e:")
                 lines.append(f"        results.append(('fail', {safe_name} + ': ' + str(e)))")

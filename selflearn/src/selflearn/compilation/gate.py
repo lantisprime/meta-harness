@@ -8,37 +8,16 @@ The gate enforces:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-
 from selflearn.compilation.models import (
     ApprovalRecord,
     CrossValidationReceipt,
     ExecutorCandidate,
-    ExecutorRecord,
     IndependentTestSuite,
     canonical_procedure_hash,
 )
 from selflearn.compilation.registry import ExecutorRegistry
 from selflearn.compilation.compiler import COMPILER_ID
 from selflearn.ports import ExecutionPort, ProvenancePort
-
-# Public alias for tests importing gate.store (F2-15 reuse)
-
-
-class _RegistryBackedStore:
-    """Thin wrapper exposing PackStore get() via registry.store."""
-
-    def __init__(self, registry: ExecutorRegistry):
-        self._registry = registry
-
-    def get(self, entry_id: str):
-        return self._registry.store.get(entry_id)
-
-
-def _store_via_registry(registry: ExecutorRegistry):
-    return _RegistryBackedStore(registry)
-
 
 # Gate errors
 class GateError(RuntimeError):
@@ -59,6 +38,10 @@ class CrossValidationGate:
     def evaluate(self, candidate: ExecutorCandidate, suite: IndependentTestSuite,
                  approval: ApprovalRecord | None, *, decided_at: str) -> CrossValidationReceipt:
         """Evaluate a candidate against a test suite.
+
+        The gate registers the candidate as quarantined (idempotent), then
+        evaluates it.  Activation is always bound to a registry record whose
+        spec_hash and executor_hash match the candidate.
 
         F2-3: restructure every gate path as:
         1. construct CrossValidationReceipt first (receipt_id="" -> self-hash)
@@ -138,10 +121,10 @@ class CrossValidationGate:
 
         # F2-5: unconditional stale spec check - entry missing/unreadable/hash-mismatch
         # -> rejected receipt, no sandbox, regardless of any active record.
-        # F2-15: reuse registry-bound store instead of constructing a new PackStore.
+        # F3-2: use registry.store directly (the candidate must be bound to a real
+        # pack entry; the registry already holds the loaded PackStore).
         try:
-            store = _store_via_registry(self.registry)
-            current_entry = store.get(entry_id)
+            current_entry = self.registry.store.get(entry_id)
             current_hash = canonical_procedure_hash(current_entry.cand.procedure)
 
             if candidate.spec.spec_hash != current_hash:
@@ -179,33 +162,22 @@ class CrossValidationGate:
         # Check for existing active executor (for swap detection)
         active = self.registry.active_for(entry_id)
 
-        # Write candidate first (adds quarantined record atomically)
+        # F3-2: register the candidate as quarantined (idempotent), then evaluate
+        # THAT record.  The registry record is the binding between the candidate
+        # and its persisted executor source; activation never happens without it.
         self.registry.write_candidate(candidate)
-
-        # Find existing quarantined record for this executor
-        existing_records = self.registry.record_for(entry_id, status="quarantined")
-        record = None
-        for r in existing_records:
-            if r.executor_hash == candidate.executor_hash:
-                record = r
-                break
-
+        record = next(
+            (
+                r for r in self.registry.record_for(entry_id, status="quarantined")
+                if r.executor_hash == candidate.executor_hash
+            ),
+            None,
+        )
         if record is None:
-            # Unregistered candidate -> rejected
-            receipt = CrossValidationReceipt(
-                receipt_id="",
-                spec_hash=candidate.spec.spec_hash,
-                executor_hash=candidate.executor_hash,
-                suite_hash=suite.suite_hash,
-                sandbox_ok=False,
-                sandbox_output="",
-                approval=None,
-                verdict="rejected",
-                reason="unregistered candidate",
-                decided_at=decided_at,
-            )
-            self._journal("gate.unregistered-candidate", candidate, receipt)
-            return receipt
+            # This should be unreachable because write_candidate ensures a
+            # quarantined record exists, but we fail loudly if the invariant
+            # breaks rather than silently activating an unbound candidate.
+            raise GateError(f"candidate for {entry_id} was not registered")
 
         # Sandbox execution
         sandbox_result = self.execution.run_check({

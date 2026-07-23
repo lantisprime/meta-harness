@@ -199,7 +199,8 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
             if not entry_dir.is_dir():
                 continue
             for source_file in entry_dir.glob("*.py"):
-                rel_path = str(source_file.relative_to(pack_dir))
+                # F3-1: use the same root base as registry paths (store-root-relative)
+                rel_path = str(source_file.relative_to(pack_dir.parent))
                 if rel_path not in recorded_paths:
                     report.findings.append(Finding(
                         "executor.orphan-source",

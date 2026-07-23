@@ -234,7 +234,7 @@ def test_runtime_approval_step_awaiting():
         # Generate and save executor source
         from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -302,7 +302,7 @@ def test_runtime_check_failure():
 
         from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -362,7 +362,7 @@ def test_runtime_success():
 
         from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -420,7 +420,7 @@ def test_outcomes_feed_apply_outcome():
 
         from selflearn.compilation.compiler import WorkflowCompiler
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -589,6 +589,8 @@ def test_runtime_blocks_dangerous_builtins():
         ("vars()", "vars"),
         ("setattr(object(), 'x', 1)", "setattr"),
         ("delattr(object(), 'x')", "delattr"),
+        ("getattr(object(), '__class__')", "getattr"),
+        ("hasattr(object(), '__class__')", "hasattr"),
     ]:
         try:
             exec(code, restricted)
@@ -637,7 +639,7 @@ def test_approval_stop_no_outcome():
 
         spec_hash = canonical_procedure_hash(procedure)
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -714,7 +716,7 @@ def test_completed_steps_fidelity_on_failure():
 
         spec_hash = canonical_procedure_hash(procedure)
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -775,7 +777,7 @@ def test_runtime_handler_error_is_not_entry_evidence():
 
         spec_hash = canonical_procedure_hash(procedure)
         compiler = WorkflowCompiler()
-        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z")
+        candidate = compiler.compile(entry, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
 
         exec_dir = store_root / pack / "executors" / "wf-001"
         exec_dir.mkdir(parents=True)
@@ -898,3 +900,113 @@ def test_runtime_ast_preflight_rejects_dunder_escape():
             runtime.run("wf-001", task_id="t1", topic="test",
                        task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                        now="2024-01-01T00:00:00Z")
+
+
+# =============================================================================
+# F3-1 citing test: active executor leaves clean doctor report
+# =============================================================================
+
+def test_doctor_clean_after_activation():
+    """F3-1: a registered+active executor produces no orphan finding and report.ok."""
+    from selflearn.doctor import run_doctor
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="do work", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        compiler = WorkflowCompiler()
+        candidate = compiler.compile(
+            entry, pack=pack, compiled_at="2024-01-01T00:00:00Z",
+            provenance=FakeProvenance(),
+        )
+
+        registry = ExecutorRegistry(store_root, pack)
+        path = registry.write_candidate(candidate)
+        active_record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=candidate.spec.spec_hash,
+            executor_hash=candidate.executor_hash,
+            status="active",
+            path=str(path.relative_to(store_root)),
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry.add_record(active_record)
+
+        report = run_doctor(store_root, fix=False)
+        orphan = [f for f in report.findings if f.code == "executor.orphan-source"]
+        assert orphan == []
+        assert report.ok is True
+
+
+# =============================================================================
+# F3-3 citing test: getattr-dunder and attribute-dunder escapes blocked
+# =============================================================================
+
+def test_runtime_preflight_blocks_getattr_dunder():
+    """F3-3: getattr removed from sandbox -> dunder access by string raises NameError."""
+    from selflearn.compilation.runtime import _make_restricted_globals
+
+    restricted = _make_restricted_globals()
+
+    # getattr is not in SAFE_BUILTINS; any attempt to use it for dunder
+    # access fails before it can do anything.
+    with pytest.raises(NameError):
+        exec("getattr(type(()), '__bases__')", restricted)
+
+
+def test_runtime_blocks_getattr_hasattr():
+    """F3-3: getattr/hasattr are absent from the restricted sandbox."""
+    from selflearn.compilation.runtime import _make_restricted_globals
+
+    restricted = _make_restricted_globals()
+
+    for code, name in [
+        ("getattr(object(), '__class__')", "getattr"),
+        ("hasattr(object(), '__class__')", "hasattr"),
+    ]:
+        try:
+            exec(code, restricted)
+            assert False, f"{name} should raise NameError"
+        except NameError:
+            pass
+
+
+# =============================================================================
+# F3-8 citing test: runtime refusal events use the injected now
+# =============================================================================
+
+def test_runtime_refusal_uses_injected_now():
+    """F3-8: no-active-record refusal is journaled with the run's injected now."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        # No executor registered
+        entry = _make_entry(pack=pack)
+        store.add_candidate(entry)
+
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="No active executor"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2025-12-25T00:00:00Z")
+
+        refusal_events = [e for e in provenance.events if e["kind"] == "executor.no-active"]
+        assert len(refusal_events) == 1
+        assert refusal_events[0]["timestamp"] == "2025-12-25T00:00:00Z"
