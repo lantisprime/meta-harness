@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta8-acceptance-20260724",
+  "definitionHash": "sha256:1b77011e4f6bf02b6b01a1f213f99d189d69e68262a798c4f40e7ef15feac8cf",
+  "integrationCommit": "e61fcbd19f687b4854b67095d82b94368b937c99",
+  "commands": [
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_discovery_scheduling.py tests/test_discovery_policy.py tests/test_discovery_heartbeats.py tests/adversarial/test_discovery_policy_boundaries.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/test_discovery_models.py tests/test_discovery_lineage.py tests/test_discovery_knowledge.py tests/test_discovery_contexts.py tests/test_discovery_supervisor.py tests/adversarial/test_discovery_boundaries.py",
+    "/Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+    "node --test scripts/workplan.test.mjs",
+    "git diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+  ],
+  "evidenceRefs": [
+    "git:integration:e61fcbd19f687b4854b67095d82b94368b937c99",
+    "git:review-head:3c14884c214445ebb3c800116698b169eafa89b3",
+    "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+    "github:pull/58:merged",
+    "github-actions:run/30016989068:pass",
+    "pytest:discovery-focused:140-passed",
+    "pytest:discovery-regression:365-passed",
+    "pytest:full:1837-passed:2-xfailed",
+    "node-test:workplan:117-passed:0-failed",
+    "git-diff-check:clean",
+    "review:.review-store/meta8-glm-regate-review-3c14884.txt:sha256:b2c8f67beb8b4e4b552bbb84ac775b49af2bceca33da7bc40d72f7c71608a6fe:glm-5.2-approve-with-mod-no-p0-no-p1-no-p2",
+    "frozen-diff:sha256:0063c34f8971051de7aafcffedc055767718ec1b062aaf410e53d406d36330f0",
+    "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+  ],
+  "receiptHash": "sha256:2082f97b4dbf2a1d1ab65bddc04f7ce98b459c96ad746ba2ff4f5b317a2f104a"
+}

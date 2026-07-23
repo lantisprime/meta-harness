@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+  "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+  "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+    "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+    "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+    "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+  ],
+  "evidenceRefs": [
+    "git:integration:26d735d2773e13ddce367245be0d7e91c691f64d",
+    "git:review-head:5d2fb52117a53618a0a8fb172efdff4b064a6370",
+    "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+    "github:pull/55:merged",
+    "github-actions:run/30017143446:pass",
+    "pytest:compilation-trio:114-passed",
+    "pytest:selflearn:338-passed:1-skipped",
+    "pytest:root:1771-passed:1-skipped:2-xfailed",
+    "node-test:workplan:117-passed:0-failed",
+    "git-diff-check:clean",
+    "review:.review-store/meta17-glm-gate-review-5d2fb52.txt:sha256:30c8e8391b02d2385043eb4e5a65eef2b0fa2a8e09f6c8449958198ca877a0b1:glm-5.2-approve-with-mod-no-p0-no-p1",
+    "frozen-diff:sha256:b76da4c6305caa3cba2317001f1ac33921a1e24cf054901507848ec4d4f00694",
+    "interpreter-note:frozen-venv-/private/tmp/meta-harness-meta-17/.venv-authoritative-differs-from-dev-venv",
+    "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+  ],
+  "receiptHash": "sha256:a329afdca79144d35af45d2077f35fab54efa39b374444b0c51561098d6e1da6"
+}
