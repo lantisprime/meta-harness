@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 93,
+  "revision": 96,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2839,6 +2839,43 @@
             "branch": "dev/meta-17-workflow-compilation",
             "head": "cc7e7c5912afe97ea1385f045dc7b6ea67832c38"
           }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 93,
+          "revisionTo": 94,
+          "at": "2026-07-23T13:26:17.532Z",
+          "evidence": {
+            "reason": "Applying accepted P2-1/P2-2/P3-2 dispositions from the GLM-5.2 re-gate on cc7e7c5 (APPROVE-WITH-MOD); head moves to bd9b79d and must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 94,
+          "revisionTo": 95,
+          "at": "2026-07-23T13:26:17.629Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Applying accepted P2-1/P2-2/P3-2 dispositions from the GLM-5.2 re-gate on cc7e7c5 (APPROVE-WITH-MOD); head moves to bd9b79d and must be re-frozen for a fresh gate",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
+          "revisionFrom": 95,
+          "revisionTo": 96,
+          "at": "2026-07-23T13:26:17.758Z",
+          "evidence": {
+            "branch": "dev/meta-17-workflow-compilation",
+            "head": "bd9b79d4f113661ba70cbd626f2d53edcebcdd09"
+          }
         }
       ],
       "claimSnapshot": {
@@ -2878,10 +2915,10 @@
       },
       "reviewFreeze": {
         "branch": "dev/meta-17-workflow-compilation",
-        "head": "cc7e7c5912afe97ea1385f045dc7b6ea67832c38",
-        "revisionFrom": 92,
-        "revisionTo": 93,
-        "at": "2026-07-23T12:44:36.021Z"
+        "head": "bd9b79d4f113661ba70cbd626f2d53edcebcdd09",
+        "revisionFrom": 95,
+        "revisionTo": 96,
+        "at": "2026-07-23T13:26:17.758Z"
       }
     }
   ]
