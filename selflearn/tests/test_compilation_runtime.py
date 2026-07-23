@@ -1010,3 +1010,141 @@ def test_runtime_refusal_uses_injected_now():
         refusal_events = [e for e in provenance.events if e["kind"] == "executor.no-active"]
         assert len(refusal_events) == 1
         assert refusal_events[0]["timestamp"] == "2025-12-25T00:00:00Z"
+
+
+# =============================================================================
+# F4-3 citing test: exec failure is normalized and journals finish event
+# =============================================================================
+
+def test_runtime_exec_failure_normalizes_and_journals_finish():
+    """F4-3: malformed executor that passes AST preflight but fails exec."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        exec_dir = store_root / pack / "executors" / "wf-001"
+        exec_dir.mkdir(parents=True)
+        exec_path = exec_dir / f"{spec_hash}.py"
+        # Passes _ast_preflight (no dunder) but fails at exec with NameError.
+        bad_source = "undefined_symbol_for_exec_failure\n"
+        exec_path.write_text(bad_source)
+
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash=content_hash(bad_source),
+            status="active",
+            path=f"{pack}/executors/wf-001/{spec_hash}.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        # A runtime.start must be paired with a runtime.finish/executor-error.
+        assert any(e["kind"] == "runtime.start" for e in provenance.events)
+        assert any(e["kind"] in ("runtime.finish", "runtime.executor-error") for e in provenance.events)
+
+
+# =============================================================================
+# F4-4 citing test: runtime guards missing entry during drift check
+# =============================================================================
+
+def test_runtime_missing_entry_journals_refusal():
+    """F4-4: entry deleted after activation is unverifiable, not uncaught."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        exec_dir = store_root / pack / "executors" / "wf-001"
+        exec_dir.mkdir(parents=True)
+        exec_path = exec_dir / f"{spec_hash}.py"
+        source = "def run(handler): return {'completed': []}"
+        exec_path.write_text(source)
+
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash=content_hash(source),
+            status="active",
+            path=f"{pack}/executors/wf-001/{spec_hash}.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        # Delete the entry from the live store.
+        del store._entries["wf-001"]
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="unverifiable"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        assert any(e["kind"] == "executor.unverifiable" for e in provenance.events)
+
+
+# =============================================================================
+# F4-12 citing test: transition refuses to operate on unknown record
+# =============================================================================
+
+def test_registry_transition_missing_record_raises():
+    """F4-12: transitioning a record not present in registry.json raises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+
+        registry = ExecutorRegistry(store_root, pack)
+
+        # A record that is not persisted in the registry file.
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash="a" * 64,
+            executor_hash="b" * 64,
+            status="quarantined",
+            path=f"{pack}/executors/wf-001/a.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+
+        with pytest.raises(RegistryError, match="not found in registry"):
+            registry.transition(record, "active", "rcpt2",
+                               updated_at="2024-01-02T00:00:00Z")

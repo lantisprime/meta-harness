@@ -160,6 +160,10 @@ class ExecutorRegistry:
 
         # Update registry
         data = self._ensure_registry()
+        if not any(r.get("record_id") == record.record_id for r in data.get("records", [])):
+            raise RegistryError(
+                f"Record {record.record_id[:16]}... not found in registry; "
+                f"cannot transition {record.entry_id} from {old_status}")
         new_records = []
         for r in data.get("records", []):
             if r.get("record_id") == record.record_id:

@@ -693,3 +693,111 @@ def test_compiler_journals_compile_event():
     assert len(compile_events) == 1
     assert compile_events[0]["entry_id"] == entry.id
     assert compile_events[0]["executor_hash"] == candidate.executor_hash
+
+
+# =============================================================================
+# F4-1 citing test: bool/None check values render as valid Python
+# =============================================================================
+
+def test_compiler_bool_and_none_check_values_exec_cleanly():
+    """F4-1: bool/None check values compile to valid Python literals."""
+    from selflearn.compilation.compiler import WorkflowCompiler, is_approval_step
+    from selflearn.compilation.runtime import _make_restricted_globals
+
+    approval_step = ProcedureStep(
+        id="approve", objective="approve", task_type="review",
+        check=(("approval", True),),
+    )
+    none_step = ProcedureStep(
+        id="check_none", objective="check none", task_type="code_edit",
+        check=(("status", None),),
+    )
+    assert is_approval_step(approval_step) is True
+
+    steps = (approval_step, none_step)
+    entry = _make_workflow_entry(procedure=steps)
+    compiler = WorkflowCompiler()
+    candidate = compiler.compile(
+        entry, pack="test", compiled_at="2024-01-01T00:00:00Z",
+        provenance=FakeProvenance(),
+    )
+
+    # Source must contain Python True/None, not JSON true/null.
+    assert "True" in candidate.source
+    assert "None" in candidate.source
+    assert "true" not in candidate.source
+    assert "null" not in candidate.source
+
+    ns = _make_restricted_globals()
+    exec(candidate.source, ns)  # should not raise NameError
+
+    # The approval predicate still resolves True inside the generated run().
+    def handler(step_id, step_data):
+        return {"status": None}
+
+    with pytest.raises(ns["ApprovalRequired"]) as exc_info:
+        ns["run"](handler)
+    assert exc_info.value.step_id == "approve"
+
+    # The None status check matches when the handler returns None.
+    only_none = (none_step,)
+    entry2 = _make_workflow_entry(procedure=only_none)
+    candidate2 = compiler.compile(
+        entry2, pack="test", compiled_at="2024-01-01T00:00:00Z",
+        provenance=FakeProvenance(),
+    )
+    ns2 = _make_restricted_globals()
+    exec(candidate2.source, ns2)
+    result = ns2["run"](lambda sid, sdata: {"status": None})
+    assert result["completed"] == ["check_none"]
+
+
+# =============================================================================
+# F4-10 citing test: hash fields reject non-hex / uppercase characters
+# =============================================================================
+
+def test_hash_fields_validate_hex_characters():
+    """F4-10: 64-char hash fields must be lowercase hex digits."""
+    steps = (_make_step("step1"),)
+    valid = "a" * 64
+    uppercase = "A" * 64
+    non_hex = "g" * 64
+    short = "ab"
+
+    # ExecutorSpec
+    ExecutorSpec(entry_id="e1", pack="p", spec_hash=valid, procedure=steps)
+    with pytest.raises(ContractError, match="64-hex"):
+        ExecutorSpec(entry_id="e1", pack="p", spec_hash=uppercase, procedure=steps)
+    with pytest.raises(ContractError, match="64-hex"):
+        ExecutorSpec(entry_id="e1", pack="p", spec_hash=non_hex, procedure=steps)
+
+    # ExecutorCandidate
+    spec = ExecutorSpec(entry_id="e1", pack="p", spec_hash=valid, procedure=steps)
+    ExecutorCandidate(spec=spec, source="x", executor_hash=valid,
+                      compiled_at="t", compiler_id="c")
+    with pytest.raises(ContractError, match="64-hex"):
+        ExecutorCandidate(spec=spec, source="x", executor_hash=uppercase,
+                          compiled_at="t", compiler_id="c")
+
+    # IndependentTestSuite
+    IndependentTestSuite(spec_hash=valid, test_source="x", suite_hash=valid,
+                         author_id="a", identity_basis="b", authored_at="t")
+    with pytest.raises(ContractError, match="64-hex"):
+        IndependentTestSuite(spec_hash=non_hex, test_source="x", suite_hash=valid,
+                             author_id="a", identity_basis="b", authored_at="t")
+
+    # CrossValidationReceipt
+    with pytest.raises(ContractError, match="64-hex"):
+        CrossValidationReceipt(
+            receipt_id="", spec_hash=valid, executor_hash=valid,
+            suite_hash=uppercase, sandbox_ok=True, sandbox_output="ok",
+            approval=None, verdict="rejected", reason="test", decided_at="t",
+        )
+
+    # ExecutorRecord
+    with pytest.raises(ContractError, match="64-hex"):
+        ExecutorRecord(
+            record_id="", entry_id="e1", pack="p", spec_hash=short,
+            executor_hash=valid, status="active", path="x", receipt_id="r",
+            updated_at="t",
+        )

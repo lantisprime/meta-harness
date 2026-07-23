@@ -161,8 +161,17 @@ class ExecutorRuntime:
                 f"No active executor for entry {entry_id}")
 
         # Drift check: spec_hash must match current procedure
-        entry = self.store.get(entry_id)
-        current_hash = canonical_procedure_hash(entry.cand.procedure)
+        # F4-4: guard store access / procedure recompute so a missing or
+        # unreadable entry is treated as an unverifiable executor.
+        try:
+            entry = self.store.get(entry_id)
+            current_hash = canonical_procedure_hash(entry.cand.procedure)
+        except Exception as e:
+            self._journal_refusal(entry_id, "executor.unverifiable",
+                                 f"cannot verify current spec for {entry_id}: {e}",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Executor for {entry_id} is unverifiable: {e}")
         if active.spec_hash != current_hash:
             self._journal_refusal(entry_id, "executor.stale-spec",
                                  f"active spec {active.spec_hash} != current {current_hash}",
@@ -200,17 +209,58 @@ class ExecutorRuntime:
 
         # Execute in restricted sandbox
         globals_ns = _make_restricted_globals()
-        exec(source, globals_ns)
 
-        # Resolve exception classes ONCE after exec (FIX-6)
-        ApprovalRequired = globals_ns.get("ApprovalRequired")
-        if ApprovalRequired is None or not isinstance(ApprovalRequired, type) \
-                or not issubclass(ApprovalRequired, Exception):
-            raise RuntimeCompError("invalid executor: ApprovalRequired not found or not an Exception class")
-        StepCheckFailed = globals_ns.get("StepCheckFailed")
-        if StepCheckFailed is None or not isinstance(StepCheckFailed, type) \
-                or not issubclass(StepCheckFailed, Exception):
-            raise RuntimeCompError("invalid executor: StepCheckFailed not found or not an Exception class")
+        # F4-3: exec and class resolution are isolated from the run step.
+        # Any failure before the executor is fully loaded normalizes to
+        # RuntimeCompError and emits a paired finish/refusal event.
+        try:
+            exec(source, globals_ns)
+            ApprovalRequired = globals_ns.get("ApprovalRequired")
+            if ApprovalRequired is None or not isinstance(ApprovalRequired, type) \
+                    or not issubclass(ApprovalRequired, Exception):
+                raise RuntimeCompError("invalid executor: ApprovalRequired not found or not an Exception class")
+            StepCheckFailed = globals_ns.get("StepCheckFailed")
+            if StepCheckFailed is None or not isinstance(StepCheckFailed, type) \
+                    or not issubclass(StepCheckFailed, Exception):
+                raise RuntimeCompError("invalid executor: StepCheckFailed not found or not an Exception class")
+            run_fn = globals_ns["run"]
+        except RuntimeCompError as exc:
+            self.provenance.append({
+                "kind": "runtime.executor-error",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "reason": f"executor load or validation failed: {exc}",
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
+            self.provenance.append({
+                "kind": "runtime.finish",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "status": "error",
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
+            raise
+        except Exception as e:
+            self.provenance.append({
+                "kind": "runtime.executor-error",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "reason": f"executor load failed: {e}",
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
+            self.provenance.append({
+                "kind": "runtime.finish",
+                "entry_id": entry_id,
+                "spec_hash": active.spec_hash,
+                "status": "error",
+                "actor": "executor-runtime",
+                "timestamp": now,
+            })
+            raise RuntimeCompError(
+                f"Executor for {entry_id} failed to load: {e}") from e
 
         completed = []
         outcomes = ()
@@ -220,7 +270,7 @@ class ExecutorRuntime:
         try:
             # FIX-6: step_handler is passed directly; generated code uses
             # module-level _COMPLETED (survives exception) to record completed steps.
-            result = globals_ns["run"](step_handler)
+            result = run_fn(step_handler)
             completed = list(globals_ns.get("_COMPLETED", []))
 
             # Success outcome

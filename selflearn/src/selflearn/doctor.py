@@ -175,6 +175,8 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
     # Check registry is parseable
     try:
         data = json.loads(registry_path.read_text())
+        if not isinstance(data, dict):
+            raise json.JSONDecodeError("registry top-level is not a dict", "", 0)
         records = data.get("records", [])
     except (json.JSONDecodeError, IOError) as e:
         report.findings.append(Finding(
@@ -189,12 +191,20 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
     entries_dir = pack_dir / "entries"
     entry_files = {f.stem: f for f in entries_dir.glob("*.md")} if entries_dir.exists() else {}
 
-    # F2-13: orphan-source check — any on-disk executor source not referenced
-    # by any registry record.  True two-file transactions do not exist; this
-    # checks for crash windows where source was written but registry update
-    # did not complete.
+    # F2-13 / F4-13: orphan-source check — any on-disk executor source not
+    # referenced by any registry record.  This includes stray .py files
+    # directly under the executors directory as well as under entry subdirs.
     recorded_paths = {r.get("path", "") for r in records}
     if exec_dir.exists():
+        for source_file in exec_dir.glob("*.py"):
+            rel_path = str(source_file.relative_to(pack_dir.parent))
+            if rel_path not in recorded_paths:
+                report.findings.append(Finding(
+                    "executor.orphan-source",
+                    rel_path,
+                    f"Executor source has no registry record: {rel_path}",
+                    fixable=False,
+                ))
         for entry_dir in exec_dir.iterdir():
             if not entry_dir.is_dir():
                 continue
@@ -209,12 +219,60 @@ def _check_executors(pack_dir: Path, fix: bool, report: DoctorReport) -> None:
                         fixable=False,
                     ))
 
+    # F4-15: leftover temporary files from atomic writes.
+    if exec_dir.exists():
+        for tmp_file in exec_dir.rglob("*.py.tmp"):
+            rel_path = str(tmp_file.relative_to(pack_dir.parent))
+            report.findings.append(Finding(
+                "executor.stale-tmp",
+                rel_path,
+                f"Leftover executor temporary file: {rel_path}",
+                fixable=False,
+            ))
+        for tmp_file in exec_dir.glob("registry.json.tmp"):
+            rel_path = str(tmp_file.relative_to(pack_dir.parent))
+            report.findings.append(Finding(
+                "executor.stale-tmp",
+                rel_path,
+                f"Leftover registry temporary file: {rel_path}",
+                fixable=False,
+            ))
+
+    # F4-14: double-active detection — the activate/supersede crash-window
+    # mitigation.  No auto-fix.
+    active_by_entry: dict[str, int] = {}
+    for r in records:
+        if r.get("status") == "active":
+            active_by_entry[r.get("entry_id", "")] = active_by_entry.get(r.get("entry_id", ""), 0) + 1
+    for entry_id, count in active_by_entry.items():
+        if count > 1:
+            report.findings.append(Finding(
+                "executor.double-active",
+                f"{pack}/executors/{entry_id}",
+                f"Entry {entry_id!r} has {count} active executor records",
+                fixable=False,
+            ))
+
+    # F4-13: active records must reference an existing source file.
+
     # Check each ACTIVE record
     for record in records:
         if record.get("status") != "active":
             continue
 
         entry_id = record.get("entry_id", "")
+
+        # F4-13: active source file must exist.
+        record_path = record.get("path", "")
+        if record_path:
+            abs_source_path = pack_dir.parent / record_path
+            if not abs_source_path.exists():
+                report.findings.append(Finding(
+                    "executor.missing-source",
+                    f"{pack}/executors/{entry_id}",
+                    f"Active executor source missing: {record_path}",
+                    fixable=False,
+                ))
 
         # Check: entry file exists
         if entry_id not in entry_files:

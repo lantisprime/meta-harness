@@ -168,6 +168,8 @@ class RealSandboxExecutionPort(ExecutionPort):
 
     F2-11: the sandbox double really executes the generated source and test
     source, using the same restricted globals helper the runtime uses.
+    F4-2: the test source is executed in a restricted namespace where
+    __import__ is unavailable, preventing injected code from importing modules.
     """
 
     def __init__(self):
@@ -184,7 +186,10 @@ class RealSandboxExecutionPort(ExecutionPort):
             exec(executor_source, ns)
             return ns
 
-        ns = {"load_executor": load_executor, "json": __import__("json")}
+        # Restrict the test namespace too: drop __import__ and dangerous builtins.
+        ns = _make_restricted_globals()
+        ns["load_executor"] = load_executor
+        ns["json"] = __import__("json")
         try:
             exec(test_source, ns)
             run_tests = ns["run_tests"]
@@ -1635,3 +1640,498 @@ def test_suite_hash_binds_author_identity():
 
     assert suite_a.suite_hash != suite_b.suite_hash
     assert suite_a.test_source == suite_b.test_source
+
+
+# =============================================================================
+# F4-2 citing test: newline-injection payloads in comments are inert
+# =============================================================================
+
+def test_testgen_newline_injection_renders_inert():
+    """F4-2: model-supplied newlines in name/expect cannot break out of comments."""
+    from selflearn.compilation.testgen import WorkflowTestAuthor
+    from selflearn.compilation.runtime import _make_restricted_globals
+
+    payload = "t\n    __import__('os').system('id') #"
+
+    class InjectionModel:
+        model_id = "injection"
+
+        def complete(self, role, prompt, context):
+            return {
+                "tests": [
+                    {"name": "order", "kind": "order", "step_id": "step1", "expect": '["step1"]'},
+                    {"name": payload, "kind": "check", "step_id": "step1", "expect": payload},
+                ]
+            }
+
+    class FakeIdentity:
+        basis = "test"
+
+        def distinct(self, a, b):
+            return True
+
+    steps = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+    spec = ExecutorSpec(
+        entry_id="wf-001", pack="test",
+        spec_hash=canonical_procedure_hash(steps),
+        procedure=steps,
+    )
+
+    suite = WorkflowTestAuthor(InjectionModel(), FakeIdentity()).author_suite(
+        spec, authored_at="2024-01-01T00:00:00Z", provenance=FakeProvenance()
+    )
+
+    # The rendered source must compile.
+    compile(suite.test_source, "<test>", "exec")
+
+    # Executing it in a restricted namespace must not raise and must not import os.
+    ns = _make_restricted_globals()
+    ns["load_executor"] = lambda: {"STEPS": {"step1": {"check": []}}, "run": lambda h: {"completed": ["step1"]}}
+    ns["json"] = __import__("json")
+    exec(suite.test_source, ns)
+    results = ns["run_tests"](ns["load_executor"])
+    assert isinstance(results, list)
+    assert "os" not in ns
+
+
+# =============================================================================
+# F4-5 citing test: doctor flags non-dict registry JSON
+# =============================================================================
+
+def test_doctor_registry_non_dict_json():
+    """F4-5: registry.json containing a bare list is corrupt."""
+    from selflearn.doctor import run_doctor
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        (pack_dir / "entries").mkdir()
+
+        exec_dir = pack_dir / "executors"
+        exec_dir.mkdir()
+        (exec_dir / "registry.json").write_text(json.dumps([1, 2, 3]))
+
+        report = run_doctor(store_root, fix=False)
+        corrupt = [f for f in report.findings if f.code == "executor.registry-corrupt"]
+        assert len(corrupt) == 1
+        assert corrupt[0].fixable is False
+        assert report.load_ok is True
+
+
+# =============================================================================
+# F4-6 citing test: swap without baseline is a precondition GateError
+# =============================================================================
+
+def test_gate_swap_without_baseline_gate_error():
+    """F4-6: swap without baseline.json raises GateError; candidate stays quarantined."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        # Activate a first executor.
+        stored = registry.store.get(spec.entry_id)
+        candidate1 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-01T00:00:00Z", provenance=FakeProvenance())
+        suite1 = IndependentTestSuite(
+            spec_hash=candidate1.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="a" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+        receipt1 = gate.evaluate(candidate1, suite1, approval, decided_at="2024-01-01T00:00:00Z")
+        assert receipt1.verdict == "activated"
+        old_active = registry.active_for(spec.entry_id)
+        assert old_active is not None
+
+        # Now attempt a swap without baseline.json.
+        steps2 = (_make_step("step1", objective="do work v2"),)
+        stored.cand = replace(stored.cand, procedure=steps2)
+        registry.store._persist_entry(stored)
+
+        candidate2 = WorkflowCompiler().compile(stored.cand, pack=pack, compiled_at="2024-01-02T00:00:00Z", provenance=FakeProvenance())
+        suite2 = IndependentTestSuite(
+            spec_hash=candidate2.spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="c" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-02T00:00:00Z",
+        )
+        with pytest.raises(GateError, match="baseline.json"):
+            gate.evaluate(candidate2, suite2, approval, decided_at="2024-01-02T00:00:00Z")
+
+        # No transition occurred; the active executor is still the first one.
+        assert registry.active_for(spec.entry_id) == old_active
+        quarantined = registry.record_for(spec.entry_id, status="quarantined")
+        assert any(r.executor_hash == candidate2.executor_hash for r in quarantined)
+
+
+# =============================================================================
+# F4-7 citing test: pack mismatch rejected without sandbox
+# =============================================================================
+
+def test_gate_pack_mismatch_rejected_without_sandbox():
+    """F4-7: candidate pack != registry pack -> rejected, no sandbox."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        wrong_spec = ExecutorSpec(
+            entry_id=spec.entry_id,
+            pack="other-pack",
+            spec_hash=spec.spec_hash,
+            procedure=spec.procedure,
+        )
+        candidate = ExecutorCandidate(
+            spec=wrong_spec,
+            source="print('test')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+
+        receipt = gate.evaluate(candidate, suite, None, decided_at="2024-01-01T00:00:00Z")
+        assert receipt.verdict == "rejected"
+        assert "pack mismatch" in receipt.reason.lower()
+        assert execution.call_count == 0
+        assert any(e["kind"] == "gate.pack-mismatch" for e in provenance.events)
+
+
+# =============================================================================
+# F4-8 citing test: compiler identity cannot approve its own output
+# =============================================================================
+
+def test_gate_compiler_identity_approval_rejected():
+    """F4-8: ApprovalRecord(approver=COMPILER_ID, strict_mode=True) is rejected."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+        compiler_approval = ApprovalRecord(
+            approver=COMPILER_ID, basis="self", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        candidate = ExecutorCandidate(
+            spec=spec,
+            source="print('test')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+
+        receipt = gate.evaluate(candidate, suite, compiler_approval, decided_at="2024-01-01T00:00:00Z")
+        assert receipt.verdict == "rejected"
+        assert "compiler cannot approve" in receipt.reason.lower()
+        # No activation transition; candidate remains quarantined.
+        assert registry.active_for(spec.entry_id) is None
+
+
+# =============================================================================
+# F4-9 citing test: refusal journal contains full receipt with sandbox_output
+# =============================================================================
+
+def test_gate_refusal_journals_full_receipt():
+    """F4-9: gate.awaiting-approval provenance event carries sandbox_output."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        candidate = ExecutorCandidate(
+            spec=spec,
+            source="print('test')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+
+        receipt = gate.evaluate(candidate, suite, None, decided_at="2024-01-01T00:00:00Z")
+        assert receipt.verdict == "refused"
+
+        refusal_events = [e for e in provenance.events if e["kind"] == "gate.awaiting-approval"]
+        assert len(refusal_events) == 1
+        nested = refusal_events[0]["receipt"]
+        assert "sandbox_output" in nested
+        assert nested["sandbox_output"] == receipt.sandbox_output
+        assert nested["verdict"] == "refused"
+
+
+# =============================================================================
+# F4-11 citing test: gate provenance events use the injected decided_at
+# =============================================================================
+
+def test_gate_journal_uses_decided_at_not_clock():
+    """F4-11: non-refusal gate journals use the injected decision timestamp."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        _create_pack(store_root, pack)
+
+        spec, steps, _ = _seed_entry(store_root, pack)
+        registry = ExecutorRegistry(store_root, pack)
+        provenance = FakeProvenance()
+        execution = FakeExecutionPort(should_fail=False)
+
+        def clock():
+            from datetime import datetime
+            return datetime(2024, 1, 1)
+
+        gate = CrossValidationGate(execution, registry, provenance, clock)
+
+        candidate = ExecutorCandidate(
+            spec=spec,
+            source="print('test')",
+            executor_hash="a" * 64,
+            compiled_at="2024-01-01T00:00:00Z",
+            compiler_id="test",
+        )
+        suite = IndependentTestSuite(
+            spec_hash=spec.spec_hash,
+            test_source="def run_tests(x): pass",
+            suite_hash="b" * 64,
+            author_id="test", identity_basis="test",
+            authored_at="2024-01-01T00:00:00Z",
+        )
+        approval = ApprovalRecord(
+            approver="admin", basis="reviewed", strict_mode=True,
+            approved_at="2024-01-01T00:00:00Z"
+        )
+
+        gate.evaluate(candidate, suite, approval, decided_at="2025-06-15T12:00:00Z")
+
+        activated_events = [e for e in provenance.events if e["kind"] == "gate.activated"]
+        assert len(activated_events) == 1
+        assert activated_events[0]["timestamp"] == "2025-06-15T12:00:00Z"
+
+
+# =============================================================================
+# F4-13 citing tests: stray source files and missing active source
+# =============================================================================
+
+def test_doctor_stray_py_in_exec_dir():
+    """F4-13: a .py directly under executors/ with no record is flagged."""
+    from selflearn.doctor import DoctorReport, _check_executors
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        (pack_dir / "entries").mkdir()
+
+        exec_dir = pack_dir / "executors"
+        exec_dir.mkdir()
+        (exec_dir / "stray.py").write_text("print('stray')")
+        (exec_dir / "registry.json").write_text(json.dumps({"records": []}))
+
+        report = DoctorReport(root=store_root, fix=False)
+        _check_executors(pack_dir, fix=False, report=report)
+
+        orphans = [f for f in report.findings if f.code == "executor.orphan-source"]
+        assert len(orphans) == 1
+        assert orphans[0].fixable is False
+
+
+def test_doctor_active_missing_source():
+    """F4-13: active record whose source file does not exist is flagged."""
+    from selflearn.doctor import DoctorReport, _check_executors
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        entries_dir = pack_dir / "entries"
+        entries_dir.mkdir()
+        (entries_dir / "wf-001.md").write_text(
+            "---\nkind: workflow\nstatus: candidate\n---\nbody"
+        )
+
+        exec_dir = pack_dir / "executors"
+        exec_dir.mkdir()
+        (exec_dir / "registry.json").write_text(json.dumps({
+            "records": [{
+                "record_id": "a" * 64,
+                "entry_id": "wf-001",
+                "pack": pack,
+                "spec_hash": canonical_procedure_hash((_make_step("step1"),)),
+                "executor_hash": "b" * 64,
+                "status": "active",
+                "path": f"{pack}/executors/wf-001/missing.py",
+                "receipt_id": "rcpt1",
+                "updated_at": "2024-01-01T00:00:00Z",
+            }]
+        }))
+
+        report = DoctorReport(root=store_root, fix=False)
+        _check_executors(pack_dir, fix=False, report=report)
+
+        missing = [f for f in report.findings if f.code == "executor.missing-source"]
+        assert len(missing) == 1
+        assert missing[0].fixable is False
+
+
+# =============================================================================
+# F4-14 citing test: double-active registry flagged
+# =============================================================================
+
+def test_doctor_double_active():
+    """F4-14: two active records for the same entry -> executor.double-active."""
+    from selflearn.doctor import DoctorReport, _check_executors
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        (pack_dir / "entries").mkdir()
+
+        exec_dir = pack_dir / "executors"
+        exec_dir.mkdir()
+        (exec_dir / "registry.json").write_text(json.dumps({
+            "records": [
+                {
+                    "record_id": "a" * 64,
+                    "entry_id": "wf-001",
+                    "pack": pack,
+                    "spec_hash": "b" * 64,
+                    "executor_hash": "c" * 64,
+                    "status": "active",
+                    "path": f"{pack}/executors/wf-001/a.py",
+                    "receipt_id": "rcpt1",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                },
+                {
+                    "record_id": "d" * 64,
+                    "entry_id": "wf-001",
+                    "pack": pack,
+                    "spec_hash": "e" * 64,
+                    "executor_hash": "f" * 64,
+                    "status": "active",
+                    "path": f"{pack}/executors/wf-001/b.py",
+                    "receipt_id": "rcpt2",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                },
+            ]
+        }))
+
+        report = DoctorReport(root=store_root, fix=False)
+        _check_executors(pack_dir, fix=False, report=report)
+
+        double = [f for f in report.findings if f.code == "executor.double-active"]
+        assert len(double) == 1
+        assert double[0].fixable is False
+
+
+# =============================================================================
+# F4-15 citing test: leftover temporary files flagged
+# =============================================================================
+
+def test_doctor_stale_tmp_files():
+    """F4-15: leftover *.py.tmp and registry.json.tmp are flagged."""
+    from selflearn.doctor import DoctorReport, _check_executors
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        pack_dir = store_root / pack
+        pack_dir.mkdir()
+        manifest = {"name": pack, "schema_version": 1, "entries": {}}
+        (pack_dir / "manifest.json").write_text(json.dumps(manifest))
+        (pack_dir / "entries").mkdir()
+
+        exec_dir = pack_dir / "executors"
+        exec_dir.mkdir()
+        entry_dir = exec_dir / "wf-001"
+        entry_dir.mkdir()
+        (entry_dir / "hash.py.tmp").write_text("tmp")
+        (exec_dir / "registry.json.tmp").write_text("tmp")
+        (exec_dir / "registry.json").write_text(json.dumps({"records": []}))
+
+        report = DoctorReport(root=store_root, fix=False)
+        _check_executors(pack_dir, fix=False, report=report)
+
+        stale = [f for f in report.findings if f.code == "executor.stale-tmp"]
+        assert len(stale) == 2
+        assert all(f.fixable is False for f in stale)

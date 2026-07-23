@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,7 +60,7 @@ class ExecutorSpec:
 
         _require(bool(self.entry_id), "ExecutorSpec.entry_id must be non-empty")
         _require(bool(self.pack), "ExecutorSpec.pack must be non-empty")
-        _require(len(self.spec_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.spec_hash),
                  "ExecutorSpec.spec_hash must be a 64-hex sha256")
         _require(bool(self.procedure), "ExecutorSpec.procedure must be non-empty")
 
@@ -77,7 +78,7 @@ class ExecutorCandidate:
     def __post_init__(self) -> None:
         from selflearn.contracts import _require
 
-        _require(len(self.executor_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.executor_hash),
                  "ExecutorCandidate.executor_hash must be a 64-hex sha256")
         _require(bool(self.source), "ExecutorCandidate.source must be non-empty")
 
@@ -96,9 +97,9 @@ class IndependentTestSuite:
     def __post_init__(self) -> None:
         from selflearn.contracts import _require
 
-        _require(len(self.spec_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.spec_hash),
                  "IndependentTestSuite.spec_hash must be a 64-hex sha256")
-        _require(len(self.suite_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.suite_hash),
                  "IndependentTestSuite.suite_hash must be a 64-hex sha256")
         _require(bool(self.test_source),
                  "IndependentTestSuite.test_source must be non-empty")
@@ -150,11 +151,11 @@ class CrossValidationReceipt:
         _require(self.verdict in ("activated", "rejected", "refused"),
                  f"CrossValidationReceipt.verdict must be one of "
                  f"activated/rejected/refused, got {self.verdict!r}")
-        _require(len(self.spec_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.spec_hash),
                  "CrossValidationReceipt.spec_hash must be 64-hex")
-        _require(len(self.executor_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.executor_hash),
                  "CrossValidationReceipt.executor_hash must be 64-hex")
-        _require(len(self.suite_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.suite_hash),
                  "CrossValidationReceipt.suite_hash must be 64-hex")
         _require(len(self.sandbox_output) <= 2000,
                  "CrossValidationReceipt.sandbox_output truncated to 2000")
@@ -212,9 +213,9 @@ class ExecutorRecord:
                  f"ExecutorRecord.status must be one of {EXECUTOR_STATUSES}")
         _require(bool(self.entry_id), "ExecutorRecord.entry_id must be non-empty")
         _require(bool(self.pack), "ExecutorRecord.pack must be non-empty")
-        _require(len(self.spec_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.spec_hash),
                  "ExecutorRecord.spec_hash must be 64-hex")
-        _require(len(self.executor_hash) == 64,
+        _require(re.fullmatch(r"[0-9a-f]{64}", self.executor_hash),
                  "ExecutorRecord.executor_hash must be 64-hex")
         _require(bool(self.path), "ExecutorRecord.path must be non-empty")
         _require(bool(self.receipt_id), "ExecutorRecord.receipt_id must be non-empty")

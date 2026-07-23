@@ -57,9 +57,10 @@ def _generate_step_dict(step: ProcedureStep) -> str:
     parts.append(f'"task_type": {_escape_string(step.task_type)}')
     parts.append(f'"tools": {json.dumps(list(step.tools))}')
     parts.append(f'"depends_on": {json.dumps(list(step.depends_on))}')
-    # Check is tuple of tuples - convert to list of lists for JSON
+    # Check is tuple of tuples - use repr so bool/None render as valid
+    # Python literals (True/False/None) inside the restricted sandbox.
     check_list = [list(pair) for pair in step.check]
-    parts.append(f'"check": {json.dumps(check_list)}')
+    parts.append(f'"check": {repr(check_list)}')
     return "{" + ", ".join(parts) + "}"
 
 

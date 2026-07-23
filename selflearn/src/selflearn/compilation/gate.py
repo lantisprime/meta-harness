@@ -29,11 +29,13 @@ class CrossValidationGate:
     """Cross-validation gate for workflow executors."""
 
     def __init__(self, execution: ExecutionPort | None, registry: ExecutorRegistry,
-                 provenance: ProvenancePort, clock: callable):
+                 provenance: ProvenancePort, clock: callable = None):
         self.execution = execution
         self.registry = registry
         self.provenance = provenance
-        self.clock = clock
+        # F4-11: the gate uses the injected decision timestamp (decided_at)
+        # for all provenance events.  The clock argument is retained only for
+        # backward-compatible construction; it is not stored or used.
 
     def evaluate(self, candidate: ExecutorCandidate, suite: IndependentTestSuite,
                  approval: ApprovalRecord | None, *, decided_at: str) -> CrossValidationReceipt:
@@ -80,7 +82,7 @@ class CrossValidationGate:
                 reason="CrossValidationGate requires ExecutionPort",
                 decided_at=decided_at,
             )
-            self._journal("gate.error", candidate, receipt)
+            self._journal("gate.error", candidate, receipt, decided_at=decided_at)
             raise GateError(
                 "CrossValidationGate requires ExecutionPort; refusing to run "
                 "without sandbox (verifier.py:150-154 convention)")
@@ -99,7 +101,7 @@ class CrossValidationGate:
                 reason="suite author identity collision / unrecorded basis",
                 decided_at=decided_at,
             )
-            self._journal("gate.identity-collision", candidate, receipt)
+            self._journal("gate.identity-collision", candidate, receipt, decided_at=decided_at)
             return receipt
 
         # Path: spec hash mismatch -> rejected without sandbox
@@ -116,7 +118,7 @@ class CrossValidationGate:
                 reason="suite/spec hash mismatch",
                 decided_at=decided_at,
             )
-            self._journal("gate.spec-mismatch", candidate, receipt)
+            self._journal("gate.spec-mismatch", candidate, receipt, decided_at=decided_at)
             return receipt
 
         # F2-5: unconditional stale spec check - entry missing/unreadable/hash-mismatch
@@ -140,7 +142,7 @@ class CrossValidationGate:
                     reason="stale spec - entry procedure has changed",
                     decided_at=decided_at,
                 )
-                self._journal("gate.stale-spec", candidate, receipt)
+                self._journal("gate.stale-spec", candidate, receipt, decided_at=decided_at)
                 return receipt
         except Exception as e:
             # F2-4: unverifiable entry -> rejected, no sandbox
@@ -156,7 +158,24 @@ class CrossValidationGate:
                 reason=f"spec unverifiable: {e}",
                 decided_at=decided_at,
             )
-            self._journal("gate.spec-unverifiable", candidate, receipt)
+            self._journal("gate.spec-unverifiable", candidate, receipt, decided_at=decided_at)
+            return receipt
+
+        # F4-7: candidate must belong to the registry's pack
+        if candidate.spec.pack != self.registry.pack:
+            receipt = CrossValidationReceipt(
+                receipt_id="",
+                spec_hash=candidate.spec.spec_hash,
+                executor_hash=candidate.executor_hash,
+                suite_hash=suite.suite_hash,
+                sandbox_ok=False,
+                sandbox_output="",
+                approval=None,
+                verdict="rejected",
+                reason="candidate/spec pack mismatch",
+                decided_at=decided_at,
+            )
+            self._journal("gate.pack-mismatch", candidate, receipt, decided_at=decided_at)
             return receipt
 
         # Check for existing active executor (for swap detection)
@@ -206,7 +225,7 @@ class CrossValidationGate:
             self.registry.transition(
                 record, "rejected", receipt_id=receipt.receipt_id, updated_at=decided_at
             )
-            self._journal("gate.sandbox-fail", candidate, receipt)
+            self._journal("gate.sandbox-fail", candidate, receipt, decided_at=decided_at)
             return receipt
 
         # Path: sandbox ok + no approval -> refused (stays quarantined)
@@ -223,8 +242,26 @@ class CrossValidationGate:
                 reason="sandbox pass awaits strict-mode approval",
                 decided_at=decided_at,
             )
-            # F2-14: journal refusal with run's injected now, not self.clock()
-            self._journal_refusal(candidate, receipt, decided_at)
+            # F4-9 / F2-14: journal the full refusal receipt using the
+            # injected decision timestamp.
+            self._journal_refusal(candidate, receipt, decided_at=decided_at)
+            return receipt
+
+        # F4-8: the compiler identity is never allowed to approve its own output
+        if approval.approver == COMPILER_ID:
+            receipt = CrossValidationReceipt(
+                receipt_id="",
+                spec_hash=candidate.spec.spec_hash,
+                executor_hash=candidate.executor_hash,
+                suite_hash=suite.suite_hash,
+                sandbox_ok=True,
+                sandbox_output=sandbox_result.output[:2000],
+                approval=approval,
+                verdict="rejected",
+                reason="compiler cannot approve its own output",
+                decided_at=decided_at,
+            )
+            self._journal("gate.compiler-self-approval", candidate, receipt, decided_at=decided_at)
             return receipt
 
         # Path: sandbox ok + approval -> activated
@@ -235,19 +272,16 @@ class CrossValidationGate:
                 / "evals" / "baseline.json"
             )
             if not baseline_path.exists():
-                receipt = CrossValidationReceipt(
-                    receipt_id="",
-                    spec_hash=candidate.spec.spec_hash,
-                    executor_hash=candidate.executor_hash,
-                    suite_hash=suite.suite_hash,
-                    sandbox_ok=True,
-                    sandbox_output=sandbox_result.output[:2000],
-                    approval=approval,
-                    verdict="rejected",
-                    reason=f"Executor swap for entry {entry_id} requires baseline.json",
-                    decided_at=decided_at,
-                )
-                self._journal("gate.swap-no-baseline", candidate, receipt)
+                # F4-6: this is a precondition failure, not a rejection.
+                # The candidate honestly stays quarantined and is retryable.
+                self.provenance.append({
+                    "kind": "gate.error",
+                    "entry_id": candidate.spec.entry_id,
+                    "spec_hash": candidate.spec.spec_hash,
+                    "actor": "cross-validation-gate",
+                    "reason": f"Executor swap for entry {entry_id} requires baseline.json",
+                    "timestamp": decided_at,
+                })
                 raise GateError(
                     f"Executor swap for entry {entry_id} requires "
                     f"baseline.json in pack {candidate.spec.pack} (regression gate)")
@@ -277,13 +311,14 @@ class CrossValidationGate:
                 active, "superseded", receipt_id=receipt.receipt_id, updated_at=decided_at
             )
 
-        # F2-3: journal the FULL receipt (all fields)
-        self._journal("gate.activated", candidate, receipt)
+        # F2-3 / F4-11: journal the FULL receipt (all fields) with the
+        # injected decision timestamp.
+        self._journal("gate.activated", candidate, receipt, decided_at=decided_at)
         return receipt
 
     def _journal(self, kind: str, candidate: ExecutorCandidate,
-                  receipt: CrossValidationReceipt) -> None:
-        """Journal a gate event to provenance with full receipt."""
+                  receipt: CrossValidationReceipt, *, decided_at: str) -> None:
+        """Journal a gate event to provenance with the full receipt."""
         self.provenance.append({
             "kind": kind,
             "entry_id": candidate.spec.entry_id,
@@ -292,8 +327,9 @@ class CrossValidationGate:
             "receipt_id": receipt.receipt_id,
             "verdict": receipt.verdict,
             "reason": receipt.reason,
-            "timestamp": self.clock().isoformat(),
-            # F2-3: journal the FULL receipt
+            # F4-11: use the injected decision timestamp for all gate events
+            "timestamp": decided_at,
+            # F2-3 / F4-9: journal the FULL receipt
             "receipt": {
                 "spec_hash": receipt.spec_hash,
                 "executor_hash": receipt.executor_hash,
@@ -313,8 +349,8 @@ class CrossValidationGate:
         })
 
     def _journal_refusal(self, candidate: ExecutorCandidate,
-                         receipt: CrossValidationReceipt, now: str) -> None:
-        """F2-14: journal refusal with the run's injected now, not self.clock()."""
+                         receipt: CrossValidationReceipt, *, decided_at: str) -> None:
+        """F2-14 / F4-9: journal the full refusal receipt using decided_at."""
         self.provenance.append({
             "kind": "gate.awaiting-approval",
             "entry_id": candidate.spec.entry_id,
@@ -323,12 +359,20 @@ class CrossValidationGate:
             "receipt_id": receipt.receipt_id,
             "verdict": receipt.verdict,
             "reason": receipt.reason,
-            "timestamp": now,  # F2-14: use injected now, not self.clock()
+            "timestamp": decided_at,  # F4-11
+            # F4-9: include the full receipt (sandbox_output + approval)
             "receipt": {
                 "spec_hash": receipt.spec_hash,
                 "executor_hash": receipt.executor_hash,
                 "suite_hash": receipt.suite_hash,
                 "sandbox_ok": receipt.sandbox_ok,
+                "sandbox_output": receipt.sandbox_output,
+                "approval": {
+                    "approver": receipt.approval.approver,
+                    "basis": receipt.approval.basis,
+                    "strict_mode": receipt.approval.strict_mode,
+                    "approved_at": receipt.approval.approved_at,
+                } if receipt.approval else None,
                 "verdict": receipt.verdict,
                 "reason": receipt.reason,
                 "decided_at": receipt.decided_at,
