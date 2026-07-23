@@ -2628,6 +2628,125 @@ test("claim rejects wrong owner host before lock and preserves bytes", async (co
   });
 });
 
+test("claim accepts an owner host that is a configured alias", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Alias",
+        status: "backlog",
+        owner: "",
+        paths: ["src/alias"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await readyCard(root, "TASK-20260711-001");
+
+  const aliasedHost = `${hostname()}.alias.example`;
+  const result = await run(
+    [
+      "claim",
+      "TASK-20260711-001",
+      "--control-root",
+      root,
+      "--caller-worktree",
+      root,
+      "--expected-revision",
+      "2",
+      "--owner",
+      `codex:${aliasedHost}:session-1`,
+    ],
+    { WORKPLAN_HOST_ALIASES: aliasedHost },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /"claimed":true/);
+
+  const claimed = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(claimed.cards[0].owner, `codex:${aliasedHost}:session-1`);
+});
+
+test("submit accepts an owner host alias that differs from the current hostname", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Alias submit",
+        status: "backlog",
+        owner: "",
+        paths: ["src/alias-submit"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await readyCard(root, "TASK-20260711-001");
+
+  const aliasedHost = `${hostname()}.submit-alias.example`;
+  const aliasEnv = { WORKPLAN_HOST_ALIASES: aliasedHost };
+
+  const claimResult = await run(
+    [
+      "claim",
+      "TASK-20260711-001",
+      "--control-root",
+      root,
+      "--caller-worktree",
+      root,
+      "--expected-revision",
+      "2",
+      "--owner",
+      `codex:${aliasedHost}:session-1`,
+    ],
+    aliasEnv,
+  );
+  assert.equal(claimResult.code, 0, claimResult.stderr);
+
+  const startResult = await run(
+    [
+      "start",
+      "TASK-20260711-001",
+      "--control-root",
+      root,
+      "--caller-worktree",
+      root,
+      "--expected-revision",
+      "3",
+      "--owner",
+      `codex:${aliasedHost}:session-1`,
+    ],
+    aliasEnv,
+  );
+  assert.equal(startResult.code, 0, startResult.stderr);
+
+  // submit while the configured alias is the frozen owner host, accepted even
+  // though it is not the current os.hostname().
+  const fakeHead = "a".repeat(40);
+  await writeFile(join(root, ".git", "HEAD"), `${fakeHead}\n`);
+  const submitResult = await run(
+    [
+      "submit",
+      "TASK-20260711-001",
+      "--control-root",
+      root,
+      "--caller-worktree",
+      root,
+      "--expected-revision",
+      "4",
+      "--owner",
+      `codex:${aliasedHost}:session-1`,
+      "--expected-head",
+      fakeHead,
+    ],
+    aliasEnv,
+  );
+  assert.equal(submitResult.code, 0, submitResult.stderr);
+  assert.match(submitResult.stdout, /"revision":5/);
+});
+
 test("named claim of non-ready card fails without falling through and preserves bytes", async (context) => {
   const { root, parent } = await repository(
     state([
