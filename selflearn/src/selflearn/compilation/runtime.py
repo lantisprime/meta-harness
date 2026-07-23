@@ -181,6 +181,20 @@ class ExecutorRuntime:
 
         # Load and verify executor source
         from pathlib import Path
+
+        # A tampered registry.path can carry control characters, notably NUL.
+        # Path.resolve() and open() raise ValueError -- NOT OSError -- on those,
+        # so such a path would slip past every OSError guard below and, worse,
+        # skip the containment check entirely: resolve() throws before
+        # is_relative_to() ever runs. Reject up front, under its own kind,
+        # since a malformed path is not an escape attempt.
+        if any(ord(ch) < 32 for ch in active.path):
+            self._journal_refusal(entry_id, "executor.malformed-path",
+                                 f"executor path {active.path!r} contains control characters",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Executor path {active.path!r} contains control characters")
+
         exec_path = Path(self.store.root) / active.path
 
         # Bounded-authority check: a tampered registry.path cannot widen the
@@ -198,7 +212,7 @@ class ExecutorRuntime:
             store_root_resolved = Path(self.store.root).resolve()
             exec_path_resolved = exec_path.resolve()
             contained = exec_path_resolved.is_relative_to(store_root_resolved)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self._journal_refusal(entry_id, "executor.path-unreadable",
                                  f"cannot resolve executor path {active.path!r}: {exc}",
                                  now=now)
@@ -221,7 +235,7 @@ class ExecutorRuntime:
         # 3.13+ (where exists() delegates to os.path.exists) swallows it.
         try:
             missing = not exec_path_resolved.exists()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self._journal_refusal(entry_id, "executor.path-unreadable",
                                  f"cannot stat executor path {active.path!r}: {exc}",
                                  now=now)
@@ -236,13 +250,14 @@ class ExecutorRuntime:
                                  now=now)
             raise RuntimeCompError(f"Executor source missing: {active.path}")
 
-        # UnicodeDecodeError is a ValueError, not an OSError, so it needs
-        # catching explicitly: a locale-drifted or corrupted executor file
-        # would otherwise escape run() raw and unjournalled -- the same class
-        # of breach as the resolve() gap, in a different exception family.
+        # ValueError is caught alongside OSError throughout: UnicodeDecodeError
+        # (a corrupted executor file) and the embedded-null-byte error are both
+        # ValueError subclasses, and neither is an OSError -- so without this
+        # they escape run() raw and unjournalled, the same class of breach as
+        # the original resolve() gap in a different exception family.
         try:
             source = exec_path_resolved.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
+        except (OSError, ValueError) as exc:
             self._journal_refusal(entry_id, "executor.path-unreadable",
                                  f"cannot read executor path {active.path!r}: {exc}",
                                  now=now)

@@ -67,9 +67,9 @@ class ExecutorRegistry:
         """
         if not self._registry_path.exists():
             self._executors_dir.mkdir(parents=True, exist_ok=True)
-            self._registry_path.write_text(json.dumps({"records": []}))
+            self._registry_path.write_text(json.dumps({"records": []}), encoding="utf-8")
         try:
-            return json.loads(self._registry_path.read_text())
+            return json.loads(self._registry_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, IOError) as e:
             raise RegistryError(f"Registry corrupt: {e}")
 
@@ -77,7 +77,7 @@ class ExecutorRegistry:
         """Atomic write of registry using tmp + os.replace."""
         self._executors_dir.mkdir(parents=True, exist_ok=True)
         tmp = self._registry_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=1))
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
         os.replace(tmp, self._registry_path)
 
     def record_for(self, entry_id: str, status: str | None = None) -> list[ExecutorRecord]:
@@ -89,7 +89,7 @@ class ExecutorRegistry:
         if not self._registry_path.exists():
             return []
         try:
-            data = json.loads(self._registry_path.read_text())
+            data = json.loads(self._registry_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, IOError) as e:
             # F2-9: raise on corrupt file, don't silently return []
             raise RegistryError(f"Registry corrupt: {e}")

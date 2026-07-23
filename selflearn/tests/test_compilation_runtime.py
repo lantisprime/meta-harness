@@ -1278,6 +1278,126 @@ def test_runtime_unreadable_contained_path_is_journalled():
         assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
 
 
+def test_runtime_non_ascii_executor_round_trips():
+    """A VALID non-ASCII executor must round-trip write -> read -> hash -> run.
+
+    content_hash() hashes text.encode("utf-8") explicitly, and executor source
+    I/O is now pinned to utf-8 on both sides. Non-ASCII source is reachable in
+    practice -- the compiler embeds the step objective and repr(entry_id)
+    directly -- so this proves the hash binding survives the round trip.
+    Without it the only non-ASCII coverage is the negative case (invalid bytes
+    fail closed), and a future refactor could silently break non-ASCII lineage
+    with CI still green.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (
+            ProcedureStep(id="step1", objective="déployer le café ☕",
+                          task_type="code_edit"),
+        )
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+
+        from selflearn.compilation.compiler import WorkflowCompiler
+        compiler = WorkflowCompiler()
+        candidate = compiler.compile(entry, pack=pack,
+                                     compiled_at="2024-01-01T00:00:00Z",
+                                     provenance=FakeProvenance())
+
+        # The fixture is only meaningful if the compiled source really carries
+        # non-ASCII bytes.
+        assert any(ord(ch) > 127 for ch in candidate.source)
+
+        registry = ExecutorRegistry(store_root, pack)
+        # Written through the real registry path, which pins utf-8.
+        registry.write_candidate(candidate)
+
+        relative_path = f"{pack}/executors/wf-001/{spec_hash}.py"
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash=candidate.executor_hash,
+            status="active",
+            path=relative_path,
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        result = runtime.run("wf-001", task_id="t1", topic="test",
+                            task_type="code_edit",
+                            step_handler=lambda sid, sdata: {"status": "ok"},
+                            now="2024-01-01T00:00:00Z")
+
+        # The hash check passed, so the utf-8 write and read agreed with
+        # content_hash's utf-8 encoding.
+        assert result.status == "completed"
+        assert not any(e["kind"] == "executor.tampered" for e in provenance.events)
+
+
+def test_runtime_control_character_path_is_rejected():
+    """A registry.path carrying a control character is refused before resolve().
+
+    Citing test for the gate-5 P2-1. Path.resolve() and open() raise ValueError
+    -- not OSError -- on an embedded NUL, so such a path escaped every OSError
+    guard raw and unjournalled, and skipped the containment check entirely
+    because resolve() throws before is_relative_to() runs.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            executor_hash="b" * 64,
+            status="active",
+            path=f"{pack}/exec\x00utors/wf-001/x.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        with pytest.raises(RuntimeCompError, match="control characters"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-01-01T00:00:00Z")
+
+        # A malformed path is not an escape attempt; it gets its own kind.
+        assert any(e["kind"] == "executor.malformed-path" for e in provenance.events)
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
+
 def test_runtime_missing_source_is_journalled():
     """A genuinely absent executor file must journal its refusal.
 
