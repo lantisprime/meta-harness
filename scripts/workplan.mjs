@@ -2166,8 +2166,16 @@ function validateIntegrationReceipt(card, expectedRevision) {
   ) {
     fail("integrationReceipt.revisionTo must be revisionFrom + 1");
   }
-  if (receipt.revisionTo !== expectedRevision) {
-    fail("integrationReceipt revision does not match expectedRevision");
+  // The board revision is global, so an unrelated card's transition advances it
+  // between this card's integrate and its accept. Requiring equality here would
+  // strand such a card in `verifying` forever, since revisions are monotonic and
+  // `block` is gated on the same check. Card-level staleness needs no guard: the
+  // only exits from `verifying` are accept (-> done) and block (-> blocked), both
+  // gated on that status, so while the card is verifying its latest receipt is
+  // necessarily this integration receipt. What must still fail closed is a receipt
+  // claiming a revision the board has not reached, which indicates forgery.
+  if (receipt.revisionTo > expectedRevision) {
+    fail("integrationReceipt revision is ahead of expectedRevision");
   }
   if (!validateIsoTimestamp(receipt.at)) {
     fail("integrationReceipt.at must be a valid ISO timestamp");

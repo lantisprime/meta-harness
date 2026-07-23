@@ -4973,6 +4973,193 @@ test("accept rejects tampered integrationReceipt and preserves bytes", async (co
   });
 });
 
+test("accept succeeds when an unrelated card advanced the board after integrate", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Integrated first",
+        status: "backlog",
+        owner: "",
+        paths: ["src/first"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  // An unrelated card's transition advances the global board revision from 6 to
+  // 7 while TASK-20260711-001 sits in verifying. Nothing happened to this card.
+  const addResult = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--id",
+    "TASK-20260711-002",
+    "--outcome",
+    "unrelated second card",
+    "--paths",
+    "src/second",
+  ]);
+  assert.equal(addResult.code, 0, addResult.stderr);
+  assert.equal(JSON.parse(addResult.stdout).revision, 7);
+
+  const midState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const cardBefore = midState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(cardBefore.status, "verifying");
+  assert.equal(cardBefore.integrationReceipt.revisionTo, 6);
+
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "7",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).revision, 8);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const accepted = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(accepted.status, "done");
+  assert.deepEqual(accepted.paths, []);
+  assert.deepEqual(accepted.releasedPaths, ["src/first"]);
+});
+
+test("accept rejects an integrationReceipt revision ahead of the board and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Receipt ahead of board",
+        status: "backlog",
+        owner: "",
+        paths: ["src/ahead"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+  const tamperedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const receipt = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  ).integrationReceipt;
+  receipt.revisionFrom = 40;
+  receipt.revisionTo = 41;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tamperedState, null, 2)}\n`,
+  );
+
+  const cardBefore = tamperedState.cards.find((c) => c.id === "TASK-20260711-001");
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /integrationReceipt revision is ahead of expectedRevision/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("block from verifying succeeds when an unrelated card advanced the board", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Blockable after drift",
+        status: "backlog",
+        owner: "",
+        paths: ["src/blockdrift"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachVerifying(root, "TASK-20260711-001");
+
+  const addResult = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--id",
+    "TASK-20260711-002",
+    "--outcome",
+    "unrelated second card",
+    "--paths",
+    "src/second",
+  ]);
+  assert.equal(addResult.code, 0, addResult.stderr);
+
+  await blockCard(root, "TASK-20260711-001", owner, "7", "drifted board", true);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const blocked = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.blockedFrom, "verifying");
+  assert.deepEqual(blocked.paths, ["src/blockdrift"]);
+});
+
 test("accept rejects tampered integrationReceipt actor and preserves bytes", async (context) => {
   const { root, parent } = await repository(
     state([
