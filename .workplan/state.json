@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 135,
+  "revision": 136,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3467,7 +3467,7 @@
     {
       "id": "TASK-20260724-019",
       "title": "Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mbp.home.lan:t019-build-20260724",
       "paths": [
         "scripts/workplan.mjs",
@@ -3555,6 +3555,19 @@
             "branch": "dev/t019-receipt-ledger-binding",
             "head": "eed775d43843a353f2b1ba8544f53429f557eeda"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+          "revisionFrom": 135,
+          "revisionTo": 136,
+          "at": "2026-07-24T12:36:31.782Z",
+          "evidence": {
+            "reviewBranch": "dev/t019-receipt-ledger-binding",
+            "reviewHead": "eed775d43843a353f2b1ba8544f53429f557eeda",
+            "integrationCommit": "f972484d46029ffdd84f5be73456ab8880ff520e"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3593,6 +3606,16 @@
         "revisionFrom": 134,
         "revisionTo": 135,
         "at": "2026-07-24T11:45:57.294Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+        "reviewBranch": "dev/t019-receipt-ledger-binding",
+        "reviewHead": "eed775d43843a353f2b1ba8544f53429f557eeda",
+        "integrationCommit": "f972484d46029ffdd84f5be73456ab8880ff520e",
+        "definitionHash": "sha256:a571e965e9a99f2282ffa65576fa9cce618e6abebfe286e9c3b49c7f49709c5f",
+        "revisionFrom": 135,
+        "revisionTo": 136,
+        "at": "2026-07-24T12:36:31.782Z"
       }
     },
     {
