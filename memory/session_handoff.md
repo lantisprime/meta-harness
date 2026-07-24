@@ -1,22 +1,32 @@
-# Session Handoff — meta-harness (2026-07-24, session 51: META-8 accepted; control-root wedge found and repaired; META-17 acceptance pending merge)
+# Session Handoff — meta-harness (2026-07-24, session 51: META-8, META-17, and the control-root repair all accepted; board clean)
 
 ## State in one line
 
-META-8 is **done**. META-17 is still `verifying` — not through any fault of its
-own, but because a defect in the control root made it unacceptable. That defect
-is fixed, panel-approved, and sitting in **PR #63**. Merge it, then accept
-META-17.
+**Zero cards open.** META-8, META-17, and the control-root repair
+(`TASK-20260724-018`) are all `done` at board revision **118**, with 13 reserved
+paths released. Two follow-up cards are filed in backlog. The only thing
+outstanding is merging the closeout PR.
 
 ## Do this first
 
-1. **Merge PR #63** (`TASK-20260724-018`, `validateIntegrationReceipt` repair).
-2. **`integrate` then `accept` it back-to-back with no intervening board
-   transition.** That ordering is not ceremony — batching two integrates is the
-   exact bug being fixed, and doing it again would strand this card too.
-3. **Accept META-17** (`TASK-20260723-017`). Its receipt
-   `.workplan/meta17-acceptance.json` is already written, committed, and valid.
-4. **File the two blocked follow-up cards** once paths release (see below).
-5. Commit the control root immediately after every transition.
+1. **Merge PR #64** — canonical control-root closeout records, board 105 → 118.
+   Nothing else depends on it; the ledger is already correct locally.
+2. **Coordinator qualifies a backlog card into Ready** before any seat claims.
+   `TASK-20260724-019` and `-020` are both unqualified backlog.
+3. Optional cleanup: worktrees `/private/tmp/mh-gate-wpfix` (disposable gate
+   worktree) and `/private/tmp/behav-verify-wpfix/` (behavioural seat scratch)
+   are both deletable.
+
+## What shipped
+
+| Card | Result |
+|---|---|
+| `TASK-20260714-006` (META-8) | **done**, 5 paths released (PR #62) |
+| `TASK-20260723-017` (META-17) | **done**, 6 paths released |
+| `TASK-20260724-018` (repair) | **done**, 2 paths released (PR #63) |
+
+META-17's `integrationReceipt.revisionTo` is **103** and it was accepted at board
+revision **115** — the precise case that was impossible before the repair.
 
 ## The wedge — the part worth reading
 
@@ -89,27 +99,27 @@ Three things this panel caught that a single lens would not have:
 
 ## Repo state
 
-- `main` at `b75a092` + PR #63 pending. Control root **revision 110** on branch
-  `card/wpfix-lifecycle`, committed after every transition.
+- `main` at `2422f30` (PR #63 merged). Control root **revision 118** on branch
+  `card/wpfix-lifecycle`, committed after every transition, awaiting PR #64.
 - Worktrees: `meta-17` and `meta-8` detached at `8a9fd33`; `wp-fix` on
   `fix/workplan-integration-receipt-revision`; `mh-gate-wpfix` (disposable gate
   worktree, deletable); `meta18-coordinator` at `884a034`.
 - Scratch from the behavioural seat under `/private/tmp/behav-verify-wpfix/` —
   safe to delete.
 
-## Blocked follow-ups — file these once paths release
+## Follow-ups filed (backlog, unqualified)
 
-Path exclusivity currently refuses both `add` calls, which is the control root
-working correctly.
+Both `add` calls were refused by path exclusivity until their predecessors
+released reservations — the control root working correctly, not an obstacle.
 
-- **After `TASK-20260724-018` releases `scripts/workplan.mjs`:** hash-chain
-  `integrationReceipt` into the append-only ledger (GLM P3-1); add resume /
+- **`TASK-20260724-019`** — the three deferred P3s: hash-chain
+  `integrationReceipt` into the append-only ledger (GLM P3-1); resume /
   `retainPaths=false` coverage after drift (codex P3); scope the new comment's
   invariant against direct `state.json` tampering (GLM P3-C).
-- **After META-17 releases `selflearn/src/selflearn/compilation`:** F1 — 
-  `_ast_preflight` calls `ast.parse` at an unguarded site (`runtime.py:275`);
-  `ast.parse` raises `ValueError`, not `SyntaxError`, on NUL-bearing source,
-  escaping every guard unjournalled.
+- **`TASK-20260724-020`** — META-17 gate-6 F1: `_ast_preflight` calls
+  `ast.parse` at an unguarded site (`runtime.py:275`); `ast.parse` raises
+  `ValueError`, not `SyntaxError`, on NUL-bearing source, escaping every guard
+  unjournalled. That escape class is **not** exhaustively closed.
 
 ## Honest caveats
 
@@ -132,6 +142,15 @@ working correctly.
   Judge seat liveness by **cumulative CPU `TIME` on the real child** plus RSS,
   and always launch CLI seats with `< /dev/null` — both seats had silently
   blocked on stdin, and silence is indistinguishable from deep review.
+
+## Second process lesson found this session
+
+**Re-freeze the card after a fix round, not just the diff.** The repair card's
+`reviewFreeze` named `84734f8` while the P3 fix round `249a826` also merged.
+Re-gating the diff is necessary but not sufficient — run block → resume → submit
+so the card names the head that was actually reviewed. Caught before integrating;
+had it not been, it would have reproduced exactly the gap on record against
+META-17's `4a8069b`.
 
 ## Standing lesson (carried forward, now with a second instance)
 
