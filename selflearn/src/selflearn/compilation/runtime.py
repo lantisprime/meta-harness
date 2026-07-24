@@ -273,8 +273,40 @@ class ExecutorRuntime:
             raise RuntimeCompError(
                 f"Executor for {entry_id} has been tampered with")
 
-        # F2-16: AST preflight before exec
-        _ast_preflight(source)
+        # F2-16: AST preflight before exec.
+        #
+        # META-17 F1: on older interpreters ast.parse() raises ValueError --
+        # NOT SyntaxError -- on NUL-bearing source (observed CPython 3.10.20),
+        # while newer ones raise SyntaxError (observed 3.11.15, 3.12.13). Since
+        # _ast_preflight catches only SyntaxError, that ValueError would escape
+        # run() raw and unjournalled, breaching both the journalled-refusal
+        # evidence contract and the RuntimeCompError normalization contract. It
+        # is reachable only through a tampered hash-matched executor file
+        # (json.dumps escapes NUL in legitimate compiler output), i.e. exactly
+        # the adversarial surface this evidence record exists for -- the same
+        # class of breach as the resolve()/read() ValueError gaps closed above,
+        # in a third call site. The dual-branch guard is deliberately
+        # version-agnostic: wrapping the call journals every preflight refusal
+        # under one honest kind before the exception leaves run() -- the
+        # ValueError case here, and the existing SyntaxError / forbidden-dunder
+        # / __builtins__ cases that _ast_preflight already normalizes to
+        # RuntimeCompError but never journalled.
+        try:
+            _ast_preflight(source)
+        except ValueError as exc:
+            self._journal_refusal(entry_id, "executor.malformed-source",
+                                 f"executor source failed preflight: {exc}",
+                                 now=now)
+            raise RuntimeCompError(
+                f"Executor source for {entry_id} failed preflight: {exc}") from exc
+        except RuntimeCompError as exc:
+            # Already normalized inside _ast_preflight; journal it here so the
+            # preflight site never aborts a run without an evidence event, then
+            # re-raise unchanged to preserve its specific refusal message.
+            self._journal_refusal(entry_id, "executor.malformed-source",
+                                 f"executor source failed preflight: {exc}",
+                                 now=now)
+            raise
 
         # Journal run start
         self.provenance.append({

@@ -901,6 +901,90 @@ def test_runtime_ast_preflight_rejects_dunder_escape():
                        task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
                        now="2024-01-01T00:00:00Z")
 
+        # META-17 F1: the dunder refusal is now also journalled under the
+        # preflight kind -- an aborted preflight must leave an evidence event.
+        assert any(e["kind"] == "executor.malformed-source" for e in provenance.events)
+
+
+def test_runtime_nul_bearing_source_is_journalled():
+    """A hash-matched executor whose source carries a NUL fails closed, not raw.
+
+    META-17 F1: on older interpreters ast.parse() raises ValueError -- NOT
+    SyntaxError -- on NUL-bearing source (observed CPython 3.10.20), and
+    _ast_preflight caught only SyntaxError, so the ValueError escaped run() raw
+    and unjournalled, breaching both the journalled-refusal evidence contract
+    and the RuntimeCompError normalization contract. (On newer interpreters --
+    observed 3.11.15 and 3.12.13 -- the tokenizer raises SyntaxError instead,
+    which _ast_preflight normalized but never journalled -- the same evidence
+    gap in the sibling branch.) The dual-branch guard is deliberately
+    version-agnostic and closes both, which is why this test asserts the journal
+    invariant and the "null bytes" semantics rather than a version-specific
+    message. Reachable only through a tampered hash-matched executor file
+    (json.dumps escapes NUL in legitimate compiler output), i.e. exactly the
+    adversarial surface the evidence record exists for. The refusal must be
+    journalled under an honest kind and normalized to RuntimeCompError.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_root = Path(tmpdir)
+        pack = "test"
+        store = PackStore(store_root)
+
+        procedure = (ProcedureStep(id="step1", objective="x", task_type="code_edit"),)
+        entry = _make_entry(pack=pack, procedure=procedure)
+        store.add_candidate(entry)
+
+        spec_hash = canonical_procedure_hash(procedure)
+        exec_dir = store_root / pack / "executors" / "wf-001"
+        exec_dir.mkdir(parents=True)
+        exec_path = exec_dir / f"{spec_hash}.py"
+        # Valid-looking Python carrying an embedded NUL. ast.parse rejects it
+        # with "source code string cannot contain null bytes" -- ValueError on
+        # older interpreters (observed CPython 3.10.20, the raw-escape defect),
+        # SyntaxError on newer ones (observed 3.11.15, 3.12.13); both are now
+        # journalled and normalized by the wrapping guard.
+        nul_source = "def run(handler):\n    x = '\x00'\n    return {'completed': []}\n"
+        exec_path.write_text(nul_source)
+
+        record = ExecutorRecord(
+            record_id="",
+            entry_id="wf-001",
+            pack=pack,
+            spec_hash=spec_hash,
+            # Hash matches the NUL-bearing bytes, so the tamper check passes and
+            # control reaches _ast_preflight -- the tampered hash-matched surface.
+            executor_hash=content_hash(nul_source),
+            status="active",
+            path=f"{pack}/executors/wf-001/{spec_hash}.py",
+            receipt_id="rcpt1",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        registry = ExecutorRegistry(store_root, pack)
+        registry.add_record(record)
+
+        provenance = FakeProvenance()
+
+        def clock():
+            return datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        runtime = ExecutorRuntime(registry, store, provenance, clock)
+
+        # A raw ValueError/SyntaxError must never escape run(); it is normalized
+        # to RuntimeCompError. Match on the version-invariant "null bytes" text.
+        with pytest.raises(RuntimeCompError, match="null bytes"):
+            runtime.run("wf-001", task_id="t1", topic="test",
+                       task_type="code_edit", step_handler=lambda sid, sdata: {"status": "ok"},
+                       now="2024-12-25T00:00:00Z")
+
+        # Journalled under the honest kind, carrying the entry_id and the run's
+        # injected now.
+        preflight_events = [e for e in provenance.events
+                            if e["kind"] == "executor.malformed-source"]
+        assert len(preflight_events) == 1
+        assert preflight_events[0]["entry_id"] == "wf-001"
+        assert preflight_events[0]["timestamp"] == "2024-12-25T00:00:00Z"
+        # A malformed source is not an escape attempt; it gets its own kind.
+        assert not any(e["kind"] == "executor.path-escape" for e in provenance.events)
+
 
 # =============================================================================
 # F3-1 citing test: active executor leaves clean doctor report
