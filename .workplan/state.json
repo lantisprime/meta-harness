@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 123,
+  "revision": 124,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3487,7 +3487,7 @@
     {
       "id": "TASK-20260724-020",
       "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
       "paths": [
         "selflearn/src/selflearn/compilation",
@@ -3573,6 +3573,19 @@
             "branch": "dev/t020-ast-preflight-valueerror-guard",
             "head": "345134e3ece39b9166114bb5729e2c4facb9e2f4"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+          "revisionFrom": 123,
+          "revisionTo": 124,
+          "at": "2026-07-24T06:16:14.855Z",
+          "evidence": {
+            "reviewBranch": "dev/t020-ast-preflight-valueerror-guard",
+            "reviewHead": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
+            "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3611,6 +3624,16 @@
         "revisionFrom": 122,
         "revisionTo": 123,
         "at": "2026-07-24T06:05:24.684Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "reviewBranch": "dev/t020-ast-preflight-valueerror-guard",
+        "reviewHead": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
+        "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "revisionFrom": 123,
+        "revisionTo": 124,
+        "at": "2026-07-24T06:16:14.855Z"
       }
     },
     {
