@@ -1,0 +1,63 @@
+I now have everything needed: the on-disk `runtime.py` and `test_compilation_runtime.py` match the frozen diff verbatim (including the P3-3 `encoding="utf-8"` at test line 946), `_ast_preflight` has exactly one production call site (now guarded), `executor.malformed-source` is referenced only by the two new journal calls + two test assertions, `content_hash` is byte-identical to the runtime's `sha256(source.encode())`, and `RuntimeCompError`/`content_hash` are properly exported. One caveat: the gate-1 artifact `t020-glm-gate-review-811ef42.txt` is **not** present in `.review-store/`, so I could not directly verify the prior P3-1/P3-2 DEFERRED text; I assess the diff afresh.
+
+---
+
+# VERDICT: APPROVE
+
+The frozen diff at head `345134e` (base `c338ec0`) closes the targeted unjournalled-`ValueError` escape class at the `_ast_preflight` call site across the supported interpreter range, strengthens the journalled-refusal evidence contract strictly additively, introduces no regression or weakening, and is covered by a high-quality version-robust test. No P0, P1, or P2 blockers. Three P3 notes follow.
+
+## Findings
+
+### P0 — none.
+
+### P1 — none.
+
+### P2 — none.
+
+### P3 (notes)
+
+**P3-1 — Taxonomy naming: dunder/`__builtins__` refusals journaled under `executor.malformed-source` (runtime.py:306-308, test_compilation_runtime.py:906).**
+The new kind is honest for the NUL-byte and invalid-Python (SyntaxError) cases (the source genuinely is malformed), and it is defensible for dunder/`__builtins__` in the "non-conforming to the executor template contract" sense. However, a forbidden-dunder access (`().__class__.__bases__[0].__subclasses__()`) is semantically a *sandbox-escape attempt*, which the existing taxonomy distinguishes from mere malformation (cf. `executor.path-escape` at runtime.py for containment escapes). Journaling it as `executor.malformed-source` records an escape attempt under a "malformed" kind — the inverse of the inflation the code itself warns against at the path site ("Collapsing both into one kind would record a mere read failure as an escape attempt, corrupting the evidence taxonomy"). Severity is low because (a) the precise classification is preserved verbatim in the `reason` field (`"forbidden dunder access: __bases__"`, `"forbidden __builtins__ reference"`), so any `reason`-aware bucketing remains correct, and (b) the card explicitly licensed bringing dunder/`__builtins__` under "the same journalled contract ... under an honest `executor.*` kind" — which `executor.malformed-source` satisfies. Suggested follow-up (not required): a dedicated `executor.forbidden-access`/`executor.sandbox-escape` kind for the dunder/`__builtins__` branch to parallel `executor.path-escape`. This is a taxonomy-fidelity refinement, not a correctness or security defect; it strictly improves evidence (was: 0 journal events for these refusals → now: 1 with specific reason).
+
+**P3-2 — Resource-exhaustion breadth: `RecursionError`/`MemoryError` from `ast.parse` on pathologically nested source would still escape unjournalled (runtime.py:294-309).**
+The guard catches `ValueError` (the 3.10 NUL escape) and `RuntimeCompError` (the normalized SyntaxError/dunder/`__builtins__` cases) — exactly the targeted escape class. It does not catch `RecursionError` (a `RuntimeError` subclass, reachable from `ast.parse`'s recursive-descent/PEG parser on deeply-nested input). Such input is reachable only via a tampered hash-matched executor file, i.e. the same adversarial surface, and would breach the evidence contract for that input. This is the same shape as the explicitly-deferred P3 breadth questions (the `ord(ch) < 32` breadth, "rewriting preflight detection logic" being out of scope) and is consistent with the existing path guards, which similarly catch only `(OSError, ValueError)` at runtime.py (resolve/exists/read sites). Not a regression (pre-existing) and out of the card's scope; flagged only to keep the "is the class exhaustively closed?" answer honest. Note: `ast.walk` is implemented iteratively (deque-based), so the walker itself is not a RecursionError source; only `ast.parse` is.
+
+**P3-3 — Gate-1 artifact not verifiable in `.review-store/`.**
+The brief cites gate-1 artifact `t020-glm-gate-review-811ef42.txt`, but no file matching `*811ef42*` or `*t020*` exists in `.review-store/` (listing verified). I therefore could not directly confirm the gate-1 APPROVE verdict or the exact text/rationale of the DEFERRED P3-1/P3-2. I confirmed independently that the only stated gate-1→head delta (P3-3, the `encoding="utf-8"` on `write_text`) is present at test_compilation_runtime.py:946. The diff is reviewed afresh on its own merits above; nothing in the missing artifact blocks this verdict, but the chain-of-custody gap (gate-1 review not persisted to the review store per the AGENTS.md "preserve the review output verbatim in `.review-store/`" requirement) should be remediated by the coordinator.
+
+## Six-point assessment
+
+1. **Does the guard close the escape class at this call site across >=3.10? — YES.**
+   - 3.10 (`ast.parse("x='\x00'")` → `ValueError`): `_ast_preflight` (runtime.py:42-44) catches only `SyntaxError`, so the `ValueError` propagates out to the call site and is caught at runtime.py:296 → journailed under `executor.malformed-source` (297-299) → `raise RuntimeCompError(...) from exc` (300-301). No raw `ValueError` escapes `run()`. CLOSED.
+   - 3.11/3.12 (`ast.parse` → `SyntaxError`): caught inside `_ast_preflight` at runtime.py:46 → re-raised as `RuntimeCompError` → caught at runtime.py:302 → journaled (306-308) → bare `raise` (309). CLOSED.
+   - The dual-branch (`except ValueError` / `except RuntimeCompError`) shape is correctly version-agnostic and the branches are disjoint (`RuntimeCompError` is not a `ValueError`), so no exception can match both.
+
+2. **Can any preflight or sandbox failure now skip journalling? — NO, for the targeted families (modulo P3-2 breadth).**
+   - Preflight refusals all now journal exactly one event before leaving `run()`: NUL-`ValueError` (296 branch), invalid-Python `SyntaxError` (302 branch), forbidden dunder (302 branch), `__builtins__` reference (302 branch).
+   - Sandbox (`exec`) failures are unchanged: `runtime.executor-error` + `runtime.finish` (the existing try/except around `exec`), and the preflight guard is positioned *after* the hash-tamper check (runtime.py:266-274) and *before* the `runtime.start` event (runtime.py:314), so a preflight refusal raises straight out of `run()` consistent with the other refusal sites (`executor.tampered` etc.) — no `runtime.start`/`finish` pair, matching the established "refusal before run start" contract.
+   - P3-2 records the only residual unjournalled termination path (resource-exhaustion), which is pre-existing, out of scope, and consistent with the existing catch posture.
+
+3. **Does the `RuntimeCompError` re-raise branch double-journal or mask anything? — NO.**
+   - Single journal event per refusal: the `except RuntimeCompError` branch journals once (306-308) then bare-`raise`s (309). The exec try block below (runtime.py:~328+) is never entered on a preflight failure, so no second (`runtime.executor-error`/`runtime.finish`) event is emitted. The NUL test pins this directly: `assert len(preflight_events) == 1` (test_compilation_runtime.py:982).
+   - No masking: bare `raise` re-raises the *same* `RuntimeCompError` object, preserving its specific message and `__cause__`/`__context__` chain (the dunder message `"forbidden dunder access: ..."` is unchanged, so the existing `match="forbidden dunder"` test at test_compilation_runtime.py:899 still passes).
+
+4. **Is `executor.malformed-source` an honest kind vs. the existing taxonomy? — YES for NUL/invalid-Python; defensible-but-imprecise for dunder/`__builtins__` (see P3-1).**
+   - Existing `executor.*` kinds: `no-active`, `unverifiable`, `stale-spec`, `malformed-path`, `path-unreadable`, `path-escape`, `missing-source`, `tampered`. The new `malformed-source` parallels `malformed-path` (malformation of the *source* vs. the *path*) and is a clean, distinguishable kind — no collision with existing kinds.
+   - For NUL-bearing and non-parseable source it is unambiguously honest. For dunder/`__builtins__` it is honest-in-reason (the `reason` field carries the precise escape classification) but slightly imprecise-in-kind (P3-1). The card explicitly licensed this single-kind approach.
+
+5. **Test quality — does the NUL test pin the invariant? — YES, high quality.**
+   - **Hash-matched tamper (reaches preflight, not the `tampered` branch):** `executor_hash=content_hash(nul_source)` (test:955) where `content_hash(text)=hashlib.sha256(text.encode("utf-8")).hexdigest()` (models.py:24-26), byte-identical to the runtime's `actual_hash=hashlib.sha256(source.encode()).hexdigest()` (runtime.py:264) since `\x00` round-trips through UTF-8 read/write. Verified: the tamper check passes and control reaches `_ast_preflight`.
+   - **Journal entry fields pinned:** `kind=="executor.malformed-source"`, `entry_id=="wf-001"`, `timestamp=="2024-12-25T00:00:00Z"` (test:981-984), and the journals emit exactly these via `_journal_refusal` (runtime.py:334-342). Single event pinned (`len==1`, test:982) → guards the no-double-journal invariant.
+   - **Version-robust match:** `pytest.raises(RuntimeCompError, match="null bytes")` (test:977). On 3.10 the raised message is `"Executor source for wf-001 failed preflight: source code string cannot contain null bytes"` (ValueError branch); on 3.11+ it is `"executor source is not valid Python: source code string cannot contain null bytes (...)"` (RuntimeCompError branch). Both contain "null bytes". The test also implicitly pins that no raw `ValueError`/`SyntaxError` escapes, since `pytest.raises(RuntimeCompError, ...)` would fail on a non-`RuntimeCompError`.
+   - **Negative:** `assert not any(e["kind"]=="executor.path-escape")` (test:986) confirms a NUL-in-source (not in-path) isn't misclassified as a path escape. The dunder test amendment (test:905-906) confirms the sibling preflight refusal is also now journaled.
+
+6. **Scope creep / stop-condition violation? — NONE.**
+   - **Reserved paths:** only `runtime.py` and `test_compilation_runtime.py` changed (verified via grep: no other production call sites of `_ast_preflight` or references to `executor.malformed-source`).
+   - **No new dependency:** no new imports.
+   - **No weakening** of dunder/`__builtins__` preflight refusals (the `_ast_preflight` body at runtime.py:36-58 is untouched; refusals are strictly *additively* journaled), the hash-tamper check (runtime.py:266-274 unchanged), the restricted-globals sandbox (`_make_restricted_globals` unchanged), or any existing `executor.*` refusal journalling (all pre-preflight refusal sites unchanged).
+   - **No new unjournalled skip:** the change makes preflight refusals journaled where previously they were not (3.11+ sibling branch) — strictly improves the evidence contract.
+   - **Bringing dunder/`__builtins__` under journalling** is explicitly licensed by the card ("in scope if the guard shape covers them naturally"); the guard covers them naturally via the `RuntimeCompError` branch. Not scope creep.
+
+---
+
+**Disposition:** APPROVE. No P0/P1/P2. The three P3 notes (taxonomy-naming refinement, resource-exhaustion breadth, gate-1 artifact persistence gap) are non-blocking and either explicitly deferred by the card or coordinator-process remediation items. The card's stop conditions and charter invariants (full-fidelity evidence, bounded authority, honest termination, no claim of planned capability) are preserved.

@@ -1,0 +1,54 @@
+Verification complete. Confirming the load-bearing facts I could check read-only:
+
+- **Exception hierarchy disjointness**: `RuntimeCompError(RuntimeError)` (`runtime.py:96`) — *not* a `ValueError` subclass. So `except ValueError` and `except RuntimeCompError` cannot mask each other; order is irrelevant. ✓
+- **Single call site**: `_ast_preflight` is called only at `runtime.py:295` (other matches are the definition, comments, or test references). The compiler.py `run` hit is generated executor text, unrelated. So "closes the escape class at this call site" is honest and total. ✓
+- **Structural separation**: the preflight `try` (`runtime.py:295–311`) is an earlier, independent block; the sandbox `exec` `try` begins at `~330` and wraps only `exec`+class validation. A preflight `RuntimeCompError` propagates straight out of `run()` — the sandbox `except RuntimeCompError`/`except Exception` never re-catch it → no double-journal, no masking. ✓
+- **`_journal_refusal` body** (`runtime.py:461`): appends `{kind, entry_id, actor, reason, timestamp}` with `timestamp=now`, so every test-asserted field is real. ✓
+- **Hash-matched reachability**: `content_hash = sha256(text.encode("utf-8"))` (`models.py:24`); tamper check reads `source = read_text("utf-8")` then `sha256(source.encode())`. For the test's ASCII+NUL source these match → tamper check passes → control reaches `_ast_preflight`. `read_text` does *not* raise on 0x00 (valid UTF-8) so NUL genuinely survives to the preflight site. ✓
+
+---
+
+## VERDICT: APPROVE
+
+No P0. No P1. No P2. Three P3 notes (all non-blocking; two are explicitly/out-of-scope-of-card by its own stop-conditions, one is a test-robustness observation). The guard closes the escape class at the only call site across ≥3.10, journals every preflight refusal under one kind before the exception leaves `run()`, preserves the original `RuntimeCompError` (and its cause chain) via bare `raise`, adds no dependency, touches only reserved paths, and leaves all existing refusals/sandbox/hash checks intact.
+
+### Required-point assessment
+
+**(1) Closes the escape class at this call site across ≥3.10 — YES.**
+- 3.10: `ast.parse(NUL)` raises `ValueError`; `_ast_preflight`'s `except SyntaxError` (`runtime.py:42-43`) does not catch it → propagates to the new `except ValueError` (`runtime.py:296-302`) → journals `executor.malformed-source` → `raise RuntimeCompError(...) from exc`. No raw ValueError leaves `run()`. ✓
+- 3.11/3.12: `ast.parse(NUL)` raises `SyntaxError` → re-normalized to `RuntimeCompError` inside `_ast_preflight` (`runtime.py:42-43`) → caught by new `except RuntimeCompError` (`runtime.py:303-311`) → journal → bare `raise`. No silent (unjournalled) refusal. ✓
+- Branches are mutually exclusive because `RuntimeCompError` subclasses `RuntimeError`, not `ValueError`. ✓
+
+**(2) Can any preflight or sandbox failure now skip journalling — NO (within the card's contracted exception families).**
+- Preflight: every `ValueError`/`RuntimeCompError` from `_ast_preflight` is journaled before leaving `run()`. Sandbox exec try/except is untouched by the diff; no regression. ✓
+- *See P3-2*: a `RecursionError`/`MemoryError` from `ast.parse` on pathological input is not caught by either branch — but that is pre-existing (the inner `except SyntaxError` never covered it either), explicitly excluded by the card's stop-condition ("no rewriting preflight detection logic"), and out of the contracted ValueError-escape scope.
+
+**(3) Does the `RuntimeCompError` re-raise branch double-journal or mask anything — NO.**
+- `_ast_preflight` is a module-level function with no `self.provenance` access → it cannot journal, so there is no second journal event. The read guard catches `(OSError, ValueError)` but `read_text` on a 0x00 byte decodes successfully, so it does not fire on NUL-in-content (precisely why the preflight is the last line). The preflight `try` is structurally upstream of the sandbox `try`, so the sandbox `except RuntimeCompError`/`except Exception` (`runtime.py:344+`) never observe a preflight refusal. Exactly one `executor.malformed-source` event per refusal.
+- No masking: the `except ValueError` branch raises `… from exc` (cause chained); the `except RuntimeCompError` branch uses bare `raise`, re-raising the identical object with its specific message (e.g. "forbidden dunder access: …") and its existing `from SyntaxError` chain intact.
+
+**(4) Is `executor.malformed-source` an honest kind vs. the existing taxonomy — PARTIALLY (non-blocking).** See P3-1.
+
+**(5) Test quality — STRONG.** `test_runtime_nul_bearing_source_is_journalled` (`test_compilation_runtime.py:906-992`) pins the invariant correctly: hash-matched tamper (`executor_hash=content_hash(nul_source)` matches the utf-8-read sha256, so control reaches `_ast_preflight`); journal fields (`kind`, exactly one event, `entry_id=="wf-001"`, `timestamp` equals the injected `now="2024-12-25T00:00:00Z"`); negative assertion that no `executor.path-escape` fires (NUL is in *source*, not *path*); version-robust `match="null bytes"` (true on both the 3.10 ValueError path and the 3.11+ SyntaxError path). The extended `test_runtime_ast_preflight_rejects_dunder_escape` additionally asserts the journal event, exercising the `except RuntimeCompError` branch. ✓
+
+**(6) Scope creep / stop-condition violation — NONE.** Only `runtime.py` preflight call site and `test_compilation_runtime.py` changed (reserved paths). No new imports. `_ast_preflight` detection logic unchanged (only wrapped). `doctor.py`, `ord(ch) < 32` breadth, restricted-globals sandbox, hash-tamper check, and all existing `executor.*` journalling untouched. Bringing the dunder/`__builtins__`/SyntaxError refusals under journalling is explicitly authorized by the card ("…if the guard shape covers them naturally"). No weakening: dunder/`__builtins__` refusals still raise `RuntimeCompError` with their original messages (bare `raise`). ✓
+
+### Findings
+
+**P3-1 — `executor.malformed-source` is a mild taxonomy downgrade for the escape-class species.**
+- Evidence: `runtime.py:297` and `runtime.py:306` journal *all* preflight species — NUL/`SyntaxError` parse failures *and* forbidden-dunder / `__builtins__` refusals — under one kind. `_ast_preflight` (`runtime.py:27-33`) frames the dunder/`__builtins__` refusals as the `().__class__.__bases__[0].__subclasses__()` *escape class*. The codebase itself warns (`runtime.py:205-208`) that collapsing a security-relevant refusal into a broader kind "would record a mere read failure as an escape attempt, corrupting the evidence taxonomy for any consumer that buckets by kind."
+- Failure scenario: a downstream evidence consumer that buckets by `kind` and treats `executor.malformed-source` as "input defect, non-security" under-weights a genuine sandbox-escape attempt, because the escape and the parse failure share a kind.
+- Mitigants (why P3, not blocking): the exact species is fully preserved in the event `reason` (`runtime.py:461-469`), so full-fidelity-evidence and controlled-attribution invariants hold; the refusal is enforced; the change is strictly *additive* (prior state: zero journal events for dunder/`__builtins__` refusals — a *worse* attribution gap than any relabelling here); and `executor.path-escape` is host-boundary-specific (no existing source-namespace escape kind to map onto). The card explicitly authorized unifying these species under one journalled kind.
+- Recommendation (follow-up, not this card): consider a dedicated escape kind for the dunder/`__builtins__` species (e.g. `executor.dunder-escape`, `executor.builtins-access`) or a uniformly neutral `executor.preflight-refusal`, retaining `executor.malformed-source` for the parse-failure species. A maintainer who weights kind-bucketing consumers heavily may elevate this to a P2 follow-up; it does not block integration.
+
+**P3-2 — `ast.parse` non-ValueError/non-SyntaxError failures remain unjournalled at the preflight site.**
+- Evidence: `runtime.py:295-311` catches only `ValueError` and `RuntimeCompError`. A `RecursionError` (deeply nested source) or `MemoryError` from `ast.parse` inside `_ast_preflight` (`runtime.py:42`) escapes `run()` raw and unjournalled.
+- Failure scenario: a tampered hash-matched executor carrying pathologically nested source triggers `RecursionError` in `ast.parse` → escapes unjournalled (same contract class as the targeted gap).
+- Why P3 / non-blocking: pre-existing (the inner `except SyntaxError` never covered these either), explicitly out of the card's stated scope ("Reachable only via… NUL-bearing source… ValueError"), and the card's stop-conditions forbid "rewriting preflight detection logic." Noting only; the card's contracted escape (raw ValueError on NUL, ≥3.10) is closed.
+
+**P3-3 — New NUL test writes the executor file without an explicit encoding.**
+- Evidence: `test_compilation_runtime.py:951` `exec_path.write_text(nul_source)` (locale-dependent default), whereas the sibling dunder test uses `content_hash(exec_path.read_text())` (`test_compilation_runtime.py:884`, encoding-robust). `content_hash` (`models.py:24`) and the runtime's `actual_hash` (`runtime.py:266-268`) both hash the *utf-8 decoded* source, so the hash match relies on a write/read round-trip.
+- Failure scenario: for non-ASCII test sources on a non-UTF-8 locale, `write_text` and `read_text("utf-8")` could disagree, silently failing the tamper check before the preflight is reached.
+- Why P3 / non-blocking: the chosen source is pure ASCII + NUL (0x00), which round-trips identically under every ASCII-superset codec, so the hash matches on the measured 3.10/3.11/3.12 venvs and the test pins the invariant as intended. Latent fragility only; recommend `write_text(nul_source, encoding="utf-8")` for hygiene.
+
+No P0, P1, or P2 findings. The diff satisfies the card's acceptance criteria and the charter's full-fidelity-evidence, normalization, and bounded-authority contracts at the contracted call site.

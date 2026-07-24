@@ -1,0 +1,191 @@
+BEHAVIORAL VERIFICATION REPORT — TASK-20260724-020 (meta-harness / selflearn)
+Seat: behavioral verification (independent of builder)
+Scratch dir: /private/tmp/behav-verify-t020
+Source under test: /private/tmp/behav-verify-t020/selflearn (copy of
+  /private/tmp/meta-harness-t020/selflearn @ head 811ef42)
+File under test: selflearn/src/selflearn/compilation/runtime.py,
+  ExecutorRuntime.run(), the try/except wrapping _ast_preflight(source)
+  (lines ~294-309 in the head-811ef42 copy).
+
+INTERPRETERS
+- .venv   (py3.12): CPython 3.12.13 (main, May 10 2026, 19:20:41) [Clang 22.1.3]
+- .venv310 (py3.10): CPython 3.10.20 (main, May 10 2026, 19:20:50) [Clang 22.1.3]
+Both created with `uv venv [-p 3.10]` and `uv pip install -e ./selflearn -p .venv*/bin/python`.
+
+METHOD
+All probes are standalone scripts (probe1..5) driving the real
+ExecutorRegistry / ExecutorRuntime / PackStore API directly (modeled on,
+but not copied from / re-run as, tests/test_compilation_runtime.py). Each
+probe constructs a real PackStore + CandidateEntry + ExecutorRecord with a
+matching spec_hash, registers it ACTIVE, and calls runtime.run(). No
+mocking of _ast_preflight, hashlib, or ast.parse — genuine execution
+throughout.
+
+===============================================================================
+PROBE 1 — POSITIVE CONTROL
+===============================================================================
+Legitimate executor source, matching hash, both interpreters.
+
+py3.12: status=completed, malformed-source events=0,
+        event kinds=['runtime.start', 'runtime.finish']
+py3.10: status=completed, malformed-source events=0,
+        event kinds=['runtime.start', 'runtime.finish']
+
+VERDICT: PASS (both interpreters). No spurious executor.malformed-source
+event; run proceeds normally through exec/run_fn to completion.
+
+===============================================================================
+PROBE 2 — NUL ESCAPE (hash-matched tamper reaching preflight)
+===============================================================================
+Executor source = "def run(handler):\n    x = '\x00'\n    return
+{'completed': []}\n"; executor_hash computed over these exact (tampered)
+bytes so the executor.tampered guard passes and control reaches
+_ast_preflight.
+
+py3.12 (SyntaxError branch inside _ast_preflight):
+  exception type   = RuntimeCompError
+  exception message = "executor source is not valid Python: source code
+                        string cannot contain null bytes ..."
+  journal events    = exactly 1, kind='executor.malformed-source',
+                       entry_id='wf-001', timestamp='2024-06-01T12:00:00Z'
+                       (matches the injected `now`), reason mirrors the
+                       exception text.
+  other event kinds present: none (no executor.path-escape / tampered
+                       pollution)
+
+py3.10 (raw ValueError branch, the original defect surface):
+  exception type   = RuntimeCompError
+  exception message = "Executor source for wf-001 failed preflight: source
+                        code string cannot contain null bytes"
+  journal events    = exactly 1, kind='executor.malformed-source',
+                       entry_id='wf-001', timestamp='2024-06-01T12:00:00Z'
+
+VERDICT: PASS on both interpreters. In neither case does a raw ValueError
+or raw SyntaxError escape run(); in both cases exactly one
+executor.malformed-source event is recorded carrying the correct entry_id
+and the run's injected `now` as its timestamp — confirming both branches
+of the "META-17 F1 dual-branch guard" claim (3.10's raw ValueError from
+ast.parse, and 3.11+'s SyntaxError normalized inside _ast_preflight) are
+now journalled by the outer try/except in run().
+
+===============================================================================
+PROBE 3 — DEFECT REPRODUCTION (guard reverted, scratch copy only)
+===============================================================================
+Action: replaced the try/except wrapping _ast_preflight(source) in
+/private/tmp/behav-verify-t020/selflearn/src/selflearn/compilation/runtime.py
+with a bare `_ast_preflight(source)` call (backed up first to
+runtime.py.orig.bak, md5 9f6dc880c60d70ae743150401146dcfd). Re-ran probe 2
+unmodified.
+
+py3.10 (reverted guard) — the original defect, reproduced:
+  exception type    = ValueError               <- RAW, not RuntimeCompError
+  exception message = "source code string cannot contain null bytes"
+  journal events     = 0 (empty list)
+
+py3.12 (reverted guard) — bonus corroboration of the docstring's claim
+  that 3.11+ normalizes-but-doesn't-journal:
+  exception type    = RuntimeCompError (normalized INSIDE _ast_preflight's
+                       own except SyntaxError branch, independent of the
+                       outer wrapper)
+  exception message = "executor source is not valid Python: source code
+                        string cannot contain null bytes"
+  journal events     = 0 (empty list)          <- unjournalled
+
+Restoration: file restored via `cp runtime.py.orig.bak runtime.py`; `diff`
+against the backup returned exit 0 (byte-identical); md5 after restore =
+9f6dc880c60d70ae743150401146dcfd (matches backup exactly).
+
+VERDICT: PASS. With the guard removed, a raw ValueError escapes run() on
+3.10 with zero journal events — reproducing the original defect exactly
+as claimed, and confirming the guard (present in the head-811ef42 code) is
+load-bearing, not incidental. The 3.12 side additionally confirms the
+claim's finer point: even pre-fix, 3.11+ never leaked a raw ValueError
+(ast.parse raises SyntaxError there, and _ast_preflight's own internal
+except SyntaxError already normalized it) — the fix's necessity is
+specifically the journalling gap plus the 3.10 raw-ValueError leak, not a
+missing normalization on newer interpreters. Scratch copy confirmed
+restored to original state before proceeding.
+
+===============================================================================
+PROBE 4 — RETAINED GUARDS still fail closed (post-fix code, both interpreters)
+===============================================================================
+4a. Hash-MISmatched tamper (hash recorded against original bytes, file
+    overwritten afterward with different content):
+  py3.12: exception=RuntimeCompError "Executor for wf-001 has been
+          tampered with"; events=['executor.tampered'] (1 event);
+          malformed-source events=0.
+  py3.10: identical exception type/message; events=['executor.tampered']
+          (1 event); malformed-source events=0.
+  -> Confirms tamper detection still fires and fires BEFORE preflight
+     (control never reaches _ast_preflight on a genuine hash mismatch).
+
+4b. Dunder-bearing source (`x.__class__` attribute access), hash matching
+    the actual (untampered-post-write) bytes:
+  py3.12: exception=RuntimeCompError "executor source contains forbidden
+          dunder access: __class__"; malformed-source events=1, event
+          reason mentions "__class__"; message mentions the dunder.
+  py3.10: identical exception type/message; malformed-source events=1.
+
+VERDICT: PASS on both sub-probes, both interpreters. executor.tampered
+still refuses before preflight is ever reached, and the dunder-escape
+guard still journals executor.malformed-source and raises RuntimeCompError
+naming the offending dunder, unchanged by the NUL-escape fix.
+
+===============================================================================
+PROBE 5 — SANDBOX UNTOUCHED (no new exposure)
+===============================================================================
+Executor source calls `open('/etc/passwd')` inside run(); passes
+_ast_preflight untouched (open is a Name, not an Attribute/dunder/
+__builtins__ reference, so preflight does not reject it — this is
+unchanged, expected behavior) and is exec'd; the actual NameError occurs
+only when run_fn(step_handler) is invoked and the sandboxed globals lack
+`open` in their restricted __builtins__.
+
+py3.12: result.status='error', outcomes=(), malformed-source events=0,
+        events=['runtime.start', 'runtime.handler-error', 'runtime.finish']
+        (NameError caught by the generic `except Exception` around
+        run_fn(step_handler) and normalized into a RunResult rather than
+        raised — same as pre-existing F2-6 behavior).
+py3.10: identical status/events.
+
+VERDICT: PASS on both interpreters. `open` never succeeds (file is never
+actually opened — a NameError fires before the call resolves), the
+sandbox's restricted-builtins whitelist is unchanged by this fix, and the
+failure is normalized into RunResult(status="error") exactly as it was
+pre-fix. No new exposure introduced by the malformed-source change.
+
+===============================================================================
+SUMMARY TABLE
+===============================================================================
+Probe                                   py3.12          py3.10
+1  Positive control                     PASS            PASS
+2  NUL escape (hash-matched tamper)     PASS            PASS
+3  Defect reproduction (guard reverted) PASS (repro'd)  PASS (repro'd)
+4a Hash-mismatch tamper still guarded   PASS            PASS
+4b Dunder escape still guarded          PASS            PASS
+5  Sandbox whitelist unchanged          PASS            PASS
+
+OVERALL: PASS — all 6 probe conditions confirmed on both interpreters.
+The claim under test is verified by direct execution: ExecutorRuntime.run()
+in the head-811ef42 scratch copy wraps _ast_preflight(source) such that
+every preflight failure (ValueError on 3.10, SyntaxError-normalized-to-
+RuntimeCompError on 3.12, and the pre-existing forbidden-dunder /
+__builtins__ RuntimeCompError cases) is journalled exactly once as
+executor.malformed-source carrying the correct entry_id and the run's
+injected `now`, then re-raised/raised as RuntimeCompError — never a raw
+ValueError or SyntaxError. Reverting the guard on the 3.10 venv reproduces
+the original raw-ValueError, zero-journal defect exactly, proving the
+guard is load-bearing. All previously-existing guards (hash tamper,
+dunder escape, sandbox builtins whitelist) remain intact and unaffected.
+
+ANOMALIES: None observed. The scratch-copy runtime.py was verified
+byte-identical (diff exit 0, md5 9f6dc880c60d70ae743150401146dcfd) to its
+pre-probe-3 backup after restoration.
+
+ARTIFACTS (all under /private/tmp/behav-verify-t020, read/write scoped to
+this scratch dir only; /private/tmp/meta-harness-t020 and the real repo
+were never touched):
+  probe_common.py, probe1_positive_control.py, probe2_nul_escape.py,
+  probe4_retained_guards.py, probe5_sandbox_untouched.py,
+  runtime.py.orig.bak (pre-probe-3 backup, kept for audit),
+  selflearn/  (copy of source under test, .venv and .venv310 venvs)
