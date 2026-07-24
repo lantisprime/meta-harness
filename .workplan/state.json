@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 126,
+  "revision": 128,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3710,8 +3710,8 @@
     {
       "id": "TASK-20260724-021",
       "title": "Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity",
-      "status": "ready",
-      "owner": "",
+      "status": "in_progress",
+      "owner": "claude:charltons-mbp.home.lan:t021-build-20260724",
       "paths": [
         "scripts/workplan.mjs",
         "scripts/workplan.test.mjs",
@@ -3768,8 +3768,57 @@
           "revisionFrom": 125,
           "revisionTo": 126,
           "at": "2026-07-24T06:53:45.349Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:t021-build-20260724",
+          "revisionFrom": 126,
+          "revisionTo": 127,
+          "at": "2026-07-24T07:09:44.451Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:t021-build-20260724",
+          "revisionFrom": 127,
+          "revisionTo": 128,
+          "at": "2026-07-24T07:09:44.527Z"
         }
-      ]
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:t021-build-20260724",
+        "definitionHash": "sha256:0cdf3794a98fa78b8be564cfecbda32f49fb38da6036a937dadf8d168c1e566d",
+        "sourceRevision": "git:b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3;trace:TASK-20260724-021;linear:META-30;decided-by:user-2026-07-24-generic-pi-namespace",
+        "worktreePath": "/private/tmp/meta-harness-t021",
+        "branch": "dev/t021-pi-owner-namespace",
+        "baseCommit": "b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3",
+        "currentHead": "b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3",
+        "paths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs",
+          "development/remote_workplan/gateway.py",
+          "tests/development/test_remote_workplan_gateway.py",
+          "AGENTS.md"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Add a generic `pi` owner namespace to the workplan control root so pi-driven open-weights seats (GLM, Kimi, MiniMax via the pi CLI) can claim and own cards under their real identity instead of presenting a false codex/claude identity, which the append-only ledger honesty rules forbid (META-30; user decision 2026-07-24: generic `pi`, NOT per-provider namespaces — provider identity stays visible via the session segment of the pi:<host>:<session> owner string). Exactly three enforcement points plus one documentation point: (1) the claim owner regex in parseClaimOwner (scripts/workplan.mjs:192, currently ^(codex|claude):([^:]+):([^:]+)$) — extend to accept pi, and update the rejection message at :194 to name pi; (2) the allowedOwnerNamespaces whitelist in validateDefinition (scripts/workplan.mjs:1177 [\"codex\",\"claude\"].includes(ns), error at :1183) — include pi and update the error text; (3) the remote gateway qualify-time namespace set in _validate_definition_contract (development/remote_workplan/gateway.py:235, currently {codex, claude, dev-orchestrator}) — add pi; the gateway's claim/reassign/revalidate owner_namespace_denied checks (:501-503, :713-714, :738-739) are generic per-card subset checks and need no enum change, only test coverage. (4) Add a `pi` lane label to the AGENTS.md:38 lane-label tuple and the :27 seat framing, disambiguating from the existing 'Pi/NeuralWatt GLM-5.2' reviewer-seat usage in AGENTS.md:47-79. Regression tests required in scripts/workplan.test.mjs (following existing conventions: a piOwner(session) helper alongside codexOwner/claudeOwner at :135-141; models at :2543-2585 disallowed-namespace claim, :2962-2989 and :3409-3445 claim-next eligibility) and in tests/development/test_remote_workplan_gateway.py (model at :319-337; also add the previously missing qualify-time negative case for an out-of-set namespace at gateway.py:236), proving: pi:<host>:<session> owners are accepted at claim/start/submit and by the gateway where a card's allowedOwnerNamespaces includes pi; pi owners are still rejected where a card's frozen namespaces exclude pi; unknown namespaces remain rejected everywhere; existing codex/claude behavior is unchanged. Cards already Ready keep their frozen namespaces. Scope is exactly the five reserved paths; no receipt hash-chaining work (that is TASK-20260724-019), no new CLI subcommands, no provider-specific namespaces, no changes to the coordinator: owner regexes (workplan.mjs:169,207; gateway.py:493-494,696-697), and no changes to claim-next ordering or any other workplan semantics.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t021 && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+          "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t021 diff --check b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3"
+        ],
+        "nextCheckpoint": "A pi:<host>:<session> owner can claim, start, and submit a card whose frozen allowedOwnerNamespaces includes pi, at the CLI and through the remote gateway, with receipts recording the pi identity verbatim; a pi owner is still rejected on cards whose frozen namespaces exclude pi and unknown namespaces are still rejected everywhere; all existing suites stay green; and a real pi seat has demonstrated the full claim-start-submit lifecycle plus the negative case against a disposable control root with the transcript preserved under .review-store/.",
+        "revisionFrom": 126,
+        "revisionTo": 127,
+        "at": "2026-07-24T07:09:44.451Z"
+      }
     }
   ]
 }
