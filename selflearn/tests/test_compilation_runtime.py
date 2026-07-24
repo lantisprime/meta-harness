@@ -943,7 +943,7 @@ def test_runtime_nul_bearing_source_is_journalled():
         # SyntaxError on newer ones (observed 3.11.15, 3.12.13); both are now
         # journalled and normalized by the wrapping guard.
         nul_source = "def run(handler):\n    x = '\x00'\n    return {'completed': []}\n"
-        exec_path.write_text(nul_source)
+        exec_path.write_text(nul_source, encoding="utf-8")
 
         record = ExecutorRecord(
             record_id="",
