@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 110,
+  "revision": 116,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2808,16 +2808,9 @@
     {
       "id": "TASK-20260723-017",
       "title": "compile learned selflearn workflow entries to cross-validated executors",
-      "status": "verifying",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
-      "paths": [
-        "selflearn/src/selflearn/compilation",
-        "selflearn/src/selflearn/doctor.py",
-        "selflearn/src/selflearn/__init__.py",
-        "selflearn/tests/test_compilation.py",
-        "selflearn/tests/test_compilation_gate.py",
-        "selflearn/tests/test_compilation_runtime.py"
-      ],
+      "paths": [],
       "priority": 1,
       "trace": "Linear META-17; charter stages 4-5 (governed learning to reusable procedural knowledge); workflow entry remains the verified spec, executor is a derived artifact; evaluator non-self-approval, bounded authority, reversible lineage, honest termination; H/E/W frozen. CARD RECONSTRUCTED 2026-07-23 after control-root data loss (see evidence episode); definition hash verified byte-identical to the frozen dispatch value.",
       "evidence": [
@@ -3066,6 +3059,45 @@
             "reviewHead": "5d2fb52117a53618a0a8fb172efdff4b064a6370",
             "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d"
           }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+          "revisionFrom": 115,
+          "revisionTo": 116,
+          "at": "2026-07-24T00:37:24.922Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+            "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+            "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+            "commands": [
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+              "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+            ],
+            "evidenceRefs": [
+              "git:integration:26d735d2773e13ddce367245be0d7e91c691f64d",
+              "git:review-head:5d2fb52117a53618a0a8fb172efdff4b064a6370",
+              "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+              "github:pull/55:merged",
+              "github-actions:run/30017143446:pass",
+              "pytest:compilation-trio:114-passed",
+              "pytest:selflearn:338-passed:1-skipped",
+              "pytest:root:1771-passed:1-skipped:2-xfailed",
+              "node-test:workplan:117-passed:0-failed",
+              "git-diff-check:clean",
+              "review:.review-store/meta17-glm-gate-review-5d2fb52.txt:sha256:30c8e8391b02d2385043eb4e5a65eef2b0fa2a8e09f6c8449958198ca877a0b1:glm-5.2-approve-with-mod-no-p0-no-p1",
+              "frozen-diff:sha256:b76da4c6305caa3cba2317001f1ac33921a1e24cf054901507848ec4d4f00694",
+              "interpreter-note:frozen-venv-/private/tmp/meta-harness-meta-17/.venv-authoritative-differs-from-dev-venv",
+              "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+            ],
+            "receiptHash": "sha256:a329afdca79144d35af45d2077f35fab54efa39b374444b0c51561098d6e1da6"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3119,17 +3151,65 @@
         "revisionFrom": 102,
         "revisionTo": 103,
         "at": "2026-07-23T14:46:28.499Z"
+      },
+      "releasedPaths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/src/selflearn/doctor.py",
+        "selflearn/src/selflearn/__init__.py",
+        "selflearn/tests/test_compilation.py",
+        "selflearn/tests/test_compilation_gate.py",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+        "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+        "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+        "commands": [
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+        ],
+        "evidenceRefs": [
+          "git:integration:26d735d2773e13ddce367245be0d7e91c691f64d",
+          "git:review-head:5d2fb52117a53618a0a8fb172efdff4b064a6370",
+          "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+          "github:pull/55:merged",
+          "github-actions:run/30017143446:pass",
+          "pytest:compilation-trio:114-passed",
+          "pytest:selflearn:338-passed:1-skipped",
+          "pytest:root:1771-passed:1-skipped:2-xfailed",
+          "node-test:workplan:117-passed:0-failed",
+          "git-diff-check:clean",
+          "review:.review-store/meta17-glm-gate-review-5d2fb52.txt:sha256:30c8e8391b02d2385043eb4e5a65eef2b0fa2a8e09f6c8449958198ca877a0b1:glm-5.2-approve-with-mod-no-p0-no-p1",
+          "frozen-diff:sha256:b76da4c6305caa3cba2317001f1ac33921a1e24cf054901507848ec4d4f00694",
+          "interpreter-note:frozen-venv-/private/tmp/meta-harness-meta-17/.venv-authoritative-differs-from-dev-venv",
+          "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+        ],
+        "receiptHash": "sha256:a329afdca79144d35af45d2077f35fab54efa39b374444b0c51561098d6e1da6",
+        "actor": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+        "releasedPaths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/src/selflearn/doctor.py",
+          "selflearn/src/selflearn/__init__.py",
+          "selflearn/tests/test_compilation.py",
+          "selflearn/tests/test_compilation_gate.py",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "revisionFrom": 115,
+        "revisionTo": 116,
+        "at": "2026-07-24T00:37:24.922Z"
       }
     },
     {
       "id": "TASK-20260724-018",
       "title": "Repair validateIntegrationReceipt so a card integrated before another card's board transition can still be accepted, while still rejecting an integrationReceipt ahead of the board",
-      "status": "review",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
-      "paths": [
-        "scripts/workplan.mjs",
-        "scripts/workplan.test.mjs"
-      ],
+      "paths": [],
       "priority": 1,
       "trace": "Discovered during META-17/META-8 acceptance 2026-07-24: global-revision equality strands any card whose accept does not immediately follow its own integrate; TASK-20260723-017 is currently unacceptable by any legal transition",
       "evidence": [
@@ -3213,6 +3293,90 @@
             "branch": "fix/workplan-integration-receipt-revision",
             "head": "84734f8d1f30d34e954f7603176b4bc8df74e261"
           }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 110,
+          "revisionTo": 111,
+          "at": "2026-07-24T00:36:41.497Z",
+          "evidence": {
+            "reason": "Re-freeze required: reviewFreeze named 84734f8 but the GLM P3-2/P3-3 fix round 249a826 also merged; re-submitting at the actually-reviewed final head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 111,
+          "revisionTo": 112,
+          "at": "2026-07-24T00:36:41.569Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Re-freeze required: reviewFreeze named 84734f8 but the GLM P3-2/P3-3 fix round 249a826 also merged; re-submitting at the actually-reviewed final head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 112,
+          "revisionTo": 113,
+          "at": "2026-07-24T00:36:41.655Z",
+          "evidence": {
+            "branch": "fix/workplan-integration-receipt-revision",
+            "head": "249a8263ccd9508eb9b7fa73962be510d90d00dc"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+          "revisionFrom": 113,
+          "revisionTo": 114,
+          "at": "2026-07-24T00:36:49.639Z",
+          "evidence": {
+            "reviewBranch": "fix/workplan-integration-receipt-revision",
+            "reviewHead": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+            "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+          "revisionFrom": 114,
+          "revisionTo": 115,
+          "at": "2026-07-24T00:37:16.084Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+            "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+            "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+            "commands": [
+              "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+              "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+              "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+            ],
+            "evidenceRefs": [
+              "git:integration:2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+              "git:review-head:249a8263ccd9508eb9b7fa73962be510d90d00dc",
+              "github:pull/63:merged",
+              "node-test:workplan:121-passed:0-failed",
+              "pytest:root:1837-passed:2-xfailed",
+              "git-diff-check:clean",
+              "review:.review-store/wpfix-glm-gate-review-84734f8.txt:sha256:75262c2c3394cc10d9157e5c1f7ade4cf9b1b97f59e8475390d90b57b90a6b21:glm-5.2-approve-no-p0-p1",
+              "review:.review-store/wpfix-glm-gate-review-249a826.txt:sha256:4f0e0adcea55b03f18f6f84eb516c60b95ddabc479e0f485aeec7d1edb2f5882:glm-5.2-approve-no-p0-p1-p2",
+              "review:.review-store/wpfix-codex-review-249a826.txt:sha256:ca89b1b678e3f04d254dc33c1937f825e33c450e0b8df903f60807c8a9cf86f9:codex-approve-1-p3",
+              "behavioral-verify:.review-store/wpfix-behavioral-verify-249a826.txt:sha256:0bef7bb490105103a3146fae2ac2f95658c59dfbb96b38b79a03a35557ee646c:6-of-6-pass-real-cli",
+              "deferred-p3:glm-p3-1-ledger-hash-chain,codex-p3-resume-coverage,glm-p3-c-comment-scope"
+            ],
+            "receiptHash": "sha256:7342ae0f176640984d22dfc8acebf504b3579e55d95908e2ef20c1287b18e93b"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3246,10 +3410,58 @@
       },
       "reviewFreeze": {
         "branch": "fix/workplan-integration-receipt-revision",
-        "head": "84734f8d1f30d34e954f7603176b4bc8df74e261",
-        "revisionFrom": 109,
-        "revisionTo": 110,
-        "at": "2026-07-23T23:53:33.837Z"
+        "head": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+        "revisionFrom": 112,
+        "revisionTo": 113,
+        "at": "2026-07-24T00:36:41.655Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "reviewBranch": "fix/workplan-integration-receipt-revision",
+        "reviewHead": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+        "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "revisionFrom": 113,
+        "revisionTo": 114,
+        "at": "2026-07-24T00:36:49.639Z"
+      },
+      "releasedPaths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+        "commands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "evidenceRefs": [
+          "git:integration:2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+          "git:review-head:249a8263ccd9508eb9b7fa73962be510d90d00dc",
+          "github:pull/63:merged",
+          "node-test:workplan:121-passed:0-failed",
+          "pytest:root:1837-passed:2-xfailed",
+          "git-diff-check:clean",
+          "review:.review-store/wpfix-glm-gate-review-84734f8.txt:sha256:75262c2c3394cc10d9157e5c1f7ade4cf9b1b97f59e8475390d90b57b90a6b21:glm-5.2-approve-no-p0-p1",
+          "review:.review-store/wpfix-glm-gate-review-249a826.txt:sha256:4f0e0adcea55b03f18f6f84eb516c60b95ddabc479e0f485aeec7d1edb2f5882:glm-5.2-approve-no-p0-p1-p2",
+          "review:.review-store/wpfix-codex-review-249a826.txt:sha256:ca89b1b678e3f04d254dc33c1937f825e33c450e0b8df903f60807c8a9cf86f9:codex-approve-1-p3",
+          "behavioral-verify:.review-store/wpfix-behavioral-verify-249a826.txt:sha256:0bef7bb490105103a3146fae2ac2f95658c59dfbb96b38b79a03a35557ee646c:6-of-6-pass-real-cli",
+          "deferred-p3:glm-p3-1-ledger-hash-chain,codex-p3-resume-coverage,glm-p3-c-comment-scope"
+        ],
+        "receiptHash": "sha256:7342ae0f176640984d22dfc8acebf504b3579e55d95908e2ef20c1287b18e93b",
+        "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "revisionFrom": 114,
+        "revisionTo": 115,
+        "at": "2026-07-24T00:37:16.084Z"
       }
     }
   ]

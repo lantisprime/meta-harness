@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+  "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+  "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+  "commands": [
+    "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+    "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+    "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+  ],
+  "evidenceRefs": [
+    "git:integration:2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+    "git:review-head:249a8263ccd9508eb9b7fa73962be510d90d00dc",
+    "github:pull/63:merged",
+    "node-test:workplan:121-passed:0-failed",
+    "pytest:root:1837-passed:2-xfailed",
+    "git-diff-check:clean",
+    "review:.review-store/wpfix-glm-gate-review-84734f8.txt:sha256:75262c2c3394cc10d9157e5c1f7ade4cf9b1b97f59e8475390d90b57b90a6b21:glm-5.2-approve-no-p0-p1",
+    "review:.review-store/wpfix-glm-gate-review-249a826.txt:sha256:4f0e0adcea55b03f18f6f84eb516c60b95ddabc479e0f485aeec7d1edb2f5882:glm-5.2-approve-no-p0-p1-p2",
+    "review:.review-store/wpfix-codex-review-249a826.txt:sha256:ca89b1b678e3f04d254dc33c1937f825e33c450e0b8df903f60807c8a9cf86f9:codex-approve-1-p3",
+    "behavioral-verify:.review-store/wpfix-behavioral-verify-249a826.txt:sha256:0bef7bb490105103a3146fae2ac2f95658c59dfbb96b38b79a03a35557ee646c:6-of-6-pass-real-cli",
+    "deferred-p3:glm-p3-1-ledger-hash-chain,codex-p3-resume-coverage,glm-p3-c-comment-scope"
+  ],
+  "receiptHash": "sha256:7342ae0f176640984d22dfc8acebf504b3579e55d95908e2ef20c1287b18e93b"
+}
