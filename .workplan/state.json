@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 130,
+  "revision": 131,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3710,15 +3710,9 @@
     {
       "id": "TASK-20260724-021",
       "title": "Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity",
-      "status": "verifying",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:t021-build-20260724",
-      "paths": [
-        "scripts/workplan.mjs",
-        "scripts/workplan.test.mjs",
-        "development/remote_workplan/gateway.py",
-        "tests/development/test_remote_workplan_gateway.py",
-        "AGENTS.md"
-      ],
+      "paths": [],
       "priority": 4,
       "trace": "User decision 2026-07-24: generic pi namespace (not per-provider). The control root hard-codes claimable owner namespaces to codex|claude: the claim owner regex (workplan.mjs:192), the allowedOwnerNamespaces whitelist (workplan.mjs:1177,1183), and the remote gateway set {codex,claude,dev-orchestrator} (development/remote_workplan/gateway.py:235). A pi seat can execute the claim CLI but can only present a false codex/claude identity, which the append-only ledger honesty rules forbid. Add pi to all three enforcement points plus regression tests, and add a pi lane label to AGENTS.md:38. Provider identity stays visible via the session segment of pi:<host>:<session> naming convention. Cards already Ready keep their frozen namespaces (t020 remains claude-only).",
       "next": [
@@ -3809,6 +3803,44 @@
             "reviewHead": "4b6551a351273d0da1ecedcf995e2d273dc36fe9",
             "integrationCommit": "f081fb21d82672b89c7af4f4efa953267d7bc4a2"
           }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:t021-closeout-20260724",
+          "revisionFrom": 130,
+          "revisionTo": 131,
+          "at": "2026-07-24T08:03:02.108Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:t021-closeout-20260724",
+            "definitionHash": "sha256:0cdf3794a98fa78b8be564cfecbda32f49fb38da6036a937dadf8d168c1e566d",
+            "integrationCommit": "f081fb21d82672b89c7af4f4efa953267d7bc4a2",
+            "commands": [
+              "cd /private/tmp/meta-harness-t021 && node --test scripts/workplan.test.mjs",
+              "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+              "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+              "git -C /private/tmp/meta-harness-t021 diff --check b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3"
+            ],
+            "evidenceRefs": [
+              "git:integration:f081fb21d82672b89c7af4f4efa953267d7bc4a2",
+              "git:review-head:4b6551a351273d0da1ecedcf995e2d273dc36fe9",
+              "github:pull/67:merged",
+              "node-test:workplan:128-pass-0-fail",
+              "pytest:gateway:28-passed",
+              "pytest:root:1777-passed:1-skipped:2-xfailed",
+              "git-diff-check:clean",
+              "review:.review-store/t021-glm-gate-review-a64a176.txt:sha256:39be453e5dba36d114b61afd12f5c61f4e947b3deb41bd9bf7c244e7cce5baf3:glm-5.2-approve-no-p0-p1-p2-4-p3",
+              "review:.review-store/t021-glm-gate-review-4b6551a.txt:sha256:e3ce135aa37b98797c8fddaf5823be1bcc72d87293f572cd339914ce9d2a1222:glm-5.2-approve-r2-integrate",
+              "review:.review-store/t021-kimi-review-a64a176.txt:sha256:a575bdefc5974d39e85a8dfe7336627aa53685e40345405f7a8f2ce6ceeb1457:kimi-k2.7-approve-zero-findings",
+              "review:.review-store/t021-codex-review-a64a176.txt:sha256:0f0932c34b31dec8f3d887e75460d3be40cd45239edee88a40ceb4e164bb373e:codex-p1-revalidate-coverage",
+              "review:.review-store/t021-codex-p1-confirm-4b6551a.txt:sha256:f8397cf529729cae38f7e7541953a9271cba4ad7a0c90efdbd59ab1512402859:codex-resolved-line-trace",
+              "behavioral-verify:.review-store/t021-behavioral-verify-a64a176.txt:sha256:fb83463cfc0e5c684869f603f56fcf56ebbfeb8ac4fa7511141ad5520d747a10:5-of-5-pass-pi-seat-disposable-root",
+              "deferred-p3:glm-p3-dev-orchestrator-set-asymmetry,glm-p3-dead-session-empty-branch,glm-p3-no-mutation-assert-hardening"
+            ],
+            "receiptHash": "sha256:b046264db9cddb90d1a7e7b02759789284d5c89960ae25693dddb0ac7894843c"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3860,6 +3892,54 @@
         "revisionFrom": 129,
         "revisionTo": 130,
         "at": "2026-07-24T07:58:16.810Z"
+      },
+      "releasedPaths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs",
+        "development/remote_workplan/gateway.py",
+        "tests/development/test_remote_workplan_gateway.py",
+        "AGENTS.md"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:t021-closeout-20260724",
+        "definitionHash": "sha256:0cdf3794a98fa78b8be564cfecbda32f49fb38da6036a937dadf8d168c1e566d",
+        "integrationCommit": "f081fb21d82672b89c7af4f4efa953267d7bc4a2",
+        "commands": [
+          "cd /private/tmp/meta-harness-t021 && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+          "cd /private/tmp/meta-harness-t021 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t021 diff --check b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3"
+        ],
+        "evidenceRefs": [
+          "git:integration:f081fb21d82672b89c7af4f4efa953267d7bc4a2",
+          "git:review-head:4b6551a351273d0da1ecedcf995e2d273dc36fe9",
+          "github:pull/67:merged",
+          "node-test:workplan:128-pass-0-fail",
+          "pytest:gateway:28-passed",
+          "pytest:root:1777-passed:1-skipped:2-xfailed",
+          "git-diff-check:clean",
+          "review:.review-store/t021-glm-gate-review-a64a176.txt:sha256:39be453e5dba36d114b61afd12f5c61f4e947b3deb41bd9bf7c244e7cce5baf3:glm-5.2-approve-no-p0-p1-p2-4-p3",
+          "review:.review-store/t021-glm-gate-review-4b6551a.txt:sha256:e3ce135aa37b98797c8fddaf5823be1bcc72d87293f572cd339914ce9d2a1222:glm-5.2-approve-r2-integrate",
+          "review:.review-store/t021-kimi-review-a64a176.txt:sha256:a575bdefc5974d39e85a8dfe7336627aa53685e40345405f7a8f2ce6ceeb1457:kimi-k2.7-approve-zero-findings",
+          "review:.review-store/t021-codex-review-a64a176.txt:sha256:0f0932c34b31dec8f3d887e75460d3be40cd45239edee88a40ceb4e164bb373e:codex-p1-revalidate-coverage",
+          "review:.review-store/t021-codex-p1-confirm-4b6551a.txt:sha256:f8397cf529729cae38f7e7541953a9271cba4ad7a0c90efdbd59ab1512402859:codex-resolved-line-trace",
+          "behavioral-verify:.review-store/t021-behavioral-verify-a64a176.txt:sha256:fb83463cfc0e5c684869f603f56fcf56ebbfeb8ac4fa7511141ad5520d747a10:5-of-5-pass-pi-seat-disposable-root",
+          "deferred-p3:glm-p3-dev-orchestrator-set-asymmetry,glm-p3-dead-session-empty-branch,glm-p3-no-mutation-assert-hardening"
+        ],
+        "receiptHash": "sha256:b046264db9cddb90d1a7e7b02759789284d5c89960ae25693dddb0ac7894843c",
+        "actor": "coordinator:charltons-mbp.home.lan:t021-closeout-20260724",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs",
+          "development/remote_workplan/gateway.py",
+          "tests/development/test_remote_workplan_gateway.py",
+          "AGENTS.md"
+        ],
+        "revisionFrom": 130,
+        "revisionTo": 131,
+        "at": "2026-07-24T08:03:02.108Z"
       }
     }
   ]
