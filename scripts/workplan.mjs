@@ -1289,6 +1289,18 @@ function makeClaimSnapshot(card, owner, revisionFrom, revisionTo) {
   };
 }
 
+function canonicalizeRecordForHash(record) {
+  const copy = { ...record };
+  delete copy.entryHash;
+  return JSON.stringify(deepSortKeys(copy));
+}
+
+function computeRecordEntryHash(record) {
+  return `sha256:${createHash("sha256")
+    .update(canonicalizeRecordForHash(record))
+    .digest("hex")}`;
+}
+
 function appendReceipt(
   card,
   from,
@@ -1299,6 +1311,9 @@ function appendReceipt(
   evidence,
 ) {
   card.receipts = [...(card.receipts || [])];
+  const lastReceipt =
+    card.receipts.length > 0 ? card.receipts[card.receipts.length - 1] : null;
+  const prevEntryHash = lastReceipt ? computeRecordEntryHash(lastReceipt) : null;
   const receipt = {
     from,
     to,
@@ -1310,7 +1325,73 @@ function appendReceipt(
   if (evidence !== undefined) {
     receipt.evidence = evidence;
   }
+  receipt.prevEntryHash = prevEntryHash;
+  receipt.entryHash = computeRecordEntryHash(receipt);
   card.receipts.push(receipt);
+}
+
+// Validates the per-card ledger's hash chain. A record is "chained" when it
+// carries an entryHash; the predecessor it points at must recompute to that
+// hash, and the chain must be contiguous -- once any record is chained, every
+// later record must be chained too. A fully legacy ledger (zero chained
+// records, or no receipts array at all) is allowed: this validator is meant
+// to be run by accept/block/resume (alongside the other pre-mutation guards),
+// not by validateState, because foreign/legacy boards must remain loadable
+// and projectable. Append-side commands (ready/claim/start/submit/integrate)
+// do not pre-validate: a tampered chained record fails entryHash recompute
+// at the next accept/block/resume regardless of later appends re-anchoring
+// prevEntryHash on top of it.
+//
+// Uniform prevRecord rule: for every chained record,
+//   receipt.prevEntryHash === (prevRecord === null
+//                                 ? null
+//                                 : computeRecordEntryHash(prevRecord))
+// This single rule covers three migration cases:
+//   - genesis (no predecessor): expected = null
+//   - legacy-anchor (predecessor is a legacy 7-field record): expected is
+//     the canonicalized hash of that legacy record as stored
+//   - middle-strip (predecessor is any chained record): expected equals
+//     that record's entryHash (since computeRecordEntryHash strips it
+//     before canonicalizing)
+// A tampered middle-strip leaves the gap visible: the successor's stored
+// prevEntryHash points to the deleted record's hash, but the recomputed
+// predecessor is the one immediately before it in the surviving array.
+function validateReceiptChain(card) {
+  const receipts = Array.isArray(card.receipts) ? card.receipts : [];
+  let prevRecord = null;
+  let chainStarted = false;
+  for (const receipt of receipts) {
+    if (
+      receipt === null ||
+      typeof receipt !== "object" ||
+      Array.isArray(receipt)
+    ) {
+      fail("receipt chain entry must be an object");
+    }
+    const hasEntryHash =
+      "entryHash" in receipt && receipt.entryHash !== null;
+    if (hasEntryHash) {
+      if (!("prevEntryHash" in receipt)) {
+        fail("receipt chain entry missing prevEntryHash");
+      }
+      const expectedPrev =
+        prevRecord === null ? null : computeRecordEntryHash(prevRecord);
+      if (receipt.prevEntryHash !== expectedPrev) {
+        fail("receipt chain prevEntryHash mismatch");
+      }
+      const expected = computeRecordEntryHash(receipt);
+      if (receipt.entryHash !== expected) {
+        fail("receipt chain entryHash recompute mismatch");
+      }
+      prevRecord = receipt;
+      chainStarted = true;
+    } else {
+      if (chainStarted) {
+        fail("receipt chain broken by legacy record after chained record");
+      }
+      prevRecord = receipt;
+    }
+  }
 }
 
 async function claim(options) {
@@ -1986,6 +2067,9 @@ async function integrate(options) {
       revisionTo: expectedRevision + 1,
       at: new Date().toISOString(),
     };
+    const integrationReceiptHash = `sha256:${createHash("sha256")
+      .update(JSON.stringify(deepSortKeys(card.integrationReceipt)))
+      .digest("hex")}`;
     appendReceipt(
       card,
       "review",
@@ -1997,6 +2081,7 @@ async function integrate(options) {
         reviewBranch: freeze.branch,
         reviewHead: freeze.head,
         integrationCommit,
+        integrationReceiptHash,
       },
     );
     card.status = "verifying";
@@ -2171,15 +2256,17 @@ function validateIntegrationReceipt(card, expectedRevision) {
   // strand such a card in `verifying` forever, since revisions are monotonic and
   // `block` is gated on the same check.
   //
-  // Card-level staleness needs no revision guard: while a card is `verifying`,
-  // its `integrationReceipt` field is necessarily the one written by the
-  // `integrate` that set that status, since `integrate` is the sole writer of
-  // both. Its `revisionTo` therefore cannot exceed the board's monotonic current
-  // revision. Note this is the standalone snapshot field, NOT
+  // Card-level staleness needs no revision guard: while a card is `verifying`
+  // (absent tampering with the receipts ledger), its `integrationReceipt`
+  // field is necessarily the one written by the `integrate` that set that
+  // status, since `integrate` is the sole writer of both along operational
+  // paths. Its `revisionTo` therefore cannot exceed the board's monotonic
+  // current revision. Note this is the standalone snapshot field, NOT
   // `card.receipts.at(-1)` -- the ledger's tail while verifying is the
   // review->verifying transition record, a different object carrying fewer
-  // fields. Defence against a stale or foreign receipt comes from the
-  // reviewFreeze correlation checks above, not from this bound.
+  // fields. Defence against a stale or foreign receipt (absent tampering
+  // with the receipts ledger) comes from the reviewFreeze correlation
+  // checks above, not from this bound.
   //
   // What must still fail closed is a receipt claiming a revision the board has
   // not reached, which indicates forgery -- the same semantics
@@ -2189,6 +2276,65 @@ function validateIntegrationReceipt(card, expectedRevision) {
   }
   if (!validateIsoTimestamp(receipt.at)) {
     fail("integrationReceipt.at must be a valid ISO timestamp");
+  }
+  validateIntegrationReceiptBinding(card);
+}
+
+function computeIntegrationReceiptHash(receipt) {
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(deepSortKeys(receipt)))
+    .digest("hex")}`;
+}
+
+function validateIntegrationReceiptBinding(card) {
+  const receipts = Array.isArray(card.receipts) ? card.receipts : [];
+  const hasChainedRecord = receipts.some(
+    (receipt) =>
+      receipt !== null &&
+      typeof receipt === "object" &&
+      !Array.isArray(receipt) &&
+      receipt.entryHash !== undefined &&
+      receipt.entryHash !== null,
+  );
+  if (!hasChainedRecord) {
+    return;
+  }
+  // Use the LAST to:"verifying" record as the binding anchor. A card that
+  // re-integrates after block/resume appends a fresh verifying record; the
+  // earlier one is a fossil that must NOT be used as the binding source, or
+  // a replayed old integrationReceipt could be re-accepted against the old
+  // record's binding hash.
+  const verifyingRecords = receipts.filter(
+    (receipt) => receipt.to === "verifying",
+  );
+  if (verifyingRecords.length === 0) {
+    fail("integrationReceipt binding record missing in ledger");
+  }
+  const bindingRecord = verifyingRecords[verifyingRecords.length - 1];
+  if (
+    !bindingRecord.evidence ||
+    bindingRecord.evidence.integrationReceiptHash === undefined ||
+    bindingRecord.evidence.integrationReceiptHash === null
+  ) {
+    fail("integrationReceipt binding record missing in ledger");
+  }
+  const expectedHash = computeIntegrationReceiptHash(card.integrationReceipt);
+  if (bindingRecord.evidence.integrationReceiptHash !== expectedHash) {
+    fail("integrationReceipt binding hash mismatch");
+  }
+  // Positional rule: when the card is currently in `verifying`, the ledger
+  // tail MUST be the same to:"verifying" record we just bound against. This
+  // closes the multi-cycle tail-strip hole: deleting the latest verifying
+  // record but replaying an older integrationReceipt that matches the old
+  // binding hash would otherwise pass check (i) above. resume is unaffected
+  // because a stripped middle record breaks prevEntryHash at the blocked
+  // tail. block-from-verifying inherits this check via its own pre-mutation
+  // validateReceiptChain + this binding call.
+  if (card.status === "verifying") {
+    const tail = receipts[receipts.length - 1];
+    if (!tail || tail.to !== "verifying") {
+      fail("ledger tail is not the verifying record");
+    }
   }
 }
 
@@ -2246,6 +2392,7 @@ async function accept(options) {
     validateTransitionCardBasics(card, "verifying");
     validateReviewFreeze(card);
     validateIntegrationReceipt(card, expectedRevision);
+    validateReceiptChain(card);
 
     const reviewHeadExists = await gitCommitExists(
       controlRoot,
@@ -2347,10 +2494,15 @@ function validateBlockedReceipt(receipt, card, expectedRevision) {
     "at",
     "evidence",
   ];
+  // entryHash and prevEntryHash are optional: legacy 7-field blocked
+  // receipts (no chain fields) and chained 9-field blocked receipts both
+  // pass; any OTHER extra field still fails closed.
+  const allowedFields = [...expectedFields, "entryHash", "prevEntryHash"];
   const keys = Object.keys(receipt);
   if (
-    keys.length !== expectedFields.length ||
-    !keys.every((key) => expectedFields.includes(key))
+    (keys.length !== expectedFields.length &&
+      keys.length !== expectedFields.length + 2) ||
+    !keys.every((key) => allowedFields.includes(key))
   ) {
     fail("blocked receipt has incorrect fields");
   }
@@ -2458,6 +2610,7 @@ async function block(options) {
     }
 
     validateTransitionCardBasics(card, card.status);
+    validateReceiptChain(card);
     if (card.definition.worktreePath !== callerWorktree) {
       fail("worktreePath must match callerWorktree");
     }
@@ -2570,6 +2723,7 @@ async function resume(options) {
     if (card.blockedFrom === "verifying") {
       validateIntegrationReceipt(card, latestReceipt.revisionFrom);
     }
+    validateReceiptChain(card);
 
     validateTransitionCardBasics(card, "blocked");
     if (card.definition.worktreePath !== callerWorktree) {
@@ -2702,15 +2856,15 @@ async function ready(options) {
     card.owner = "";
     card.definition = definition;
     card.authorityGrant = { ...AUTHORITY_GRANT };
-    card.receipts = [...(card.receipts || [])];
-    card.receipts.push({
-      from: "backlog",
-      to: "ready",
-      actor: owner,
-      revisionFrom: expectedRevision,
-      revisionTo: expectedRevision + 1,
-      at: new Date().toISOString(),
-    });
+    appendReceipt(
+      card,
+      "backlog",
+      "ready",
+      owner,
+      expectedRevision,
+      expectedRevision + 1,
+      undefined,
+    );
 
     state.revision += 1;
 

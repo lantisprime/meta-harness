@@ -12,7 +12,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { hostname } from "node:os";
@@ -7431,4 +7431,1325 @@ test("direct imported block rejects invalid reason and retainPaths", async (cont
     }),
     /--retain-paths must be true or false/,
   );
+});
+
+// --- Receipt ledger hash-chaining (TASK-20260724-019) ---
+
+function deepSortKeysLocal(value) {
+  if (Array.isArray(value)) return value.map(deepSortKeysLocal);
+  if (value !== null && typeof value === "object") {
+    const sorted = {};
+    for (const k of Object.keys(value).sort()) sorted[k] = deepSortKeysLocal(value[k]);
+    return sorted;
+  }
+  return value;
+}
+
+function receiptChainHash(receipt) {
+  // Mirrors workplan.mjs computeRecordEntryHash: deepSortKeys then sha256
+  // over a copy with entryHash removed, prefixed with "sha256:". Used by
+  // tests to assert chain invariants without exposing the internal helper.
+  const copy = { ...receipt };
+  delete copy.entryHash;
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(deepSortKeysLocal(copy)))
+    .digest("hex")}`;
+}
+
+function integrationReceiptHash(receipt) {
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(deepSortKeysLocal(receipt)))
+    .digest("hex")}`;
+}
+
+test("post-drift block then resume from verifying retainPaths=true passes chained validateBlockedReceipt", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Drift block resume chained",
+        status: "backlog",
+        owner: "",
+        paths: ["src/driftblockresume"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachVerifying(root, "TASK-20260711-001");
+
+  const driftAdd = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--id",
+    "TASK-20260711-002",
+    "--outcome",
+    "Unrelated drift",
+    "--paths",
+    "src/driftunrelated",
+  ]);
+  assert.equal(driftAdd.code, 0, driftAdd.stderr);
+
+  await blockCard(root, "TASK-20260711-001", owner, "7", "drifted block", true);
+
+  const blockedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const blockedReceipt =
+    blockedState.cards.find((c) => c.id === "TASK-20260711-001").receipts.at(-1);
+  assert.equal(blockedReceipt.to, "blocked");
+  assert.equal(blockedReceipt.entryHash, receiptChainHash(blockedReceipt));
+  const predecessor =
+    blockedState.cards
+      .find((c) => c.id === "TASK-20260711-001")
+      .receipts[
+        blockedState.cards.find((c) => c.id === "TASK-20260711-001").receipts.length - 2
+      ];
+  assert.equal(blockedReceipt.prevEntryHash, receiptChainHash(predecessor));
+
+  const resumeResult = await resumeCard(
+    root,
+    "TASK-20260711-001",
+    owner,
+    "8",
+  );
+  assert.equal(resumeResult.revision, 9);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const resumedCard = finalState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  assert.equal(resumedCard.status, "in_progress");
+  assert.equal(resumedCard.blockedFrom, undefined);
+  assert.equal(resumedCard.blockReason, undefined);
+  assert.equal(resumedCard.retainPaths, undefined);
+  assert.deepEqual(resumedCard.paths, ["src/driftblockresume"]);
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("post-drift block retainPaths=false: peer reserves path and resume fails closed with overlap", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Drift released resume",
+        status: "backlog",
+        owner: "",
+        paths: ["src/driftshared"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachVerifying(root, "TASK-20260711-001");
+
+  const driftAdd = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--id",
+    "TASK-20260711-002",
+    "--outcome",
+    "Unrelated drift",
+    "--paths",
+    "src/driftunrelated2",
+  ]);
+  assert.equal(driftAdd.code, 0, driftAdd.stderr);
+
+  await blockCard(root, "TASK-20260711-001", owner, "7", "release path", false);
+
+  const peerAdd = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "8",
+    "--id",
+    "TASK-20260711-003",
+    "--outcome",
+    "Peer overlap",
+    "--paths",
+    "src/driftshared",
+  ]);
+  assert.equal(peerAdd.code, 0, peerAdd.stderr);
+
+  await readyCard(root, "TASK-20260711-003", {}, "9");
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const resumeResult = await run([
+    "resume",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "10",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(resumeResult.code, 0);
+  assert.match(resumeResult.stderr, /overlap/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("post-drift block retainPaths=false without peer claim: resume succeeds and re-reserves", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Drift released no peer",
+        status: "backlog",
+        owner: "",
+        paths: ["src/driftnoppeer"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachVerifying(root, "TASK-20260711-001");
+
+  const driftAdd = await run([
+    "add",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--id",
+    "TASK-20260711-002",
+    "--outcome",
+    "Unrelated drift",
+    "--paths",
+    "src/driftunrelated3",
+  ]);
+  assert.equal(driftAdd.code, 0, driftAdd.stderr);
+
+  await blockCard(root, "TASK-20260711-001", owner, "7", "release path", false);
+
+  const resumeResult = await resumeCard(
+    root,
+    "TASK-20260711-001",
+    owner,
+    "8",
+  );
+  assert.equal(resumeResult.revision, 9);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const resumedCard = finalState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  assert.equal(resumedCard.status, "in_progress");
+  assert.deepEqual(resumedCard.paths, ["src/driftnoppeer"]);
+
+  // Verify no other card now has overlapping path
+  const peer = finalState.cards.find((c) => c.id === "TASK-20260711-002");
+  assert.ok(peer);
+  assert.equal(peer.status, "backlog");
+
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("chained ledger carries genesis null prevEntryHash, valid entryHash, and chain integrationReceiptHash", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Chain shape",
+        status: "backlog",
+        owner: "",
+        paths: ["src/chainshape"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  await reachVerifying(root, "TASK-20260711-001");
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const cardObj = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  const receipts = cardObj.receipts;
+  assert.ok(Array.isArray(receipts));
+  assert.ok(receipts.length >= 5);
+
+  // Genesis: backlog -> ready
+  assert.equal(receipts[0].from, "backlog");
+  assert.equal(receipts[0].to, "ready");
+  assert.equal(receipts[0].prevEntryHash, null);
+  assert.equal(receipts[0].entryHash, receiptChainHash(receipts[0]));
+
+  // Every chained receipt's prevEntryHash equals the recomputed hash of its
+  // predecessor as stored.
+  for (let i = 1; i < receipts.length; i += 1) {
+    assert.equal(receipts[i].prevEntryHash, receiptChainHash(receipts[i - 1]));
+    assert.equal(receipts[i].entryHash, receiptChainHash(receipts[i]));
+  }
+
+  // The review -> verifying receipt carries evidence.integrationReceiptHash.
+  const verifyingReceipt = receipts.find((r) => r.to === "verifying");
+  assert.ok(verifyingReceipt);
+  assert.ok(verifyingReceipt.evidence);
+  assert.ok(
+    typeof verifyingReceipt.evidence.integrationReceiptHash === "string",
+  );
+  assert.match(
+    verifyingReceipt.evidence.integrationReceiptHash,
+    /^sha256:[0-9a-f]{64}$/,
+  );
+
+  // The stored integrationReceiptHash equals a recomputation over the
+  // canonicalized card.integrationReceipt snapshot.
+  const integrationHash = integrationReceiptHash(cardObj.integrationReceipt);
+  assert.equal(
+    verifyingReceipt.evidence.integrationReceiptHash,
+    integrationHash,
+  );
+});
+
+test("accept rejects chained receipt edited without recomputing entryHash and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Tamper entryHash",
+        status: "backlog",
+        owner: "",
+        paths: ["src/tamperentry"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  const tamperedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  // Edit a chained receipt without recomputing its entryHash.
+  const targetReceipt = tamperedCard.receipts.find(
+    (r) => r.to === "review",
+  );
+  targetReceipt.evidence.frozenNote = "tampered";
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tamperedState, null, 2)}\n`,
+  );
+
+  const cardBefore = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /receipt chain entryHash recompute mismatch/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("accept rejects middle-strip of chained records and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Middle strip",
+        status: "backlog",
+        owner: "",
+        paths: ["src/middlestrip"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  const tamperedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  // Remove the claimed->in_progress record; the successor's prevEntryHash
+  // will then mismatch the recomputed hash of the in_progress->review
+  // record that now sits immediately before it.
+  const claimIdx = tamperedCard.receipts.findIndex((r) => r.to === "in_progress");
+  assert.ok(claimIdx > 0);
+  tamperedCard.receipts.splice(claimIdx, 1);
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tamperedState, null, 2)}\n`,
+  );
+
+  const cardBefore = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /receipt chain prevEntryHash mismatch/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("accept rejects tail-strip of review->verifying binding record and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Tail strip binding",
+        status: "backlog",
+        owner: "",
+        paths: ["src/tailstrip"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  const tamperedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  // Drop the review->verifying record (the one carrying the binding).
+  tamperedCard.receipts = tamperedCard.receipts.filter(
+    (r) => r.to !== "verifying",
+  );
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tamperedState, null, 2)}\n`,
+  );
+
+  const cardBefore = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /integrationReceipt binding record missing in ledger/,
+  );
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("accept rejects swapped integrationReceipt whose revisionTo still passes bound and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Swap integrationReceipt",
+        status: "backlog",
+        owner: "",
+        paths: ["src/swapsnapshot"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  const tamperedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  // Swap integrationReceipt for a doctored copy that still validates against
+  // the existing checks (same reviewFreeze correlation, same revisionTo bound
+  // preserved at the current board revision). Only the binding hash will
+  // detect the swap.
+  const integrationCommit = tamperedCard.integrationReceipt.integrationCommit;
+  tamperedCard.integrationReceipt = {
+    ...tamperedCard.integrationReceipt,
+    integrationCommit: "2222222222222222222222222222222222222222",
+    at: new Date().toISOString(),
+  };
+  tamperedCard.integrationReceipt.revisionTo = tamperedCard.integrationReceipt.revisionFrom + 1;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tamperedState, null, 2)}\n`,
+  );
+
+  const cardBefore = tamperedState.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor, {
+    integrationCommit: cardBefore.integrationReceipt.integrationCommit,
+  });
+  // sanity: integrationCommit is in fact doctored
+  assert.notEqual(cardBefore.integrationReceipt.integrationCommit, integrationCommit);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /integrationReceipt binding hash mismatch/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("legacy un-chained 7-field receipts continue to pass transitions", async (context) => {
+  const legacyOwner = codexOwner("legacy-1");
+  const legacyCoordinator = coordinatorOwner("legacy-1");
+  // Build a minimal but valid legacy definition so claim's
+  // validateStoredDefinition passes. The receipt ledger, however, stays in
+  // its pre-chain shape (no entryHash / prevEntryHash fields).
+  const legacyDefinition = makeDefinition(
+    { allowedOwnerNamespaces: ["codex"] },
+    // Will be rewritten to the real controlRoot after repository() returns.
+    "/tmp/worktree",
+  );
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Legacy unchained",
+        status: "ready",
+        owner: legacyOwner,
+        paths: ["src/legacyunchained"],
+        definition: {
+          ...legacyDefinition,
+          worktreePath: "__will_be_replaced__",
+        },
+        authorityGrant: {
+          executionCoordination: true,
+          evaluator: false,
+          metaEvaluation: false,
+        },
+        receipts: [
+          {
+            from: "backlog",
+            to: "ready",
+            actor: legacyCoordinator,
+            revisionFrom: 0,
+            revisionTo: 1,
+            at: "2025-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  // Rewrite the worktreePath and definitionHash to match the real root.
+  const seed = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  seed.cards[0].definition.worktreePath = root;
+  seed.cards[0].definition.definitionHash = computeDefinitionHash(
+    seed.cards[0].definition,
+  );
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(seed, null, 2)}\n`,
+  );
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  // sync must still load and project the legacy board without rejection.
+  const syncResult = await run(["sync", "--control-root", root]);
+  assert.equal(syncResult.code, 0, syncResult.stderr);
+
+  // claim must still validate and accept the 7-field unchained receipt as
+  // a fully legacy ledger; the chain validator must not reject it.
+  const claimResult = await run([
+    "claim",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "1",
+    "--owner",
+    legacyOwner,
+  ]);
+  assert.equal(claimResult.code, 0, claimResult.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const legacyCard = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(legacyCard.status, "claimed");
+  // The new claim receipt is chained; the legacy receipt above remains
+  // un-chained. validateReceiptChain must treat the legacy prefix as legacy
+  // (no entryHash yet) and the new suffix as chained.
+  assert.equal(legacyCard.receipts.length, 2);
+  assert.equal(legacyCard.receipts[0].entryHash, undefined);
+  assert.equal(legacyCard.receipts[1].entryHash, receiptChainHash(legacyCard.receipts[1]));
+  assert.equal(
+    legacyCard.receipts[1].prevEntryHash,
+    receiptChainHash(legacyCard.receipts[0]),
+  );
+
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("card with no receipts array is treated as empty legacy ledger", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "No receipts array",
+        status: "backlog",
+        owner: "",
+        paths: ["src/noreceipts"],
+        // no `receipts` field at all
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  // sync must accept a card whose `receipts` field is missing entirely.
+  const syncResult = await run(["sync", "--control-root", root]);
+  assert.equal(syncResult.code, 0, syncResult.stderr);
+
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+
+  // A transition on a no-receipts card must succeed: appendReceipt will
+  // synthesize a genesis record (prevEntryHash=null), and the chain validator
+  // will accept the empty prefix as legacy.
+  const definitionPath = join(root, "definition.json");
+  await writeDefinition(definitionPath, {}, root);
+  const readyResult = await run([
+    "ready",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "1",
+    "--owner",
+    coordinatorOwner(),
+    "--definition-json",
+    definitionPath,
+  ]);
+  assert.equal(readyResult.code, 0, readyResult.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const nocard = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(nocard.status, "ready");
+  assert.equal(nocard.receipts.length, 1);
+  assert.equal(nocard.receipts[0].from, "backlog");
+  assert.equal(nocard.receipts[0].to, "ready");
+  assert.equal(nocard.receipts[0].prevEntryHash, null);
+  assert.equal(nocard.receipts[0].entryHash, receiptChainHash(nocard.receipts[0]));
+
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+  // Belt-and-braces: state.json and WORKPLAN.md differ from the original
+  // bytes only because of the legitimate ready transition (not a tamper).
+  assert.notDeepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  assert.notDeepEqual(
+    await readFile(join(root, "WORKPLAN.md")),
+    workplanBefore,
+  );
+});
+
+// --- Orchestrator P1 defects: legacy-anchor (DEFECT 1) and multi-cycle
+//     binding (DEFECT 2) ---
+
+// Build a legacy-prefix in_progress card: a card already in in_progress with
+// three hand-written 7-field receipts (ready, claimed, started) and a valid
+// definition/authorityGrant/claimSnapshot. Used by the defect 1 test below.
+async function legacyInProgressRoot(parentLabel = "legacyanchor") {
+  const legacyOwner = codexOwner("legacy-anchor-1");
+  const legacyCoordinator = coordinatorOwner("legacy-anchor-1");
+  const legacyDefinition = makeDefinition(
+    { allowedOwnerNamespaces: ["codex"] },
+    "/tmp/worktree",
+  );
+  const { root, parent } = await repository(
+    state(
+      [
+        card({
+          id: "TASK-20260711-001",
+          title: "Legacy anchor",
+          status: "in_progress",
+          owner: legacyOwner,
+          paths: ["src/legacyanchor"],
+          definition: { ...legacyDefinition, worktreePath: "__will_be_replaced__" },
+          authorityGrant: {
+            executionCoordination: true,
+            evaluator: false,
+            merge: false,
+            promotion: false,
+            deployment: false,
+            credentials: false,
+            runtime: false,
+          },
+          claimSnapshot: {
+            owner: legacyOwner,
+            definitionHash: "PLACEHOLDER",
+            sourceRevision: legacyDefinition.sourceRevision,
+            worktreePath: "/tmp/worktree",
+            branch: legacyDefinition.branch,
+            baseCommit: legacyDefinition.baseCommit,
+            currentHead: legacyDefinition.currentHead,
+            paths: ["src/legacyanchor"],
+            plane: legacyDefinition.plane,
+            frozenAxes: [...legacyDefinition.frozenAxes],
+            budget: legacyDefinition.budget,
+            acceptanceCommands: [...legacyDefinition.acceptanceCommands],
+            nextCheckpoint: legacyDefinition.nextCheckpoint,
+            revisionFrom: 1,
+            revisionTo: 2,
+            at: "2025-01-01T00:00:00.000Z",
+          },
+          receipts: [
+            {
+              from: "backlog",
+              to: "ready",
+              actor: legacyCoordinator,
+              revisionFrom: 0,
+              revisionTo: 1,
+              at: "2025-01-01T00:00:00.000Z",
+            },
+            {
+              from: "ready",
+              to: "claimed",
+              actor: legacyOwner,
+              revisionFrom: 1,
+              revisionTo: 2,
+              at: "2025-01-01T00:01:00.000Z",
+            },
+            {
+              from: "claimed",
+              to: "in_progress",
+              actor: legacyOwner,
+              revisionFrom: 2,
+              revisionTo: 3,
+              at: "2025-01-01T00:02:00.000Z",
+            },
+          ],
+        }),
+      ],
+      { revision: 3 },
+    ),
+    parentLabel,
+  );
+
+  // Rewrite the worktreePath, definitionHash, and claimSnapshot definitionHash
+  // to match the real root.
+  const seed = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const legacyCard = seed.cards[0];
+  legacyCard.definition.worktreePath = root;
+  legacyCard.definition.definitionHash = computeDefinitionHash(
+    legacyCard.definition,
+  );
+  legacyCard.claimSnapshot.worktreePath = root;
+  legacyCard.claimSnapshot.definitionHash = legacyCard.definition.definitionHash;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(seed, null, 2)}\n`,
+  );
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  return {
+    root,
+    parent,
+    owner: legacyOwner,
+    coordinator: legacyCoordinator,
+  };
+}
+
+test("legacy-prefix ledger anchors chained records by predecessor hash and survives submit->integrate->accept", async (context) => {
+  const { root, parent, owner } = await legacyInProgressRoot(
+    "legacyanchor-d1",
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  // submit -> in_progress -> review. The submit record is the FIRST chained
+  // record; its prevEntryHash must equal computeRecordEntryHash of the last
+  // legacy 7-field record, not null. DEFECT 1 lived here: a validator that
+  // required the first chained record's prevEntryHash to be null would
+  // strand every card whose receipt history starts in the pre-chain era.
+  await createBranch(root, "review");
+  const reviewHead = await commitOnBranch(root, "review", "review commit");
+  await execGit(["-C", root, "checkout", "review"]);
+  const submitResult = await run([
+    "submit",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+    "--expected-head",
+    reviewHead,
+  ]);
+  assert.equal(submitResult.code, 0, submitResult.stderr);
+  await execGit(["-C", root, "checkout", "main"]);
+
+  // (submit lands at revision 4; integrate at 5; accept at 6.)
+
+  const mid = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const midCard = mid.cards[0];
+  assert.equal(midCard.status, "review");
+  assert.equal(midCard.receipts.length, 4);
+  const submitReceipt = midCard.receipts[3];
+  assert.equal(submitReceipt.entryHash, receiptChainHash(submitReceipt));
+  // First chained receipt must chain from the legacy predecessor, not null.
+  const startReceipt = midCard.receipts[2];
+  assert.equal(
+    submitReceipt.prevEntryHash,
+    receiptChainHash(startReceipt),
+  );
+
+  // integrate -> review -> verifying. The new chained verifying receipt must
+  // chain from the chained submit receipt and carry the binding hash.
+  const integrationCommit = await mergeBranch(root, "review", "integrate");
+  const integrateResult = await run([
+    "integrate",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "4",
+    "--actor",
+    coordinatorOwner("legacy-anchor-coord"),
+    "--integration-commit",
+    integrationCommit,
+  ]);
+  assert.equal(integrateResult.code, 0, integrateResult.stderr);
+
+  const integrated = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const integratedCard = integrated.cards[0];
+  assert.equal(integratedCard.status, "verifying");
+  const verifyingReceipt = integratedCard.receipts.at(-1);
+  assert.equal(verifyingReceipt.to, "verifying");
+  assert.equal(
+    verifyingReceipt.prevEntryHash,
+    receiptChainHash(integratedCard.receipts[integratedCard.receipts.length - 2]),
+  );
+  assert.ok(
+    typeof verifyingReceipt.evidence.integrationReceiptHash === "string",
+  );
+  assert.equal(
+    verifyingReceipt.evidence.integrationReceiptHash,
+    integrationReceiptHash(integratedCard.integrationReceipt),
+  );
+
+  // accept must SUCCEED. The chain validator walks the legacy prefix
+  // (chainStarted stays false through three legacy records), then accepts the
+  // chained suffix anchored at the legacy predecessor's hash.
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(
+    acceptancePath,
+    integratedCard,
+    coordinatorOwner("legacy-anchor-coord"),
+  );
+
+  const acceptResult = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "5",
+    "--actor",
+    coordinatorOwner("legacy-anchor-coord"),
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.equal(acceptResult.code, 0, acceptResult.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const finalCard = finalState.cards[0];
+  assert.equal(finalCard.status, "done");
+  // The new done record is the last chained entry; its prevEntryHash must
+  // anchor to the verifying record that precedes it.
+  const acceptReceipt = finalCard.receipts.at(-1);
+  assert.equal(acceptReceipt.to, "done");
+  assert.equal(
+    acceptReceipt.prevEntryHash,
+    receiptChainHash(finalCard.receipts[finalCard.receipts.length - 2]),
+  );
+
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("multi-cycle reachVerifying -> block -> resume -> submit -> integrate accepts against the LAST verifying record", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Multi-cycle binding",
+        status: "backlog",
+        owner: "",
+        paths: ["src/multicycletwo"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  // First cycle: reachVerifying appends a chained verifying record.
+  const first = await reachVerifying(root, "TASK-20260711-001");
+  const firstActor = first.actor;
+  const firstOwner = first.owner;
+
+  // Block from verifying with retainPaths=true so paths survive. This appends
+  // a chained blocked record tail.
+  await blockCard(
+    root,
+    "TASK-20260711-001",
+    firstOwner,
+    "6",
+    "mid-cycle block",
+    true,
+  );
+
+  // Resume: tail is now the resume (in_progress) receipt.
+  await resumeCard(root, "TASK-20260711-001", firstOwner, "7");
+
+  // Second cycle: submit + integrate again. The ledger now has TWO chained
+  // verifying records. DEFECT 2 lived here: a validator that picked the FIRST
+  // to:"verifying" record would compare against the stale cycle-1 binding.
+  await createBranch(root, "review2");
+  const secondReviewHead = await commitOnBranch(
+    root,
+    "review2",
+    "second review commit",
+  );
+  await execGit(["-C", root, "checkout", "review2"]);
+  const submit2 = await run([
+    "submit",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "8",
+    "--owner",
+    firstOwner,
+    "--expected-head",
+    secondReviewHead,
+  ]);
+  assert.equal(submit2.code, 0, submit2.stderr);
+  await execGit(["-C", root, "checkout", "main"]);
+
+  const secondIntegration = await mergeBranch(
+    root,
+    "review2",
+    "second integrate",
+  );
+  const integrate2 = await run([
+    "integrate",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "9",
+    "--actor",
+    firstActor,
+    "--integration-commit",
+    secondIntegration,
+  ]);
+  assert.equal(integrate2.code, 0, integrate2.stderr);
+
+  // The ledger MUST have two to:"verifying" records; the last must carry the
+  // binding hash for the current card.integrationReceipt.
+  const beforeAccept = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const beforeCard = beforeAccept.cards[0];
+  assert.equal(beforeCard.status, "verifying");
+  const verifyingRecords = beforeCard.receipts.filter(
+    (r) => r.to === "verifying",
+  );
+  assert.equal(verifyingRecords.length, 2);
+  const lastVerifying = verifyingRecords[verifyingRecords.length - 1];
+  assert.equal(
+    lastVerifying.evidence.integrationReceiptHash,
+    integrationReceiptHash(beforeCard.integrationReceipt),
+  );
+
+  // accept must SUCCEED. The validator uses the LAST to:"verifying" record
+  // as the binding anchor.
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, beforeCard, firstActor);
+
+  const acceptResult = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "10",
+    "--actor",
+    firstActor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.equal(acceptResult.code, 0, acceptResult.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "done");
+
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("multi-cycle tail-strip of latest verifying record with replayed integrationReceipt fails closed at accept and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Multi-cycle tail strip",
+        status: "backlog",
+        owner: "",
+        paths: ["src/multitailstrip"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  // Run the first cycle so we have a single verifying record and snapshot
+  // the corresponding card.integrationReceipt + reviewFreeze for the replay.
+  const first = await reachVerifying(root, "TASK-20260711-001");
+  const firstActor = first.actor;
+  const firstOwner = first.owner;
+
+  const afterFirstCycle = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const firstCycleCard = afterFirstCycle.cards[0];
+  const firstCycleIntegrationReceipt = JSON.parse(
+    JSON.stringify(firstCycleCard.integrationReceipt),
+  );
+  const firstCycleReviewFreeze = JSON.parse(
+    JSON.stringify(firstCycleCard.reviewFreeze),
+  );
+
+  // Block + resume to break the linear chain, then run the second cycle.
+  await blockCard(
+    root,
+    "TASK-20260711-001",
+    firstOwner,
+    "6",
+    "mid-cycle block",
+    true,
+  );
+  await resumeCard(root, "TASK-20260711-001", firstOwner, "7");
+
+  await createBranch(root, "review2");
+  const secondReviewHead = await commitOnBranch(
+    root,
+    "review2",
+    "second review commit",
+  );
+  await execGit(["-C", root, "checkout", "review2"]);
+  const submit2 = await run([
+    "submit",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "8",
+    "--owner",
+    firstOwner,
+    "--expected-head",
+    secondReviewHead,
+  ]);
+  assert.equal(submit2.code, 0, submit2.stderr);
+  await execGit(["-C", root, "checkout", "main"]);
+
+  const secondIntegration = await mergeBranch(
+    root,
+    "review2",
+    "second integrate",
+  );
+  const integrate2 = await run([
+    "integrate",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "9",
+    "--actor",
+    firstActor,
+    "--integration-commit",
+    secondIntegration,
+  ]);
+  assert.equal(integrate2.code, 0, integrate2.stderr);
+
+  // Attack surface:
+  //   1. Tail-strip the SECOND to:"verifying" record so the binding anchor
+  //      rolls back to the first-cycle one.
+  //   2. Replay card.integrationReceipt AND card.reviewFreeze back to the
+  //      first-cycle snapshots so the per-field correlation checks in
+  //      validateIntegrationReceipt pass.
+  // Without the positional rule, the binding hash for the surviving first
+  // verifying record would now match the replayed card.integrationReceipt
+  // and accept would succeed. The position rule closes this hole: the
+  // ledger tail must still be a to:"verifying" record when the card is
+  // currently in `verifying`.
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tampered.cards[0];
+  tamperedCard.receipts = tamperedCard.receipts.filter(
+    (r) => r !== tamperedCard.receipts.at(-1),
+  );
+  tamperedCard.integrationReceipt = firstCycleIntegrationReceipt;
+  tamperedCard.reviewFreeze = firstCycleReviewFreeze;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(
+    acceptancePath,
+    tamperedCard,
+    firstActor,
+    {
+      integrationCommit: firstCycleIntegrationReceipt.integrationCommit,
+    },
+  );
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const acceptResult = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "10",
+    "--actor",
+    firstActor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(acceptResult.code, 0);
+  // Either the position rule fires (clean case) or the binding hash check
+  // catches it if the binding anchor changed in some other way; both prove
+  // the validator is fail-closed against this attack.
+  assert.match(
+    acceptResult.stderr,
+    /ledger tail is not the verifying record|integrationReceipt binding hash mismatch/,
+  );
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
 });
