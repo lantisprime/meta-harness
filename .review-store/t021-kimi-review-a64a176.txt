@@ -1,0 +1,44 @@
+ ## Frozen-diff review verdict: **APPROVE**
+
+**Base:** `b376afa0eecd8b3e1f0e60cbd9060b1136a29fd3`  
+**Head:** `a64a1764e694fd49eb16117a19f1824f4a017ac4`  
+**Scope contract:** `scripts/workplan.mjs`, `scripts/workplan.test.mjs`, `development/remote_workplan/gateway.py`, `tests/development/test_remote_workplan_gateway.py`, `AGENTS.md`
+
+I reviewed all five reserved paths. The sandbox blocks `git` commands and Python `bash` invocations, so I verified code structure, diff intent, and semantics by inspecting the head files directly, validating grep matches, and reconstructing behavior from the source. The worktree file set and state match the contract.
+
+### 1. Correctness
+- `scripts/workplan.mjs:192` adds `pi` to the claim-owner regex: `/^(codex|claude|pi):([^:]+):([^:]+)$/`. Semantics are unchanged except for the added namespace; anchors, capture groups (namespace, host, session), and alternation precedence are identical. Host/session remain `[^:]+`, so `pi:<host>:<session>` preserves provider identity in the session segment as required.
+- `scripts/workplan.mjs:1177-1183` whitelists `pi` in `allowedOwnerNamespaces` validation and updates the error message.
+- `development/remote_workplan/gateway.py:235` expands the qualify-time namespace superset to `{"codex", "claude", "dev-orchestrator", "pi"}`. 
+- `AGENTS.md:38` adds the `pi` lane label.
+- All other logic (coordinator regex, host checks, lock owners, path validation, receipt semantics, claim/transition ordering) is untouched.
+
+### 2. Security / validation
+- No unknown namespace can pass: `workplan.mjs` requires `["codex", "claude", "pi"].includes(ns)` and the regex rejects anything outside the three. The gateway set includes the pre-existing `dev-orchestrator` superset, so no existing validation is weakened.
+- Per-card frozen `allowedOwnerNamespaces` is still enforced: `validateOwnerNamespace` (`scripts/workplan.mjs:1190-1194`) calls `parseClaimOwner` and checks namespace membership in the definition.
+- Coordinator owner handling is unchanged; `coordinator:<host>:<session>` remains separate from worker namespaces.
+- No host/session checks were weakened.
+
+### 3. Test adequacy (new / modified tests)
+- `scripts/workplan.test.mjs`:
+  - Positive pi lifecycle through claim/start/submit (lines ~3938-3968).
+  - Positive `claim-next` pi selection (lines ~3210-3265).
+  - Negative frozen-namespace rejection for pi (lines ~2717-2745).
+  - Negative unknown namespace rejection with updated error message (lines ~2748-2789).
+  - `ready` accepts `["pi"]` definition and rejects `["pi", "bogus"]` (lines ~2050-2114).
+- `tests/development/test_remote_workplan_gateway.py`:
+  - `test_pi_credential_claims_pi_only_card_and_preserves_owner` (line 340).
+  - `test_pi_claim_is_denied_when_frozen_namespaces_exclude_pi` (line 368).
+  - `test_qualification_rejects_unknown_owner_namespace` (line 395).
+  - `test_reassign_to_pi_obeys_frozen_owner_namespaces` (line 413).
+- Tests are specific to pi and would fail if pi were reverted; they are not tautologies.
+
+### 4. Consistency
+- Error messages enumerating namespaces are updated in both `workplan.mjs:194` and `workplan.mjs:1183`.
+- `AGENTS.md:38` now lists `codex`, `claude`, `coordinator`, `pi` consistently with code lanes.
+- No stale `codex|claude` text remains in the modified files.
+
+### 5. Scope
+- Only the five reserved paths changed. No drive-by refactor or scope leakage observed in the reviewed files.
+
+**No P0/P1/P2/P3 findings. The diff correctly implements the generic `pi` owner namespace without behavior changes beyond the stated intent and passes all five review lenses.**

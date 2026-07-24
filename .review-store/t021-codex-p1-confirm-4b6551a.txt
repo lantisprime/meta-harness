@@ -1,0 +1,2865 @@
+Reading additional input from stdin...
+2026-07-24T07:35:31.394160Z ERROR codex_models_manager::cache: failed to load models cache: missing field `supports_reasoning_summaries` at line 88 column 5
+OpenAI Codex v0.144.6
+--------
+workdir: /private/tmp/meta-harness-t021
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019f930d-0572-73f2-8de3-7c5e69c9a9b6
+--------
+user
+You previously reviewed frozen diff b376afa..a64a176 in this worktree and returned one P1: no pi coverage of the gateway revalidation namespace guard (development/remote_workplan/gateway.py:738-739). A fix commit 4b6551a351273d0da1ecedcf995e2d273dc36fe9 (test-only) added test_revalidate_allows_active_pi_owner_when_replacement_includes_pi and test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation to tests/development/test_remote_workplan_gateway.py. Verify READ-ONLY whether this resolves your P1: do the tests actually exercise the :738-739 branch both ways, are the no-mutation assertions sound (definition, owner, revision, fencing_generation), and is the commit really test-only (git show 4b6551a). Answer RESOLVED or NOT-RESOLVED with evidence.
+codex
+I’ll verify the exact commit diff and trace both tests against the gateway branch, then report only a read-only verdict with file/line evidence.
+codex
+Because this continues a prior frozen-diff review, I’m using the episodic-memory workflow to check any persisted review context before inspecting the repository. This remains strictly read-only.
+exec
+/bin/zsh -lc "sed -n '1,240p' /private/tmp/meta-harness-t021/.agents/skills/episodic-memory/SKILL.md" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+---
+name: episodic-memory
+description: >
+  Manage persistent episodic memories across sessions. Use this skill whenever
+  the user says "remember this", "save this decision", "what did we decide
+  about X", "recall", "what do you know about project X", or when a significant
+  architectural decision, bug root cause, or milestone is reached. Also use
+  when starting work on a project to proactively recall relevant past episodes.
+  Even if the user doesn't explicitly ask, store episodes for important
+  decisions, discoveries, or context valuable in future sessions.
+version: 0.3.0
+---
+
+# Episodic Memory
+
+Persistent, self-correcting memory across coding sessions. Markdown files with YAML frontmatter. When a decision proves wrong, revise it — the original is superseded and future searches show only the corrected version.
+
+**Scripts:** `~/.episodic-memory/scripts/`
+**Data:** global `~/.episodic-memory/episodes/` (default) | local `.episodic-memory/episodes/`
+**Full per-script reference:** `~/.episodic-memory/EM_SCRIPTS_GUIDE.md`. Read it before first script use.
+
+## Store (0-3 per session)
+
+Store when: significant decision or trade-off, bug root cause or non-obvious behavior, milestone reached, critical constraint discovered, user says "remember this". Do NOT store: routine edits, credentials, info already in auto-memory.
+
+```bash
+node ~/.episodic-memory/scripts/em-store.mjs --project <name> --category <decision|discovery|milestone|context|research> --tags "<t1,t2>" --summary "<text>" --body "<text>" [--scope global|local] [--url "<source-url>"]
+```
+
+Project name: cwd basename or git remote name. Default scope is global (available to all projects).
+
+### Lessons that activate (RFC-009)
+
+Store a durable lesson with `--category lesson` plus activation flags so it resurfaces
+automatically instead of only on search: `--trigger "<phrase>"` / `--trigger tool:Bash:git*` /
+`--trigger activity:plan` (repeatable), `--applies-to-project <slug|*>`, `--applies-to-tool
+claude-code`, `--priority <1-7>` (the 8-9 critical band is EARNED from linked violations, never
+declared). When the advisory activation adapter is installed (`install.mjs --install-activation`,
+Claude Code, per-project), these lessons surface as advisory context at prompt / tool /
+session-start events — exit 0, never a block. Mute a lesson for one project by id via a
+hand-authored `<project>/.episodic-memory/lesson-suppress.json` (fail-open). Full flag reference:
+"Lesson activation" in `EM_SCRIPTS_GUIDE.md`.
+
+### Playbooks (RFC-011)
+
+A consumer project may declare per-project playbook loading preferences in an optional
+hand-authored `<project>/.episodic-memory/playbooks.json` (schema-backed, at most 32 entries /
+64 KiB). Each entry selects a playbook lesson episode by **episode id** — any chain member;
+the trigger-index build resolves it to the terminal active revision — and a `mode`:
+`session_start` (surface at every session start) or `on_demand` (surface when the RFC-009
+trigger matcher fires). When the advisory activation adapter is installed, declared playbooks
+render as provenance-prefixed imperative `READ <id>` pointers into the tracked bounded
+`em-search --read <id>` (never bodies), the voluntary counterpart to the earned critical band.
+A missing or malformed file degrades to no playbooks loaded (advisory fail-open);
+`em-prune` / `em-consolidate --fold-superseded` protect referenced chains and fail CLOSED
+(abort) on a present-but-unparseable file. Full reference: “Playbooks (RFC-011 R1/R2)” and
+“Playbooks (RFC-011 R3/R4)” in `EM_SCRIPTS_GUIDE.md`.
+
+```json
+{"schema_version":1,"playbooks":[{"id":"<episode-id-a>","mode":"session_start"},{"id":"<episode-id-b>","mode":"on_demand","triggers":["review panel"]}],"bounds":{"max_playbooks":2}}
+```
+
+## Research (web search + store)
+
+When researching from the web: first check `em-search.mjs --category research --query "<topic>"` to avoid duplicates. Distill findings into body with enough detail to be useful without revisiting the URL. Add `--url` and `--category research`.
+
+## Recall
+
+- Session start: proactively `em-recall.mjs --project <name> [--task-type <implementation|push|rule|general>] [--limit 5]` — surfaces relevant episodes + violation pre-flight for behavioral patterns related to the task type (RFC-002 Phase 3). Use `--task-type implementation` before code work to surface recent bp-001/bp-006 violations.
+- User asks about past decisions: `em-search.mjs --query "<topic>" [--full]`
+- Before contradicting a past decision: search first
+
+```bash
+node ~/.episodic-memory/scripts/em-recall.mjs [--project <name>] [--task-type <implementation|push|rule|general>] [--scope local|global|all] [--limit <n>] [--days <n>]
+node ~/.episodic-memory/scripts/em-search.mjs [--project <name>] [--query <text>] [--tag <t>] [--category <c>] [--since <date>] [--limit <n>] [--full] [--scope local|global|all] [--include-superseded] [--history <id>]
+node ~/.episodic-memory/scripts/em-list.mjs [--project <name>] [--limit <n>]
+```
+
+### Recall routing (pick the level before you search)
+
+Route the query to the right abstraction level first; then search within it. Routing chooses WHERE to look — it never re-weights or re-ranks `em-search` results (the RFC-001 score-merge contract is untouched: passes stay independent, results merge by highest score).
+
+| Query class | Sounds like | Shipped surface | Command |
+|---|---|---|---|
+| Profile-class — standing rules, preferences, how-we-work, playbooks | "how do I run seats", "what are the review rules" | Operator memory (MEMORY.md index + feedback files, loaded at session start) and playbooks (session_start auto-load, RFC-011) | already in context at session start; on demand: `node ~/.episodic-memory/scripts/em-search.mjs --tag playbook --scope global --limit 1 --full` |
+| Event-class — what happened: decisions, bug root causes, milestones | "what did we decide about X", "why did Y break" | Episodes | `node ~/.episodic-memory/scripts/em-search.mjs --query "<topic>" [--tag <t>] [--scope local\|global\|all] [--full]` |
+| Evolution-class — how a decision changed; what is current | "what is the latest revision of X" | Supersedes chains | `node ~/.episodic-memory/scripts/em-search.mjs --history <episode-id> [--full]` |
+
+No transcript-level or topic-track routes exist: those levels are not shipped (`em-mine-transcripts.mjs` is a one-way staging miner, not a recall surface; topic tracks are not implemented). Honest capability labels (Principle 5): route only to what ships.
+
+### When to stop (recall budget)
+
+- Stop as soon as the answer is grounded: you can cite an episode id (or a chain terminal) that answers the question.
+- Stop after two consecutive queries that surface nothing new and relevant; broaden once (drop `--project`, widen `--scope`) before concluding the memory is absent.
+- Bound the pass: default at most 3 recall calls per question. Advisory session-start surfaces are already hard-bounded (RFC-009 R3: `max_matches` 3 / `max_tokens` ~500, the cap never flexes) and all surfacing is lifecycle-gated, never polled (RFC-012 B-4). That 3-call default is operational guidance layered within those unchanged bounds; no separate recall budget is introduced.
+
+## Revise (self-correction)
+
+When a prior decision proves wrong: search for original, then revise. Original is auto-marked superseded. Use `--history <id>` to show the full chain.
+
+```bash
+node ~/.episodic-memory/scripts/em-revise.mjs --original <id> --summary "<text>" --body "<text>" [--tags "<t1,t2>"]
+```
+
+## Staleness Check
+
+When encountering a URL, check if stored research exists and is stale. At session start or when recalling research, check for outdated entries. Re-fetch and revise if content changed.
+
+```bash
+node ~/.episodic-memory/scripts/em-check-stale.mjs [--days 30] [--project <name>]
+```
+
+## Behavioral Patterns
+
+Global episodic memory stores behavioral patterns — reusable workflows that apply across all projects. Tag with `behavioral-pattern` and scope `global`.
+
+**Pattern promotion:** When a project-specific decision proves to be a best practice (confirmed across 2+ projects), promote it to global memory:
+```bash
+node ~/.episodic-memory/scripts/em-store.mjs --project global --category decision --tags "behavioral-pattern,<topic>" --summary "<pattern name>" --body "<pattern details>" --scope global
+```
+
+**Pattern detection at session end:** Before storing session episodes, check if any project-specific decisions are generalizable. If a pattern would benefit other projects, store it globally with tag `behavioral-pattern`.
+
+## Session End
+
+Review session for 0-3 significant events, store them, then proceed with normal session handoff. Also examine project-specific decisions for potential promotion to global behavioral patterns.
+
+After writing the handoff (or a PR body), scan it so cited episodes earn recall weight: `node ~/.episodic-memory/scripts/em-feedback.mjs --scan-text <file>` records one +1 per resolved episode id it finds.
+
+## Maintenance
+
+Rebuild index if corrupted: `node ~/.episodic-memory/scripts/em-rebuild-index.mjs --scope all`
+
+## Pattern-health + review-dispatch surfaces (RFC-009 P3)
+
+- `em-trigger-index.mjs --with-pattern-health` recomputes and persists `session_start.pattern_health` (verdict derived from `em-pattern-health --hermetic --check`); without the flag the prior field carries forward verbatim. The SessionStart adapter renders one `pattern-health:` advisory line when the verdict is unhealthy.
+- `second-opinion.mjs request|consensus --timeout <ms>` (>= 1000) bounds each provider dispatch round; expiry kills the child, records `{round, timeoutMs}`, and persists partial output to `.review-store/forensics/` (never parsed as a verdict).
+- Every second-opinion dispatch prepends up to 3 matched lesson pointers (500-token bound, `--no-track`, incl. `activity:review` lessons) from the merged trigger index.
+
+exec
+/bin/zsh -lc "sed -n '1,320p' \""'$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+# EM Scripts Guide (agent-facing)
+
+This is the per-script reference for the episodic-memory substrate an agent uses at
+runtime. After `install.mjs` runs, every script below lives at
+`~/.episodic-memory/scripts/` and is invoked with `node` and an absolute path:
+
+```
+node ~/.episodic-memory/scripts/<script>.mjs [flags]
+```
+
+There is also a unified dispatcher: `em <command>` ≡ `node
+~/.episodic-memory/scripts/em-<command>.mjs` (shim at
+`~/.episodic-memory/bin/em`; `em help --json` lists every command). Both forms
+are equivalent — use whichever the harness makes easier.
+
+Every script prints a single JSON object to stdout. Parse that JSON. Do not scrape
+prose, and do not read the episode `.md` files or the `index.jsonl` directly to get
+data that a script will return for you.
+
+This guide is deployed to `~/.episodic-memory/EM_SCRIPTS_GUIDE.md` on every install.
+Human-facing walkthroughs live in `docs/USER_MANUAL.md`. Installation per harness is
+in `docs/install/`.
+
+> **Per-project model.** `install.mjs` hook and enforcement flags (`--install-hooks`, `--install-enforcement`, `--install-activation` and their uninstall counterparts) are independent per-project opt-ins, each scoped to the `--project <path>` you pass; enforcement is per-project and never global, none of these three layers ever writes to `~/.claude`, and a project without `--install-enforcement` has no gates.
+
+All outputs shown below are trimmed from real runs (Node v26, isolated sandbox).
+
+---
+
+## Intent routing (pick the right command)
+
+Match your intent to the command. The third column is the wrong habit it replaces.
+
+| Your intent | Right command | Wrong habit it replaces |
+|---|---|---|
+| "What happened recently?" / "did X happen?" | `em-list --project <name> --limit <n>` or `em-search --since <date> --tag <t> --no-track` | Guessing `--query` keywords and hoping for a hit |
+| Session-start context before working | `em-recall --project <name> [--task-type implementation]` | Reading random episode files, or skipping recall entirely |
+| Save a decision / discovery / milestone | `em-store --project <name> --category <cat> --summary ... --body ...` (use `--body-file` for long bodies; `--scope local` for repo-tied episodes) | Hand-writing an episode `.md` file |
+| Correct a wrong past decision | `em-revise --original <id> --summary ... --body ...` | Editing the original episode file in place |
+| Investigative / exploratory search | `em-search --query ... --no-track --no-score` | A plain `em-search` that reorders results and bumps access counts |
+| Index looks wrong / out of sync | `em-rebuild-index --scope all` | Hand-editing `index.jsonl` |
+| Anything feels broken / slow / inconsistent | `em-doctor` (then `em-doctor --fix`) | Guessing at which index to rebuild, or ignoring warnings |
+| Maintenance should run itself (doctor/embed/backup/hygiene) | `em-routines sync`, then `em-routines list` | Hand-written crontabs, or the legacy machine-specific launchd script |
+| A recalled episode actually helped / kept being irrelevant | `em-feedback --id <id> --useful` / `--noise` | Letting access counts alone decide future ranking |
+| A decision must never fade or be pruned | `em-pin --id <id>` (or `em-store --pin`) | Re-storing the same decision periodically to keep it fresh |
+| Episode stored in the wrong scope (global vs local) | `em-move --id <id> --to local\|global` | `mv` + manual rebuild (loses counters, leaves stale rows) or re-storing (new id, broken chains) |
+| Store cluttered with near-duplicate episodes on one topic | `em-consolidate` (dry-run), then `--apply` | Leaving duplicates to dilute search, or deleting episodes by hand |
+| "What does memory actually hold?" | `em-stats` | Counting episode files by hand |
+| Topic lookup where wording differs from storage | `em-semantic --query <text>` (after `em-embed`) | Guessing synonyms into `em-search --query` |
+| Find a topic across all projects | `em-search --query <topic> --scope all` | Grepping episode files |
+| Show the full history of one episode | `em-search --history <id> --full` | Guessing which revision is current |
+| "What is connected to this episode?" (lineage, clusters, hubs) | `em-graph --from <id>` / `--orphans` / `--hubs` | Manual joins across multiple searches |
+| Significant session ended, nothing stored yet | `em-capture extract` then `review` (or `em-capture list` when recall reports `pending_drafts`) | Reconstructing the session from memory, or silently storing without review |
+| Session start printed an install version-drift notice | `em-sync-install` (this project, from the dist cache) or `node <repo>/install.mjs --update-consumers` (all registered projects) | Hand-copying hook/skill files, or re-running full installs in every consuming project |
+| One view of EVERY registered project's store (analytics/health/fold) | `em-stats --all-projects`, `em-doctor --all-projects`, `em-consolidate --fold-superseded --all-projects --dry-run` | Cd-ing into each project and running per-store commands |
+| The same lesson keeps recurring across projects | `em-promote` (dry-run), then `em-promote --apply` (EXPERIMENTAL) | Re-learning it per project, or hand-copying lesson episodes to global |
+| Derive a topic track from related primary episodes (manual curation) | `em-topic-tracks` (dry-run preview), then `--apply --confirm <fingerprint>` | Hand-crafting a global lesson by eye, or skipping provenance links so future sessions lose the source chain |
+| User wants to SEE the store (dashboard, browse, drafts, hygiene) | `em-console` — hand the user the printed URL | Pasting walls of JSON at the user |
+| User wants guided maintenance in the terminal | `em-manage` (interactive menu) | Dictating flag-by-flag commands to a human |
+| Make a lesson surface on a phrase / tool / activity (or rebuild that index) | `em-store --category lesson --trigger ...` then `em-trigger-index` | Hoping search recall happens to resurface the lesson |
+
+Default write scope is GLOBAL. Pass `--scope local` to keep an episode inside the
+current repo's `.episodic-memory/`. Searches read local and global together by
+default.
+
+---
+
+## Hard rules
+
+1. NEVER hand-write an episode `.md` file, and NEVER append a row to `index.jsonl`
+   by hand. On 2026-07-04 a Pi Agent session hand-authored an episode file plus a
+   raw `index.jsonl` row with frontmatter `created:` instead of `date:`/`time:`.
+   Every later session that ran `em-list` then crashed with
+   `TypeError: (b.date + b.time).localeCompare is not a function` (the sort at
+   `em-list.mjs:64` reads `date` and `time`, which the hand-written row lacked).
+   Read-side hardening is PR #447; writer-side validation is tracked in issue #448.
+   Use `em-store` / `em-revise` so the frontmatter and the index row are always
+   written together and correctly.
+2. Episode IDs are immutable. A decision is never edited. It is corrected by a
+   revision chain: `em-revise --original <id>` writes a new episode that supersedes
+   the old one, and default searches then return only the latest active version.
+3. Every script prints JSON to stdout. Parse it. Do not scrape prose or log lines.
+4. After install the scripts live at `~/.episodic-memory/scripts/`. Always invoke
+   them with `node` and the absolute path shown above, from any working directory.
+5. Every installed script supports `--help` / `-h` (PR #449): a standalone help
+   token anywhere in the arguments prints one JSON object
+   `{"status":"help","script":"<name>.mjs","usage":"..."}` and exits 0 with zero
+   side effects. Exception: for `em-lock`, tokens after its `--` separator belong
+   to the wrapped command and never trigger help. On OLDER deployed copies
+   (before PR #449) `--help` was not universal and probing could RUN a script's
+   default behavior, including a real `em-prune` pass; if `--help` returns
+   anything other than `status: "help"`, refresh the install before probing
+   further, and read the flag lists in this guide instead.
+
+---
+
+## Read-only manifest (checkpoint-gate integration, E4)
+
+`patterns/readonly-commands.json` (schema:
+`patterns/readonly-commands.schema.json`; deployed to
+`~/.episodic-memory/patterns/readonly-commands.json`) is the first-party
+registry of command shapes that are read-only BY DESIGN. The Claude Code
+checkpoint gate consults it — via `scripts/classifier-hold-consult.mjs`, on
+the canonical form from `scripts/lib/command-canonical.mjs` — before holding a
+novel Bash command for agent classification, so by-design readers (`em-stats`,
+`em-graph`, `em-doctor` without `--fix`, `em-pattern-health --check`,
+`em-recall` with its documented read flags, `node --version`, and the readers
+already hardcoded in the shell classifier) run without a false-positive hold.
+
+Maintenance rule: when a script gains a WRITE flag, add it to that entry's
+`deny_flags` (or move the entry to a closed `allow_flags` list) in the same
+PR; when a new read-only script ships, add an entry citing this guide. A stale
+manifest fails CLOSED (the hold returns) — never open. Tests:
+`tests/test-readonly-manifest.mjs`.
+
+On a manifest miss the gate additionally tries a non-interactive LLM
+auto-classify (`llm-classify.mjs --three-way`; requires `ANTHROPIC_API_KEY`,
+hard 10s timeout, confidence >= 0.8, verdict cached with `"source":"llm"`)
+before falling back to the agent hold. See
+`plugins/claude-code/hooks/README.md` for the full consult order.
+
+---
+
+## Category vocabulary (RFC-009 R10)
+
+The set of valid episode categories is a closed vocabulary defined once in
+`categories.json` (repo root; deployed to `~/.episodic-memory/categories.json`), read by
+every script through `scripts/lib/categories.mjs`. Do not hardcode category names anywhere.
+
+- Members: `decision`, `discovery`, `milestone`, `context`, `research`, `lesson`,
+  `violation`, `workflow.lifecycle`, `workplan`, `temporary`.
+- A **category** is a single load-bearing typed field (exactly one per episode, drawn from
+  this vocabulary). **Tags** are a free-form, additive label set and are never load-bearing
+  in control flow. Filter by category with `em-search --category`, by tag with `--tag`.
+- **Write surfaces are strict**: `em-store` and `em-revise` reject an unknown or deprecated
+  category (a deprecated one names its successor). `em-restore --apply` skips-and-surfaces an
+  unknown-category episode instead of writing it through.
+- **Read/index/prune surfaces are tolerant**: an episode with an unknown category never breaks
+  listing, search, ranking, or index build; `em-rebuild-index --check` reports it as drift.
+- **Lifecycle**: most categories are `standard`. `temporary` is `aggregate-then-prune` — once a
+  temporary episode is consolidated (carries `superseded_by`), `em-prune` may archive it
+  aggressively even if it is referenced by a successor's `consolidates` array.
+- **Deprecation** is by mapping, never deletion: a member gains `deprecated_for: <successor>`
+  and readers map it at read/index time; stored episode bytes are never rewritten.
+
+---
+
+## Lesson activation (RFC-009 R1/R2 write + index, R3/R4 event plane)
+
+Lesson episodes may carry OPTIONAL activation frontmatter, written through flags on
+`em-store`/`em-revise` (lesson-only; any other category rejects them):
+
+- `--trigger <value>` (repeatable) — three explicit kinds: a plain **phrase**
+  (`"second opinion"`), a **tool** binding (`tool:Bash:git*`), or an **activity**
+  class (`activity:plan`). Activity classes come from the closed vocabulary in
+  `activation-classes.json` (repo root; deployed to `~/.episodic-memory/`) —
+  `plan|design|review|troubleshoot|implement|push|rule`; an unknown or deprecated
+  class is rejected at write time. (Phrase sets inside the vocabulary are empty in
+  P1b; the P2 activation adapter populates and consumes them.)
+- `--applies-to-project <slug|*>` / `--applies-to-tool <id>` (repeatable) — scoping;
+  tool ids are the fixed set `claude-code|codex|opencode|pi-agent|cursor|windsurf`.
+- `--priority <1-7>` (default 5) — the DECLARED priority. **8-9 is the EARNED
+  critical band and is never writer-declarable**: it is derived at trigger-index
+  build time from linked violations (one linked violation → `effective_priority` 8,
+  two or more → 9). Stored episode bytes are never mutated by the band.
+- `--review-by <YYYY-MM-DD>` — expiry; an expired lesson drops out of the trigger index.
+- `--evidence <violation-id>` (repeatable) — back-link a lesson to the violations
+  that prove it matters. Validated at write time against the MERGED local+global
+  index (existence + `category: violation`).
+
+`em-violation` gains the symmetric `--lesson <lesson-id>` (repeatable) forward-link and
+now writes a typed `violated_pattern: <pattern-id>` frontmatter scalar (T6): `em-recall`'s
+violation preflight and `em-pattern-health`'s strike counting read the typed field,
+dual-read with the legacy `violated:<id>` tag during the burn-in window (issue #457).
+
+`em-trigger-index` builds ONE derived `trigger-index.json` per store (see its full
+entry); writes of trigger-bearing lessons print an informational R9a collision report
+on stderr when another active lesson shares a trigger phrase (the write always proceeds).
+The `RFC-009-lesson-activation.contract.json` mirror + `validate-rfc-009-contract-mirror.mjs`
+diff these surfaces against code in CI.
+
+### Event plane — the advisory activation adapter (R3/R4, P2)
+
+The adapter is the CONSUMER half: a Claude-Code-only, per-project, opt-in set of three thin
+hooks installed by `install.mjs --install-activation` (reverse with `--uninstall-activation`).
+It never enforces — every hook exits 0 and emits no decision/block field — and reads ONLY the
+purpose-built derived indexes, never `index.jsonl`, episode bodies, or environment:
+
+- `activation-prompt` (UserPromptSubmit) and `activation-tool` (PreToolUse) match the merged
+  `trigger-index.json` against the event and inject up to `max_matches` bounded lesson pointers
+  as `additionalContext` (band 8-9 rendered imperatively; ≤7 plain).
+- `activation-sessionstart` (SessionStart) renders the precomputed `session_start` blend:
+  tier-1 `critical_entries` (every active band 8-9 lesson, trigger-independent) then tier-2
+  `entries` (static-score top-N, cross-tier deduped) plus the violation preflight (per-task-type
+  counts derived from the `violated_pattern` field).
+- All three share `activation-hook-run.mjs` and a co-located `manifest.json` carrying the
+  project scope identity (slug + resolved root); the hook filters `applies_to_*` against THAT
+  identity, never inherited cwd or environment.
+
+Per-project suppression: a hand-authored `<project>/.episodic-memory/lesson-suppress.json`
+(`{ "schema_version": 1, "suppress": [{ "episode_id", "reason", "added" }] }`, schema
+`schemas/lesson-suppress.schema.json`) mutes lessons by id across ALL bands. The whole-file
+load is fail-open: a **missing** file yields no suppression **silently** (no note — the common
+case); a present-but-unreadable, syntax-malformed, or shape-malformed file yields no suppression
+plus exactly one stderr note. Injection always proceeds — never fatal. There is no `em-suppress` writer
+this phase; the file is hand-authored (RFC-009 R1). Suppression is for SCOPE errors; correct a
+WRONG lesson via `em-revise` supersession instead (the superseded version drops from the index).
+
+**Playbooks (RFC-011 R3/R4).** A per-project `<project>/.episodic-memory/playbooks.json`
+extends the session-start surface and the on-demand matcher with DECLARED pointers
+to playbook lesson episodes — the voluntary counterpart to the earned critical band
+(see `em-trigger-index` for the derived data and `em-search --read` for the tracked
+bounded read the pointers name). The session-start hook renders one imperative line
+per `session_start` playbook, AFTER the tier-1 critical band and BEFORE the tier-2
+static blend:
+
+```
+playbook (playbooks.json): READ <terminal-id> before proceeding (node <scripts>/em-search.mjs --read <terminal-id>): <summary>
+```
+
+The `playbook (playbooks.json):` provenance prefix is load-bearing — declared
+injection is visible and auditable, never ambient. `lesson-suppress.json` mutes a
+playbook id by episode id (applied before dedup, like every band). A playbook id
+that is also a tier-1 candidate renders once in the critical form instead, and
+playbook ids are excluded from the tier-2 blend (one id, one line). When the build
+capped declarations the note carries `+N declared playbooks capped, incl. <id>`;
+when the token budget drops a line, `+N more suppressed, incl. playbook <episode_id>`.
+On demand, `entry_class: "playbook"` rows (derived from `on_demand` declarations)
+flow through the existing `matchActivation` matcher untouched and render the same
+playbook form when matched. The adapter stays advisory — every path exits 0 with no
+decision field; an ABSENT `playbooks.json` is normal zero-state (renders nothing,
+silent); a MALFORMED file renders nothing with a stderr note.
+
+---
+
+## Full entries
+
+### em-store
+
+Create a new episode.
+
+- WHEN TO USE: a significant decision, a bug root cause or non-obvious discovery, a
+  milestone, a critical constraint, or an explicit "remember this". Store 0 to 3 per
+  session.
+- WHEN NOT TO USE: routine edits, credentials, or anything already captured. Never
+  as a substitute for `em-revise` when correcting an existing episode.
+
+```
+node ~/.episodic-memory/scripts/em-store.mjs \
+  --project <name> \
+  --category <decision|discovery|milestone|context|research|lesson|violation|workflow.lifecycle|workplan|temporary> \
+  --tags "<t1,t2>" \
+  --summary "<one line>" \
+  --body "<detail>" \
+  [--body-file <path|->] [--scope local|global] [--url <source-url>]
+```
+
+Output on success:
+
+```json
+{"status":"ok","id":"20260704-133309-chose-jwt-over-sessions-7cd4","file":".../episodes/20260704-133309-chose-jwt-over-sessions-7cd4.md","scope":"global"}
+```
+
+Output when required args are missing:
+
+```json
+{"status":"error","message":"Missing required args. Usage: --project <name> --category <decision|discovery|milestone|context|research|lesson|violation|workflow.lifecycle|workplan|temporary> (--tags <t1,t2> | --tag <t> [--tag <t> ...]) --summary <text> (--body <text> | --body-file <path|->) [--scope local|global]"}
+```
+
+Flags that matter:
+- `--scope` defaults to `global`. Pass `--scope local` for episodes that should stay
+  inside this repo.
+- `--body-file <path|->` reads the body from a file; `-` reads stdin. It is recommended for bodies containing backticks, `$()`, or `$VAR`, which an inline shell argument may expand before the script sees it. Also use it for long bodies (plan documents), so a huge inline `--body` does not trip a shell or permission gate. Mutually exclusive with `--body`.
+- Tags accept `--tags a,b`, repeated `--tag a --tag b`, or a mix. They are merged,
+  deduplicated, lowercased, and sorted.
+- Lesson-only activation flags (`--trigger`, `--applies-to-project`, `--applies-to-tool`,
+  `--priority`, `--review-by`, `--evidence`) — see "Lesson activation" above. Inline-array
+  values may not contain `,` `[` `]` `"` (rejected before any write).
+
+Common mistakes: forgetting `--category`; passing `--scope local` when you meant the
+default global; hand-writing the file instead of calling this script; trying
+`--priority 8` (the 8-9 band is earned, not declared).
+
+### em-revise
+
+Supersede an existing episode with a corrected one.
+
+- WHEN TO USE: a stored decision proved wrong or changed. The original is marked
+  `superseded` and the new episode becomes the active one.
+- WHEN NOT TO USE: to fix a typo (that is still a revision, but consider whether it
+  is worth a chain entry); never edit the original file directly.
+
+```
+node ~/.episodic-memory/scripts/em-revise.mjs \
+  --original <episode-id> \
+  --summary "<what changed>" \
+  --body "<why / the correction>" \
+  [--tags "<t1,t2>"] [--body-file <path>] [--scope inherit|local|global]
+```
+
+Output:
+
+```json
+{"status":"ok","id":"20260704-133309-switched-to-session-cookies-285f","file":".../episodes/20260704-133309-switched-to-session-cookies-285f.md","supersedes":"20260704-133309-chose-jwt-over-sessions-7cd4","scope":"global"}
+```
+
+Flags that matter:
+- `--scope` defaults to `inherit` (the revision lands in the same store as the
+  original). Only pass `local` or `global` to force a cross-store move.
+- Tags are inherited from the original and merged with any you pass.
+- The same lesson-only activation flags as `em-store` apply (validated against the
+  INHERITED category). Activation, linkage, and `violated_pattern` are INHERITED
+  from the original — like tags — so a typo-revision never demotes a lesson to
+  freeform; a flag passed on the revise OVERRIDES that one field (replace, not merge).
+
+Common mistakes: inventing a new episode with `em-store` instead of revising, which
+leaves both versions active and searchable.
+
+### em-search
+
+
+exec
+/bin/zsh -lc 'wc -l "$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md" && sed -n '"'321,640p' \""'$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+    1481 /Users/charltondho/.episodic-memory/EM_SCRIPTS_GUIDE.md
+Search episodes with local plus global fallback.
+
+- WHEN TO USE: "what did we decide about X", finding an episode id to revise, or any
+  topic lookup.
+- WHEN NOT TO USE: to list the newest N episodes with no query (use `em-list`), or at
+  session start (use `em-recall`).
+
+```
+node ~/.episodic-memory/scripts/em-search.mjs \
+  [--project <name>] [--query <text>] [--tag <t>] [--category <cat>] \
+  [--since <YYYY-MM-DD>] [--limit <n>] [--scope local|global|all] \
+  [--full] [--include-superseded] [--read <id>] [--history <id>] [--no-score] [--no-track] \
+  [--warn-time-ms <n>] [--warn-count <n>]
+```
+
+`--history` is the evolution-class route: use it whenever the question is "what is the CURRENT version of this decision," not "did this happen."
+
+Output:
+
+```json
+{"status":"ok","count":1,"episodes":[{"id":"20260704-133309-chose-jwt-over-sessions-7cd4","date":"2026-07-04","time":"13:33","project":"demo","category":"decision","status":"active","supersedes":null,"tags":["api","auth"],"summary":"Chose JWT over sessions","source":"global"}]}
+```
+
+Flags that matter (from the script's own `Usage:` header):
+- `--query` is tiered: exact summary match (1.0) > contiguous summary substring
+  (0.7) > all-tokens-match across summary/tags/body (field-weighted, < 0.7) >
+  contiguous body substring (0.4). Multi-word queries no longer need to be an
+  exact substring — every token just has to land somewhere. Token order does
+  not matter.
+- Query lookups are accelerated by `tokens.json` (a token inverted index the
+  writers maintain; rebuilt by `em-rebuild-index`). Results are identical to a
+  full scan — the index only prunes candidates. Missing index → slow full
+  scan + a rebuild warning. Tokens dropped by the df diet (recorded under the
+  index's `_dropped` marker; see `em-rebuild-index`) are non-pruning: a query
+  containing one falls back to full scoring for that token instead of
+  returning zero candidates, so results stay identical there too.
+- Partial tier: when strict matches leave `--limit` unfilled, multi-word
+  queries also return episodes matching at least HALF the tokens, marked
+  `"match":"partial"` and scored below every full match. `--no-score`
+  suppresses partials (stable recency contract).
+- By default `em-search` scores results by relevance and tracks access (each hit
+  bumps the episode's `access_count` and reorders future relevance).
+- `--no-score` skips relevance scoring so results come back in a stable
+  recency order.
+- `--no-track` skips access tracking. Use it (with `--no-score`) for investigative
+  or repeated searches so you do not pollute the usage signals that recall relies on.
+  History queries and `--include-superseded` already skip tracking.
+- `--full` includes episode bodies. `--history <id>` returns the whole revision
+  chain. The walk follows `supersedes`, `superseded_by`, and `consolidates` edges
+  (cycle-safe); a single-`supersedes` chain is unchanged. Chain members that
+  were archived (`em-prune`, `em-consolidate --fold-superseded`) still appear:
+  the walk also reads `archived-index.jsonl`, flags them `"archived": true`,
+  and `--full` resolves their bodies from `archived/`.
+- `--read <id>` is the tracked, bounded, single-episode read (RFC-011 R7) the
+  playbook pointers name. It fetches exactly ONE episode by exact id — no
+  chain walk, no search fallthrough (an unknown OR empty id returns
+  `{"status":"error"}` exit 1; an empty value never falls through to search).
+  The episode payload is built from the episode FILE's parsed frontmatter
+  merged over the index row (the file wins for frontmatter fields; the index
+  row supplies `access_count`/`last_accessed`/`source`), so hand-authored or
+  foreign frontmatter keys survive the read. The read resolves `episodes/`
+  then `archived/` (an archived episode returns normally with its `status`
+  field visible). The body is bound to its SERIALIZED form in bytes: it is
+  truncated until `Buffer.byteLength(JSON.stringify(body), 'utf8') <= 49152`
+  with `body_truncated: true` and a stderr note (a truncated body is a prefix
+  of the original; output is always valid JSON). An index row whose body file
+  is absent from BOTH `episodes/` and `archived/` returns `body_missing: true`
+  with a stderr note and is NOT tracked (a delivered-nothing read must never
+  feed the conversion metric a clean follow). Otherwise the read WRITES access
+  tracking (`access_count` +1, `last_accessed`) on that row; `--no-track`
+  skips it. If both `--read` and `--history` are passed, `--read` wins.
+- `--category <cat>` is index-backed via `category-index.json` (same degrade-to-linear-scan
+  fallback as `--tag`). A deprecated category name canonicalizes to its successor; an unknown
+  category still filters (tolerant read).
+- `--warn-time-ms <n>` and `--warn-count <n>` tune the elapsed-time and total-episode thresholds for performance warnings (defaults 500 ms and 5000 episodes).
+
+`--history` output (chain, oldest first):
+
+```json
+{"status":"ok","count":2,"chain":[{"id":"...-chose-jwt-over-sessions-7cd4","status":"superseded",...},{"id":"...-switched-to-session-cookies-285f","status":"active","supersedes":"...-chose-jwt-over-sessions-7cd4",...}]}
+```
+
+`--read <id>` output (found — file frontmatter merged over the row, body
+included, access tracked; an unknown OR empty id returns the `error` shape and
+exit 1, never a search fallthrough):
+
+```json
+{"status":"ok","episode":{"id":"ep-read-1","date":"2026-07-08","time":"00:00","project":"t","category":"lesson","status":"active","summary":"tracked bounded read demo","tags":[],"triggers":["x phrase"],"priority":5,"access_count":0,"last_accessed":null,"source":"local","body":"# tracked bounded read demo\n\nthe playbook body text"}}
+{"status":"error","message":"Episode \"unknown-id\" not found"}
+```
+
+The read tracks access on the matched row (it bumps the index row's
+`access_count` +1 and stamps `last_accessed`); the values in the emitted
+episode are the PRE-increment row values (`access_count` 0 and `last_accessed`
+`null` on a first read), so the on-disk row reads `1` / a timestamp after the
+read. `--no-track` leaves the row untouched. A body whose
+`JSON.stringify(body)` exceeds 49152 bytes returns `body_truncated: true` (the
+body is truncated to AT MOST the cap — <= 49152 serialized bytes, a prefix of
+the original); a row with no body file in either `episodes/` or `archived/`
+returns `body_missing: true` and is not tracked. Both print a stderr note.
+
+Common mistakes: guessing `--query` words when you actually want a time or tag
+filter (use `--since` / `--tag` / `--category`); running plain `em-search` in a loop
+and skewing relevance instead of adding `--no-track --no-score`.
+
+### em-list
+
+List the most recent episodes, newest first. No relevance scoring.
+
+- WHEN TO USE: "what happened recently", a quick catch-up, confirming a store landed.
+- WHEN NOT TO USE: topic search (use `em-search`), or context assembly at session
+  start (use `em-recall`).
+
+```
+node ~/.episodic-memory/scripts/em-list.mjs [--project <name>] [--limit <n>] [--scope local|global|all] [--include-superseded]
+```
+
+Output:
+
+```json
+{"status":"ok","count":1,"episodes":[{"id":"20260704-133309-chose-jwt-over-sessions-7cd4","date":"2026-07-04","time":"13:33","project":"demo","category":"decision","status":"active","supersedes":null,"tags":["api","auth"],"summary":"Chose JWT over sessions","source":"global"}]}
+```
+
+Common mistakes: expecting a `--query` flag (there is none); this is a pure recency
+list.
+
+### em-recall
+
+Proactive session-start recall via a three-pass retrieval (project match, tag match,
+recent cross-project) plus behavioral-pattern pre-flight warnings.
+
+- WHEN TO USE: the first thing you do when starting work on a project. Pass
+  `--task-type implementation` before code work to surface recent bp-001 / bp-006
+  violations from the last 30 days.
+- WHEN NOT TO USE: for a specific topic lookup (use `em-search`).
+
+```
+node ~/.episodic-memory/scripts/em-recall.mjs [--project <name>] [--task-type <implementation|push|rule|general>] [--scope local|global|all] [--limit <n>] [--days <n>] [--no-track] [--warn-time-ms <n>] [--warn-count <n>]
+```
+
+Output shape:
+
+```json
+{"status":"ok","context":{"project":"demo","branch_tokens":["..."],"effective_tokens":["..."],"task_type":null},"count":3,"episodes":[{"id":"...","summary":"Chose JWT over sessions","source":"global","score":0.998}],"preflight_warnings":[],"prune_suggestion":null}
+```
+
+Flags that matter: `--task-type implementation` adds the violation pre-flight;
+`--no-track` avoids bumping access counts if you are recalling repeatedly;
+`--warn-time-ms <n>` and `--warn-count <n>` tune performance-warning thresholds.
+
+Common mistakes: skipping recall and re-deriving context that a past session already
+recorded.
+
+Stopping: stop when an episode id grounds the answer, or after two empty queries (broaden scope once); at most 3 recall calls per question; session-start advisory bounds (RFC-009 R3 max_matches/max_tokens) never flex.
+
+### em-pin
+
+Pin/unpin an episode. Pinned episodes never decay below a 0.6 time factor in
+search/recall scoring (unpinned floor 0.1) and are never archived by
+`em-prune`. Revisions inherit pinning.
+
+- WHEN TO USE: a foundational decision (architecture choice, hard-won
+  constraint) that must stay competitive with fresh episodes indefinitely.
+- WHEN NOT TO USE: routine notes — pinning everything defeats decay.
+
+```
+node ~/.episodic-memory/scripts/em-pin.mjs --id <episode-id> [--unpin]
+```
+
+Output: `{"status":"ok","id":"...","pinned":true,"scope":"local"}`. You can
+also pin at creation time: `em-store --pin` / `em-revise --pin`.
+
+### em-feedback
+
+Record whether a recalled episode was actually useful. `access_count` says an
+episode was SEEN; this counter says it HELPED (+1, `--useful`) or was noise
+(-1, `--noise`). The scorer folds it in at ±5% per point (clamped −30%/+50%),
+so consistently useful episodes rise and consistently irrelevant ones sink.
+
+- WHEN TO USE: after a recalled/searched episode genuinely shaped a decision
+  (`--useful`), or when the same irrelevant episode keeps surfacing
+  (`--noise`).
+- WHEN NOT TO USE: as a bookmark (that is `em-pin`) or reflexively on every
+  search hit — feedback is signal precisely because it is deliberate.
+
+```
+node ~/.episodic-memory/scripts/em-feedback.mjs --id <episode-id> (--useful | --noise)
+node ~/.episodic-memory/scripts/em-feedback.mjs --scan-text <file> [--scope local|global|all] [--dry-run]
+```
+
+Output: `{"status":"ok","id":"...","feedback":3,"scope":"global"}`. Counter
+clamps to [-10, 10] and survives index rebuilds.
+
+`--scan-text` is batch inference: an episode id cited in a session handoff,
+PR body, or lessons write-up demonstrably shaped that artifact, which is the
+`--useful` signal without the typing. It extracts episode-id patterns (shape
+derived from em-store's generator), dedupes, skips ids that do not resolve in
+the selected scope(s), and records ONE +1 per resolved id. `--dry-run`
+previews without writing. Wrap-up habit: scan the handoff/PR body so cited
+episodes earn recall weight.
+
+Output: `{"status":"ok","mode":"scan-text","scope":"all","scanned":1,"matched":5,"resolved":4,"recorded":4,"skipped_unresolved":1,...}`
+
+### em-move
+
+Atomic episode relocation between scopes (RFC-005). Preserves the id,
+supersedes chain, access/feedback counters, and pinned flag; updates
+index.jsonl, tags.json, category-index.json, and tokens.json in BOTH scopes;
+writes an audit episode (category `context`, tag `em-move`) to the
+destination scope.
+
+- WHEN TO USE: demoting a project-specific episode that leaked into global,
+  or promoting a local lesson that proved cross-project.
+- WHEN NOT TO USE: content edits (`em-revise`), archival (`em-prune`),
+  cross-project moves (out of scope by design).
+
+```
+node ~/.episodic-memory/scripts/em-move.mjs (--id <full-id> | --ids <id1,id2,...> | --filter-tag <tag>) \
+  --to local|global [--dry-run] [--reason <text>] [--no-audit] [--confirm] [--break-anchors]
+```
+
+Safety gates: full ids only; >10 episodes needs `--confirm`; ids hardcoded in
+`MEMORY.md` anchors refuse without `--break-anchors`; found-in-both-scopes
+with different content is a hard error (identical content completes the
+interrupted move). Every refusal path writes nothing.
+
+Output: `{"status":"ok","moved":[{"id":"...","from":"global","to":"local","audit_id":"..."}],"noop":[],"errors":[]}`
+
+### em-consolidate
+
+Fold clusters of near-duplicate episodes into digest episodes (RFC-001's
+semantic-consolidation capability). Dry-run by DEFAULT — `--apply` writes.
+
+- WHEN TO USE: a topic has accumulated several overlapping episodes that
+  dilute search results; periodic store hygiene.
+- WHEN NOT TO USE: correcting one wrong episode (`em-revise`), or archival
+  (`em-prune`). Digests never re-fold; pinned members are excluded unless
+  `--include-pinned`; violation/workplan/workflow.lifecycle never cluster.
+
+```
+node ~/.episodic-memory/scripts/em-consolidate.mjs [--scope local|global] \
+  [--min-sim <0..1>] [--min-cluster <n>] [--category <cat>] [--project <name>] \
+  [--include-pinned] [--apply] [--confirm]
+node ~/.episodic-memory/scripts/em-consolidate.mjs --clerk [--scope local|global]
+node ~/.episodic-memory/scripts/em-consolidate.mjs --clerk --apply --confirm \
+  [--scope local|global] [--reject-all] [--reject-member <id>]... [--lock-timeout <s>]
+node ~/.episodic-memory/scripts/em-consolidate.mjs --fold-superseded \
+  [--min-chain <n>] [--dry-run] [--scope local|global]
+node ~/.episodic-memory/scripts/em-consolidate.mjs --fold-superseded \
+  --all-projects [--min-chain <n>] [--dry-run] [--confirm]
+```
+
+Clerk report mode (`--clerk` without `--apply`) is READ-ONLY over episode and source-index state. It proposes `merge`, `dedupe`, or `keep-distinct` clusters from lexical signals: tag Jaccard after high-document-frequency tags are dropped, summary Jaccard, and shared triggers. It emits `mode: "clerk-report"` and writes nothing except a derived `trigger-index.json` that may be lazily built while loading shared triggers.
+
+Clerk apply mode (`--clerk --apply --confirm`) fails closed without `--confirm`. It holds one blocking target-store `clerk-apply.lock` (`.episodic-memory/clerk-apply.lock` for a local store) for the whole apply; `--lock-timeout <s>` controls acquisition and defaults to 30 seconds. For a merge, writes are ordered digest first, then member `status: superseded` / `superseded_by` index flips; the original knowledge remains reachable and can be reactivated through `em-revise`. Apply finishes with exactly one run-record episode per invocation: `category: workflow.lifecycle`, scalar `record_type: clerk-run`, with a `clerk_cutover` stamp. Each apply invocation detects incomplete prior applies and reports their orphans as benign (digest written, members active) or dangerous (members already superseded).
+
+Human rejections are explicit apply inputs: `--reject-all`, or repeatable `--reject-member <id>` for any cluster containing that member. The run record carries rejected cluster fingerprints, and a rejected cluster is not re-proposed against an unchanged store. `--scope local|global` chooses the store for both report and apply.
+
+Standard (non-clerk) clustering is body-token Jaccard within (project, category) groups; the
+0.35 default separates genuine near-duplicates (~0.35–0.5) from unrelated
+episodes (~0.0). On `--apply`, each cluster gets one digest episode carrying
+`consolidates: [ids...]`, union tags, full member bodies, and inherited
+pinning; members flip to `status: superseded` + `superseded_by: <digest>` in
+file and index, so they stop surfacing but stay reachable via `--history`.
+More than 5 clusters requires `--confirm`.
+
+`--fold-superseded` targets long revision chains instead of duplicates: for
+each LINEAR supersedes-chain with at least `--min-chain` members (default
+10), the non-terminal members are archived via the same mechanism `em-prune`
+uses (file to `archived/`, index row to `archived-index.jsonl`, `tags.json`
+cleaned — a reversible move, never a delete). The terminal episode is
+untouched, ids stay immutable, bodies are never edited, and
+`em-search --history` still shows the full chain (the walk reads archived
+metadata; archived members carry `"archived": true`). Pinned or
+still-active members are kept and reported; forked/non-linear chains are
+skipped whole. `--dry-run` lists exactly what a real run would move. Output:
+`{"status":"ok","mode":"fold-superseded","dry_run":false,"chains":[{"terminal":"...","chain_length":12,"folded":[...],"kept":[...]}],"folded_total":11}`.
+
+`--all-projects` (fold mode only, mutually exclusive with `--scope`) folds
+every consumer-registry store in one pass; output gains a per-store `stores`
+array. A REAL multi-store run requires `--confirm` and fails closed before
+any move. R6 protection is unioned across cwd-local + global + ALL registered
+stores, so a referencer in any store protects a chain member in any other.
+Registrations whose substrate-resolved store is not `<project>/.episodic-memory`
+(git-nested paths, linked worktrees, symlinked store dirs) are reported
+`skipped_store: "non-root-store"` and never written.
+
+### em-stats
+
+Read-only store analytics — never writes, never bumps access counters.
+
+```
+node ~/.episodic-memory/scripts/em-stats.mjs [--scope local|global|all] [--top <n>] [--all-projects]
+```
+
+`--all-projects` appends one scope block per consumer-registry store (label
+`project:<basename>`; the `dir` field is the identity — labels can collide,
+dirs cannot). Stores already covered by the `--scope` blocks are skipped by
+realpath, so a symlink-aliased local store never double-counts. Totals include
+the appended blocks.
+
+Per scope: episode totals (active/superseded/pinned), archived count,
+category + project + tag distributions, age buckets, access/feedback
+aggregates, a prunable estimate (same threshold as em-prune; pinned rows
+excluded), index-file presence/sizes, the date range, and
+`derived_index_bloat_ratio` (tokens.json bytes / index.jsonl bytes; `null`
+when either file is absent). A ratio far above ~1-5x means the token index is
+dominated by non-discriminating posting lists — `em-rebuild-index` applies
+the df diet and shrinks it; `em-doctor` warns above 20x.
+
+### em-embed
+
+Build or update the embeddings sidecar (`embeddings.jsonl`) that powers
+`em-semantic`. Incremental: only new/changed episodes re-embed; superseded
+episodes are skipped and stale rows dropped.
+
+```
+node ~/.episodic-memory/scripts/em-embed.mjs [--scope local|global|all] \
+  [--provider hash|cmd] [--cmd "<command>"] [--model <name>] [--rebuild]
+```
+
+exec
+/bin/zsh -lc "sed -n '641,960p' \""'$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+
+Providers:
+- `hash` (default) — built-in deterministic IDF-weighted feature hashing.
+  Offline, zero-dep, no setup. Similarity = weighted exact-token overlap
+  (rare terms count more). No substring/synonym awareness.
+- `cmd` — pipes `{id,text}` JSONL to your command (`--cmd` or
+  `$EM_EMBED_CMD`), reads `{id,vector}` JSONL back. Wire real embedding
+  models here (ollama, API endpoints); the substrate stays zero-dependency.
+
+Ready-made adapters live in the repo under `examples/embedders/`:
+`ollama-embed.sh` (local Ollama, default model `nomic-embed-text`) and
+`openai-embed.sh` (OpenAI-compatible endpoints, batched into one API call).
+Both are python3-stdlib only:
+
+```
+node em-embed.mjs --scope all --cmd "sh <clone>/examples/embedders/ollama-embed.sh" --model ollama-nomic
+```
+
+Persistent configuration — no flags needed per call: the installer wizard's
+semantic-search step (or your editor) writes
+`~/.episodic-memory/embed-config.json`:
+
+```json
+{ "provider": "cmd", "cmd": "sh <clone>/examples/embedders/ollama-embed.sh", "model": "ollama-nomic" }
+```
+
+Both em-embed and em-semantic read it through the same resolver. Precedence:
+explicit `--provider`/`--cmd`/`--model` flags > `$EM_EMBED_CMD` >
+embed-config.json > built-in hash. A malformed config degrades to hash.
+
+### em-semantic
+
+Similarity search over the embeddings sidecar. Ranks by cosine similarity ×
+the standard decay/usage/pinning/feedback score. Refuses model mismatches
+(query and sidecar must be embedded by the same provider/model).
+
+- WHEN TO USE: topic lookups where your wording may not overlap the stored
+  wording (with a real `cmd` model), or IDF-weighted topical ranking (hash).
+- WHEN NOT TO USE: exact phrases, tags, dates — `em-search` is sharper there.
+
+```
+node ~/.episodic-memory/scripts/em-semantic.mjs --query <text> [--scope local|global|all] \
+  [--limit <n>] [--min-sim <0..1>] [--project <name>] [--provider hash|cmd] [--cmd "<command>"] [--full] [--no-track]
+```
+
+Output adds `similarity` per episode:
+`{"status":"ok","count":2,"model":"hash-v1-256","episodes":[{"id":"...","similarity":0.71,"score":0.68,...}]}`
+
+LLM re-ranking (optional): `--rerank-cmd "<command>"` (or `rerank_cmd` in
+`~/.episodic-memory/embed-config.json`, or `$EM_RERANK_CMD`) pipes the top
+candidate window (3× limit, capped at 30) through a reranker — stdin JSON
+`{query, candidates:[{id,summary,similarity}]}` → stdout `{"order":[ids]}`.
+The shipped `examples/rerankers/claude-rerank.sh` drives `claude -p` using
+your existing Claude Code login (no API key; Anthropic has no embeddings API,
+so Claude re-ranks rather than embeds). Reranker failure falls back to vector
+order with a `warning`; `--no-rerank` bypasses a configured reranker. Output
+gains `"reranked":true` when applied.
+
+### em-routines
+
+Scheduled-maintenance manager: definitions live in
+`~/.episodic-memory/routines.json` (data, not code), applied to whatever
+scheduler the machine actually has — launchd (macOS), systemd user timers
+(Linux), or a managed crontab block (fallback; foreign entries preserved
+byte-for-byte).
+
+- WHEN TO USE: `sync` once after install (or via the wizard /
+  `install.mjs --install-routines`); `list` to check health; `run <r>` to
+  trigger one now; `add` for your own scheduled commands.
+- WHEN NOT TO USE: one-off maintenance (call em-doctor etc. directly).
+
+```
+node ~/.episodic-memory/scripts/em-routines.mjs sync            # seed + schedule defaults
+node ~/.episodic-memory/scripts/em-routines.mjs list            # config + platform + last-run + staleness
+node ~/.episodic-memory/scripts/em-routines.mjs run doctor
+node ~/.episodic-memory/scripts/em-routines.mjs enable|disable <r>
+node ~/.episodic-memory/scripts/em-routines.mjs add --name <n> --cron "0 4 * * *" --cmd "<command>"
+node ~/.episodic-memory/scripts/em-routines.mjs logs <r> [--lines <n>]
+node ~/.episodic-memory/scripts/em-routines.mjs uninstall       # de-schedule; config + logs kept
+```
+
+Built-ins (all zero-LLM, safe unattended, no-op when their feature is
+unconfigured): `doctor` daily 08:15 (auto-repair), `embed` daily 03:30
+(sidecar refresh), `backup-sync` daily 23:00, `hygiene-report` Sunday 09:00
+(read-only consolidate/prune/stats report). Every run — scheduled or manual —
+records state (`logs/routines/state.json`); `list` flags a routine **stale**
+when an enabled, scheduled routine hasn't run within 2× its interval (a
+silently-dead scheduler) and exits 1 so you can cron-check the checker.
+Cron expressions: 5 fields, each `*` or an integer (dom/month must be `*`) —
+anything launchd/systemd can't express is rejected, never mistranslated.
+
+### em-graph
+
+Typed-edge traversal over the episode graph (RFC-007 core). Projection over
+file storage, built fresh per query — no sidecar DB.
+
+```
+node ~/.episodic-memory/scripts/em-graph.mjs --from <id> [--depth <n>] [--limit <n>] \
+  [--edges supersedes,consolidates,evidence,cites,tags|all] [--scope local|global|all] \
+  [--include-superseded]
+node ~/.episodic-memory/scripts/em-graph.mjs --orphans     # no non-tag edges at all
+node ~/.episodic-memory/scripts/em-graph.mjs --hubs [--top <n>]
+```
+
+Edges: `supersedes` (chains), `consolidates` (digest→member), `evidence`
+(lesson↔violation), `cites` (episode ids in BODIES — fenced code/backticks
+skipped, frontmatter excluded), `tags` (opt-in pseudo-nodes for cluster
+queries). Undirected BFS, depth default 2, node limit 50 (closest first,
+`truncated` flagged). Lineage keeps superseded nodes, marked via `status`.
+Output: `{root, nodes:[{id,distance,summary,...}], edges:[{from,to,type}]}`.
+
+### em-capture
+
+Session auto-capture (wave-6 #2): draft candidate episodes from a session
+transcript at session end; confirm them into the store later.
+Confirm-before-store is the invariant — drafts are never silently promoted.
+
+- WHEN TO USE: a significant session ended and nothing was stored; reviewing
+  `pending_drafts` surfaced by `em-recall`; enabling continuous capture via
+  the wizard.
+- WHEN NOT TO USE: as a substitute for deliberate `em-store` at
+  decision/lesson time — capture is the safety net, not the primary path.
+
+```
+node ~/.episodic-memory/scripts/em-capture.mjs extract [--transcript <path>] [--session-id <id>]
+  [--project <name>] [--mode heuristic|cmd] [--cmd "<command>"] [--max <n>] [--dry-run]
+node ~/.episodic-memory/scripts/em-capture.mjs list
+node ~/.episodic-memory/scripts/em-capture.mjs review --draft <id>
+  (--accept <n,...> | --accept-all | --reject <n,...> | --discard) [--scope local|global]
+```
+
+Drafts live at `~/.episodic-memory/drafts/<draft-id>.json` — not episodes, no
+index rows, invisible to search/recall ranking (recall reports only a
+`pending_drafts` count). Heuristic mode (default, zero-LLM) scans for explicit
+markers ("remember this", "lesson:", "decision:"), assistant decision
+language, error-then-fix command pairs, and merged-PR milestones; fenced code
+and inline backticks are stripped first. `cmd` mode pipes
+`{session_id, project, max, chunks}` to a user command returning
+`{candidates:[...]}` — template: `examples/capturers/claude-capture.sh`
+(drives `claude -p` via your existing login). Accepts write through
+`em-store.mjs` as a subprocess (category validation + indexing apply) and are
+tagged `auto-captured`. `em-doctor` warns on drafts older than 14 days.
+
+### em-check-stale
+
+Report research episodes whose source URL may be out of date.
+
+- WHEN TO USE: at session start, or when you encounter a URL you have research for,
+  to decide whether to re-fetch and `em-revise`.
+- WHEN NOT TO USE: as a general search.
+
+```
+node ~/.episodic-memory/scripts/em-check-stale.mjs [--days 30] [--project <name>]
+```
+
+Output:
+
+```json
+{"status":"ok","count":1,"stale":[{"id":"...","category":"research","summary":"...","url":"https://...","fetched":"2026-05-26","daysOld":39}]}
+```
+
+### em-rebuild-index
+
+Regenerate `index.jsonl` (plus `tags.json`, `category-index.json`, and the
+`tokens.json` full-text token index) from the episode `.md` files on disk.
+Atomic (temp plus rename). Idempotent: safe to run repeatedly. Preserves
+`access_count`/`last_accessed`/`feedback` from the old index and `pinned:`
+from frontmatter.
+
+- WHEN TO USE: the index looks out of sync, after you manually removed an episode
+  file, or to recover from a corrupted index.
+- WHEN NOT TO USE: as a routine step. Never hand-edit `index.jsonl`; rebuild it.
+
+```
+node ~/.episodic-memory/scripts/em-rebuild-index.mjs --scope all
+```
+
+Output:
+
+```json
+{"status":"ok","rebuilt":[{"scope":"local","count":1,"category_drift":{"unknown":{},"deprecated":{}}}]}
+```
+
+`category-index.json` maps each canonical category to its episode ids (deprecated members
+map to the successor key; unknown categories are indexed under their literal key AND counted
+as drift). It backs `em-search --category` the same way `tags.json` backs `--tag`.
+
+`tokens.json` df diet: posting lists for tokens appearing in more than 40% of the
+corpus (`DF_DROP_RATIO` in `lib/relevance.mjs`) are dropped — they do not
+discriminate, and they dominated the file (a 1811-episode store measured 49.9MB of
+tokens.json against 1.3MB of index.jsonl). Dropped tokens are recorded sorted under
+the `_dropped` key so readers treat them as non-pruning (full-scoring fallback)
+rather than absent; search results are identical before and after the diet.
+Incremental writers (`em-store`/`em-revise`/`em-move`) never regrow a dropped
+token; the next rebuild recomputes df from scratch.
+
+`--check` (RFC-009 R10f) is a read-only drift report: it lists every episode whose stored
+category is unknown or deprecated and exits 1 if any exist, 0 otherwise. It writes nothing.
+Use it in CI/hooks to catch taxonomy drift without correcting it (correction is a later phase).
+
+```
+node ~/.episodic-memory/scripts/em-rebuild-index.mjs --check --scope all
+```
+
+Note: `--help` short-circuits safely (PR #449), but any OTHER unknown argument is
+ignored and a rebuild runs. `--scope all` rebuilds both local and global.
+
+### em-trigger-index
+
+Build the derived lesson-activation trigger index (RFC-009 R2).
+
+- WHEN TO USE: after storing/revising trigger-bearing lessons, to (re)build
+  `trigger-index.json`; or `--merged` to see the deduped local+global view a
+  consumer would read. Builds are lazy — an unchanged store is a cache hit.
+- WHEN NOT TO USE: as a search surface (use `em-search`); to mutate episodes (it
+  is read-only over the store and never rewrites stored bytes).
+
+```
+node ~/.episodic-memory/scripts/em-trigger-index.mjs [--project <root>] [--scope local|global|all] [--merged] [--with-pattern-health]
+```
+
+Output: `{"status":"ok","built":[{"scope":"local","store":".../.episodic-memory","entries":3,"cache_hit":false}]}`
+
+Flags that matter:
+- `--project <root>` is a PATH binding (unique among em-* scripts, where
+  `--project` is a name filter): when `<root>` is an existing directory the local
+  store is `<root>/.episodic-memory` regardless of caller cwd.
+- `--merged` prints the local-precedence merged view (one store failing degrades
+  to the other with a stderr note, never fatal). The merged view RECOMPUTES
+  `effective_priority` and `session_start` against BOTH stores' rows, so a
+  cross-scope link (local lesson, global violation) earns the band there; the
+  per-store artifact keeps a per-store band (deterministic per store). Consumers
+  read the merged view.
+
+The artifact: `trigger-index.json` carries `schema_version`, a `source` fingerprint
+(`index_mtime_ms` + `index_size` + `index_sha256`, TOCTOU-safe), a `build_report`
+(excluded unknown/deprecated activity classes), `entries` (per-trigger rows with
+`trigger_kind` phrase|tool|activity and the DERIVED `effective_priority` 1-9), and a
+`session_start` section (`critical_entries` = every band-8/9 lesson, trigger-independent;
+`entries` = top-10 by the `static_score` blend; `preflight` = per-task-type recent
+violation counts keyed by `violated_pattern`; `pattern_health` = the R5b build-time verdict `{schema_version:1, verdict, unhealthy, pattern_ids, computed_at}`, computed only under `--with-pattern-health`, carried forward verbatim otherwise, local-store only;
+`cadence` = the RFC-012 R3a consolidation-cadence advisory `{enabled:true, phrase_sharing, active_lessons, k_shared:3, n_lessons:200, line?}`, stamped on every build from that store's own rows+entries, advisory-only) that the P2 session-start hook will read.
+
+**Playbooks (RFC-011 R1/R2).** An OPTIONAL per-project file
+`<project>/.episodic-memory/playbooks.json` declares which playbook lesson
+episodes load at session start or on demand (`schemas/playbooks.schema.json`:
+`schema_version: 1`, at most 32 entries / 64 KiB, unknown keys rejected;
+`{ id, mode: session_start|on_demand, triggers?(on_demand only) }`; optional
+`bounds.max_playbooks` integer 1..4, default 2). The `id` may be ANY member
+of a supersedes chain; the build resolves it to the terminal active revision.
+Resolution is cross-store: local + GLOBAL `index.jsonl` rows are merged for
+playbook resolution only, and a continuing-chain row outranks a stale terminal
+snapshot (a superseded copy in one store never shadows the live chain in the
+other). Derivation is advisory fail-open — a malformed/over-bound/schema-invalid
+file is skipped with a `build_report` note and a stderr line, never fatal, and
+degrades to no playbooks loaded. Two derived forms persist ONLY in the LOCAL
+store's index:
+
+- `session_start.playbooks` — `[{ episode_id, summary, read_command }]` in
+  preference-file order, CAPPED at build to `bounds.max_playbooks` (the cap
+  lives in the derived artifact). Siblings: `session_start.playbooks_capped`
+  (integer count) and `session_start.playbooks_capped_first` (first capped id,
+  or `null`).
+- `entries[]` rows with `entry_class: "playbook"` — one per effective trigger
+  of an `on_demand` entry, carrying the standard row shape plus
+  `effective_priority: 0` (sorts below every lesson in top-K),
+  `applies_to_projects: [<this project's slug>]`, `applies_to_tools: ["*"]`,
+  `read_command`, and `triggers_overridden: true` ONLY when the preference
+  entry declared a `triggers` override (the merged view then mutes the
+  episode's own trigger rows; an EXCLUDED declaration emits neither rows nor a
+  marker, so the episode's own triggers stay live).
+
+`build_report.playbooks = { declared: [{episode_id, mode}], capped_ids: [...],
+excluded: { unresolvable, cycle, inactive, non_lesson, expired,
+chain_collision, empty_triggers } }` plus an OPTIONAL `warnings: { oversized:
+[...], unpinned: [...] }` key emitted only when one of its lists is non-empty —
+the standing audit surface for what this project injects (`warnings.unpinned`
+flags selected terminals that are not pinned; pin them with `em-pin`). The
+`source` fingerprint extends on every v3 build: `playbooks_*` (mtime/size/sha256)
+is recorded UNCONDITIONALLY (absent = zero-state, so first CREATION, edits, and
+DELETION all invalidate), and `global_index_*` is recorded only when a valid
+preference file exists (a global playbook revision invalidates the local
+section; config-free projects pay no cross-store coupling). The event-plane
+freshness check compares `playbooks_*`/`global_index_*` mtime+size only (sha256
+is recorded for the build's own cache probe). `--merged` threads the local
+`session_start.playbooks` through unchanged. (`trigger-index.json` is now
+`schema_version: 4`; v3->v4 added `session_start.cadence` (RFC-012 R3a); a cached older index is rebuilt on upgrade.)
+
+Common mistakes: confusing the stored `priority` (1-7, declared) with
+`effective_priority` (1-9, derived — the 8-9 band is earned from linked violations,
+never written); expecting `--project` to filter by name like other scripts.
+
+### em-doctor
+
+Health check + repair for the stores and the installation. One command answers
+"is memory healthy, and if not, what exactly is wrong and how do I fix it".
+
+- WHEN TO USE: something feels off (searches slow, warnings about missing
+  indexes, results missing), after a crash/interrupted write, after moving
+  machines, or as a periodic maintenance check.
+- WHEN NOT TO USE: as a data query (use search/list/recall).
+
+```
+node ~/.episodic-memory/scripts/em-doctor.mjs [--scope local|global|all] [--fix] [--strict] [--verbose] [--all-projects]
+```
+
+`--all-projects` additionally runs the store-class checks once per
+consumer-registry store (scope label `project:<basename>`; every store-class
+row carries `data_dir` — the identity, since labels can collide). `--fix`
+routes rebuilds by `data_dir` (spawning `em-rebuild-index --scope local` with
+`cwd` at that project's root) and reports `skipped: non-root-store` for
+registrations whose substrate-resolved store is not
+`<project>/.episodic-memory` (git-nested paths, linked worktrees) — a rebuild
+there would repair a different store than the one diagnosed. Non-store checks
+(gate friction, installs-drift, backup, drafts) still run exactly once.
+
+Checks: Node version, index.jsonl parse, index↔episode-file drift (both
+directions), tags.json + category-index.json consistency, tokens.json bloat
+(warn when tokens.json exceeds 20x the size of index.jsonl — fix is a
+rebuild, which applies the df diet), dangling `supersedes` pointers, stale
+
+exec
+/bin/zsh -lc "sed -n '961,1280p' \""'$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+`.tmp` files from interrupted atomic writes, dead-pid `.lock` files,
+installed-script presence/drift, backup config, consumer installs-drift
+(registered projects behind the global install version or carrying locally
+modified installed artifacts — fix hint: `install.mjs --update-consumers`),
+gate friction (below).
+
+**Gate friction** (`gate-friction`, `gate-false-positives`, `gate-log-size`;
+local scope). The Claude Code enforcement gates (checkpoint-gate.sh,
+plan-gate.sh, stop-gate.sh) append one JSON line per terminal decision to
+`<repo>/.checkpoints/gate-log.jsonl`:
+
+```json
+{"ts":1783487852,"gate":"checkpoint","tool":"Bash","label":"read_only","reason":"read_only","decision":"allow","sid":"<session>","cmd_sha256":"<sha256 of the whitespace-normalized command>"}
+```
+
+`em-doctor` reports counts per decision (`allow` / `silence` / `hold` /
+`block`) and the **false-positive metric**: a `hold` (novel Bash command
+parked for agent classification) whose command shape later received a
+`read_only` or `nonsrc_write` verdict in `.checkpoints/classify/` was
+friction on a harmless command — the join re-hashes each verdict marker's
+`command_normalized` with the same whitespace-collapse rules the gate hashes
+with. Warns when downgraded holds exist and when the log exceeds 5MB (the
+gates only append; rotate/truncate it yourself). Absent or partially
+malformed logs degrade gracefully (absent → ok; bad lines counted and
+skipped).
+
+Output (trimmed):
+
+```json
+{"status":"issues","summary":{"ok":6,"warn":2,"error":1},"checks":[{"id":"index-parse","scope":"local","level":"error","message":"1 malformed line(s) in index.jsonl","fix":"em-rebuild-index"}]}
+```
+
+- Exit 0 when no `error`-level findings; 1 otherwise. `--strict` makes `warn`
+  findings also exit 1 (CI mode).
+- `--fix` rebuilds indexes (delegating to `em-rebuild-index`) and removes stale
+  `.tmp`/`.lock` litter, then re-runs the store checks and reports the post-fix
+  state. Everything else stays report-only.
+- Every non-ok finding carries a `fix` hint when a safe automated repair exists.
+
+### em-sync-install
+
+Checksum-guarded refresh of the CURRENT project's installed episodic-memory
+artifacts (skills, instruction files, hooks) from the global dist cache
+(`~/.episodic-memory/dist/<version>/`), written by `install.mjs` on every
+install. This is the apply-side of the SessionStart drift notice: only files
+whose on-disk sha256 still matches the project's install manifest
+(`<project>/.episodic-memory-install.json`) are overwritten; locally modified
+files are always left untouched and reported. Only projects present in the
+consumer registry (`~/.episodic-memory/installs.json`) are ever touched, and
+enforcement artifacts are skipped unless the registry entry says
+`enforcement_installed: true`.
+
+- WHEN TO USE: the SessionStart hook printed a version-drift notice and you
+  want to update just this project without the repo checkout (`install.mjs
+  --update-consumers` sweeps ALL registered projects from the repo instead).
+  Runs automatically at session start when the operator set
+  `"auto_update": true` in `<project>/.episodic-memory/enforce-config.json`.
+- WHEN NOT TO USE: to install into a NEW project (use `install.mjs`); it never
+  adds files, only refreshes what a previous install recorded.
+
+```
+node ~/.episodic-memory/scripts/em-sync-install.mjs [--project <dir>] [--dry-run]
+```
+
+Output (trimmed):
+
+```json
+{"status":"refreshed","from_version":"1111111111111111111111111111111111111111","to_version":"ef0d77166644d02e34fe0644c3b27ece4cfb19cd","refreshed":[".claude/skills/episodic-memory/SKILL.md"],"skipped_modified":[".claude/hooks/checkpoint-gate.sh"],"notice":"episodic-memory: auto-updated 1 artifact(s) to ef0d77166644; 1 locally modified file(s) left untouched: .claude/hooks/checkpoint-gate.sh"}
+```
+
+Degrade statuses (always exit 0): `current` (nothing to do), `no-manifest`,
+`no-cache`, `no-global-manifest`, `unregistered`.
+
+### em-prune
+
+Archive episodes that score below a relevance threshold.
+
+- WHEN TO USE: when the store has grown large and you want to archive low-value
+  episodes. Always start with `--dry-run`.
+- WHEN NOT TO USE: casually. Running it with no flag performs a real prune pass.
+
+```
+node ~/.episodic-memory/scripts/em-prune.mjs --dry-run
+node ~/.episodic-memory/scripts/em-prune.mjs --scope global --threshold 0.15
+node ~/.episodic-memory/scripts/em-prune.mjs --check
+```
+
+Output:
+
+```json
+{"status":"ok","results":[{"scope":"local","pruned":0,"remaining":1779,"freed_bytes":0},{"scope":"global","pruned":0,"remaining":474,"freed_bytes":0}]}
+```
+
+`--check` exits 1 when prunable episodes exist (CI gate). `--dry-run` previews with
+no writes.
+
+**Protection set (RFC-009 R6).** Prune never archives, in any mode: violations
+evidence-linked to a valid lesson (either direction: the lesson's `evidence` array
+or the violation's `lessons` array); valid lessons carrying `triggers`; episodes
+named in a valid episode's `consolidates` array; supersession-chain members of any
+of those; and the latest `record_type: clerk-run` episode per store. Clerk run records
+are produced by `em-consolidate --clerk --apply`. "Valid" means
+not superseded and `review_by` absent or unexpired — protection lapses when the
+referencing episode is superseded or expires. Retained entries are counted in the
+`protected` output field; `--dry-run` lists them in `protected_episodes` as
+`{id, score, reason, via}` where `via` names the protecting episode. `remaining`
+includes protected entries; the `--check` exit code ignores them.
+
+**RFC-011 R5(b) playbook-referenced protection + SCOPED fail-closed abort.** A
+playbook declared in `<project>/.episodic-memory/playbooks.json` is load-bearing
+for that project, so `computeProtectedIds` resolves each declared id to its
+terminal active revision and protects the WHOLE resolved chain (terminal + every
+member) with reason `playbook-referenced` (members also carry `chain-member`).
+`--dry-run` lists the protected chain in `protected_episodes` as
+`{id, score, reason, via}` (`via` names the declared id). The same `playbooks.json`
+is read by `em-prune` AND `em-consolidate --fold-superseded`, and retention FAILS
+CLOSED where the advisory surfaces fail open — scoped by store:
+
+- LOCAL archival aborts only when THIS project's `playbooks.json` is
+  present-but-unparseable (exit 1, archives nothing; a sibling project's
+  corruption never blocks a local prune — the blast radius is scoped).
+- GLOBAL archival aborts when the registry is degraded
+  (`~/.episodic-memory/installs.json` present-but-unparseable, including
+  `readRegistry`'s silent `{entries:[], rebuilt:true}` rebuild) OR any
+  registered project's `playbooks.json` is present-but-unparseable (global
+  protection is then unknowable).
+
+An ABSENT file is normal operation: no protection, no abort, prunable episodes
+archive as usual. The abort message names the offending file. Pin a frequently
+referenced playbook terminal with `em-pin` (pinned episodes floor scoring decay
+and are never pruned); the build report's `warnings.unpinned` flags selected
+terminals that are not.
+
+`--dry-run` on a chain `pb-0 ← pb-1 ← pb-2` (active terminal) whose
+`playbooks.json` references the intermediate `pb-1` (observed on an isolated
+fixture — every member survives, terminal + members):
+
+```json
+{"status":"ok","results":[{"scope":"local","prunable":0,"remaining":3,"freed_bytes":0,"protected":3,"protected_episodes":[{"id":"pb-0","score":0.1,"reason":"chain-member","via":"pb-1"},{"id":"pb-1","score":0.1,"reason":"playbook-referenced","via":"pb-1"},{"id":"pb-2","score":0.1,"reason":"playbook-referenced","via":"pb-1"}],"episodes":[]}]}
+```
+
+(`--dry-run` uses the `prunable` key + an `episodes` preview list; a real
+prune uses `pruned` and mutates.)
+
+A torn-write (present-but-unparseable) local `playbooks.json` aborts LOCAL
+archival and archives nothing:
+
+```json
+{"status":"error","message":"em-prune: aborting archival — local playbooks.json present but unparseable (not valid JSON: ...) (<project>/.episodic-memory/playbooks.json)"}
+```
+
+### em-promote
+
+EXPERIMENTAL (promote-or-remove decision 2026-10-08) — cross-project
+recurring-lesson promotion, the first learning-strategy capability
+(CAPABILITIES.md experimental tier). Dry-run by DEFAULT — `--apply` writes.
+
+- WHEN TO USE: the same lesson keeps getting re-learned in different
+  registered projects; you want it surfaced globally with provenance.
+- WHEN NOT TO USE: near-duplicates inside ONE store (`em-consolidate`),
+  moving a single episode between scopes (`em-move`), or fewer than 2
+  registered projects (nothing to correlate).
+
+```
+node ~/.episodic-memory/scripts/em-promote.mjs [--min-sim <0..1>] [--apply]
+```
+
+Scans every consumer-registry store for active `lesson` episodes and clusters
+them by body-token Jaccard (default 0.35, same vocabulary as
+`em-consolidate`). A candidate must span >=2 distinct stores with >=2 distinct
+member identities: replicas (same id AND summary — clone/fork stores)
+collapse to one member and never count as recurrence, while a coincident id
+with different content stays two members. `--apply` writes ONE global lesson
+episode per candidate via `em-store` (never hand-written files): project
+`cross-project`, tags = member-tag union + `promoted-lesson` +
+`promoted:<sha8>` (the identity hash over sorted `<id>#<sha8(summary)>`
+member keys), body = per-member excerpts + a `## Sources` list. Source
+stores are NEVER written. Re-runs are idempotent by hash; a grown cluster
+promotes under its new hash with a `Supersedes-promotion:` back-reference.
+Malformed existing promoted episodes (bad hash tag, missing `## Sources`)
+are reported in `warnings`, never fatal. Exit 1 only when an `--apply` write
+failed; usage errors exit 2.
+
+### em-topic-tracks
+
+On-demand learning-strategy capability (CAPABILITIES.md WEAK tier): scans
+the global store plus every registered source store for clusters of related
+primary episodes (>=3 members by default) and, on explicit per-candidate
+confirmation, derives ONE global lesson episode per cluster via `em-store`.
+Dry-run is the DEFAULT; nothing is written until you pass `--apply` together
+with the 64-hex fingerprints from the preview.
+
+- WHEN TO USE: you have hand-curated the relevant primary episodes into a
+  cluster (e.g., three related `lesson`/`decision`/`research` episodes across
+  registered projects) and want a typed-provenance global lesson so every
+  future session surfaces it through ordinary search.
+- WHEN NOT TO USE: a near-duplicate cluster inside ONE store (`em-consolidate`),
+  a recurring lesson across projects that needs `em-promote` instead, fewer
+  than three configured source episodes (the build step rejects sub-threshold
+  clusters), or any cluster whose members have not yet been captured —
+  `em-topic-tracks` derives from existing episodes, it does not invent them.
+
+```
+node ~/.episodic-memory/scripts/em-topic-tracks.mjs [--max-episodes <n>] [--apply] [--confirm <64-hex>]...
+node ~/.episodic-memory/scripts/em-topic-tracks.mjs --help
+```
+
+The CLI is a thin wrapper over `scripts/topic-tracks/engine.mjs`; the engine
+owns behavior and `em-store` owns every write. The CLI itself never touches
+an episode, index, tag, or lock file.
+
+**Preview → confirm → apply workflow.** A dry-run prints one JSON object:
+`{status:"ok", dry_run:true, config, candidates, skipped, warnings,
+missing_sources}`. Each `candidates[]` entry carries a stable 64-hex
+`fingerprint`, `common_tags`, a deterministic `summary` and `body`,
+`promotion_sources` (typed `{store_id, episode_id, content_sha256}` refs to
+every member — these are the typed provenance round-tripped through
+`em-store --promotion-sources-json`), and the `members[]` themselves.
+`skipped[]` lists fingerprints already derived on a prior run as
+`{fingerprint, reason:"already-derived", existing_episode_id}` — re-runs are
+idempotent and will not duplicate an existing global lesson.
+
+To write the lessons you want, repeat `--confirm <fingerprint>` for each
+preview candidate you approve, then add `--apply`:
+
+```
+# Preview only (default mode; no filesystem changes).
+node ~/.episodic-memory/scripts/em-topic-tracks.mjs
+
+# Confirm and apply a chosen subset; --confirm is repeatable.
+node ~/.episodic-memory/scripts/em-topic-tracks.mjs \
+  --apply \
+  --confirm <fingerprint-A> \
+  --confirm <fingerprint-B>
+```
+
+Confirmed `--apply` writes ONE `category:lesson` episode per fingerprint
+through `em-store` — never by hand — into the global store with typed
+`promotion_sources`, and exits 0 on success. The apply result mirrors the
+dry-run shape: `{status:"ok", dry_run:false, written, skipped, unconfirmed,
+warnings, missing_sources}`. `written[]` carries `{fingerprint, episode_id,
+project}` for each new global lesson; `skipped[]` again surfaces
+`already-derived` rows; `unconfirmed[]` lists preview fingerprints that
+were not selected and therefore were not written.
+
+**Bounds and warnings.** The committed config sets `warn_episodes:1000`
+(emit a `warning-threshold-exceeded` warning when the total eligible
+input members after eligibility filtering and replica collapse exceeds
+1000, before clustering) and `max_episodes:2000` (hard cap; any run where
+the total eligible input members after eligibility filtering and replica
+collapse exceeds 2000, before pair construction, exits 2 with
+`topic-tracks-max-episodes`). `--max-episodes <n>` may only TIGHTEN the
+committed cap (values <=2000); any value above the committed cap is
+rejected with `invalid-max-episodes`, exit 2. CLI args use exact pairwise
+parsing: unknown flags, `--flag=value` spellings, positional arguments,
+and missing values all exit 2 with `unknown-flag` or the appropriate usage
+error.
+
+**`--auto` is REJECTED.** RFC-001 Phase 4's `em-consolidate --auto` /
+`--apply-without-confirm` proposal was withdrawn in favor of per-candidate
+confirmation; passing `--auto` exits 2 with `auto-write-withdrawn`. There
+is no flag that writes without per-fingerprint `--confirm <fingerprint>`.
+
+**Global-only side effect; sources are immutable.** The confirmed write
+target is the global store (`~/.episodic-memory/`); source stores — both
+the global source rows AND every registered source-store episode used as
+a member — remain byte-identical. The apply path holds a store write lock
+on the global store AND every represented source store, and re-validates
+source content hashes under both locks before any write; a mutated source
+during that window is reported as `stale-fingerprint` and the run exits 1
+without touching the global store. There is no flag or mode that mutates a
+source episode: source immutability is enforced by the engine, not by a
+usage rule.
+
+**Output shapes (excerpts).** Dry-run success:
+
+```json
+{
+  "status": "ok", "dry_run": true,
+  "config": { "tag_jaccard_min": 0.3, "summary_jaccard_min": 0.2,
+              "min_cluster": 3, "warn_episodes": 1000, "max_episodes": 2000,
+              "common_tag_support": 0.5, "source_categories": ["decision","lesson","research"] },
+  "candidates": [
+    { "fingerprint": "<64-hex>",
+      "common_tags": ["..."],
+      "summary": "...",
+      "body": "...",
+      "promotion_sources": [
+        { "store_id": "<16-hex-or-global>",
+          "episode_id": "<id>", "content_sha256": "<64-hex>" }
+      ],
+      "members": [
+        { "store_id": "<16-hex-or-global>",
+          "episode_id": "<id>", "project": "<name>",
+          "category": "decision|lesson|research",
+          "date": "YYYY-MM-DD", "summary": "..." }
+      ] }
+  ],
+  "skipped": [
+    { "fingerprint": "<64-hex>",
+      "reason": "already-derived",
+      "existing_episode_id": "<id>" }
+  ],
+  "warnings": [],
+  "missing_sources": []
+}
+```
+
+Apply success mirrors the dry-run shape with `dry_run:false`, `written[]`,
+`skipped[]` (again `already-derived`), and `unconfirmed[]` (preview
+fingerprints you did not pass to `--confirm`). Every dry-run / apply /
+error object validates against `schemas/runtime/topic-tracks-io.schema.json`;
+any error is one of the closed set
+`auto-write-withdrawn | invalid-max-episodes | confirm-required |
+confirm-malformed | confirm-duplicate | confirm-unknown | unknown-flag |
+topic-tracks-config-unloadable | topic-tracks-config-invalid |
+topic-tracks-config-symlink | topic-tracks-max-episodes |
+stale-fingerprint | store-write-lock-timeout | store-write-failed`.
+
+**No new ranking layer.** The derived global lesson is an ordinary
+
+exec
+/bin/zsh -lc "sed -n '1281,1481p' \""'$HOME/.episodic-memory/EM_SCRIPTS_GUIDE.md"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+`category:lesson` episode — it is surfaced through the same `em-search`,
+`em-recall`, and `--tag` paths as every other lesson, and there is
+deliberately no new ranking layer for derived lessons (no special tag,
+no special index, no boost). The only signal that an episode was derived
+by `em-topic-tracks` is the typed `promotion_sources` payload; discovery
+is by tag/query, not by source. `em-rebuild-index` preserves
+`promotion_sources` across rebuilds so derived lessons keep their typed
+provenance after index maintenance.
+
+### em-console
+
+Local web console over the CLI contract: one page (dashboard, browse + history,
+recall preview, capture drafts, maintenance) whose every action POSTs to a closed
+command registry that spawns the sibling `em-*` scripts and returns their JSON.
+Loopback-only, per-launch token in the printed URL, read-only unless launched with
+`--allow-write`, idles out after `--idle-timeout` seconds (default 1800). Agent
+rule: this is a HUMAN surface — launch it for the user and hand over the URL;
+agents keep using the JSON CLI directly.
+
+### em-manage
+
+Interactive day-2 maintenance wizard: status (doctor + stats), hygiene
+(rebuild-index, fold-superseded, prune, doctor --fix — dry-run first, apply only
+on explicit confirm), backup, capture drafts, routines, and an em-console
+launcher. Prose menus for humans; every underlying operation is a spawned `em-*`
+script. Scriptable via piped stdin (EOF takes defaults).
+
+```
+node ~/.episodic-memory/scripts/em-manage.mjs
+```
+
+Agent rule: human surface — suggest it to users; agents call the underlying scripts directly.
+
+### em-pattern-health
+
+Aggregate violation episodes per behavioral pattern within a rolling window and flag
+which patterns need enforcement.
+
+- WHEN TO USE: to see which behavioral patterns are being violated repeatedly and
+  whether a hook exists to stop them.
+- WHEN NOT TO USE: for ordinary recall.
+
+```
+node ~/.episodic-memory/scripts/em-pattern-health.mjs            # full report
+node ~/.episodic-memory/scripts/em-pattern-health.mjs --summary  # one line
+node ~/.episodic-memory/scripts/em-pattern-health.mjs --check    # exit 1 if attention needed
+node ~/.episodic-memory/scripts/em-pattern-health.mjs --pattern <id> --window-days <N> --min-violations <N> --json
+```
+
+`needs-enforcement` means violated repeatedly with no hook found. `needs-attention`
+means a hook exists but violations continue (escalate to a human).
+
+**`--hermetic` (RFC-009 R5a).** Reads ONLY project surfaces: violations from the
+project-local store, the patterns registry from `<project>/.episodic-memory/patterns/`
+falling back to `<project>/patterns/_index.json`, and enforcement detection over
+`<project>/.claude/hooks`, `<project>/.git/hooks`, `<project>/.github/workflows` —
+zero `$HOME` reads, so output is identical under any HOME. Scope is forced to
+`local`; combining with an explicit `--scope global|all` errors. Output shape and
+the `--check` exit contract are unchanged.
+
+```
+node ~/.episodic-memory/scripts/em-pattern-health.mjs --hermetic --check   # project-only CI gate (R5b wires this in Phase 3)
+```
+
+### em-violation
+
+Record a behavioral-pattern violation as a structured episode.
+
+- WHEN TO USE: when you (or the user) catch a workflow rule being broken, so the
+  system can track repeat offenses.
+- WHEN NOT TO USE: for ordinary decisions or discoveries (use `em-store`).
+
+```
+node ~/.episodic-memory/scripts/em-violation.mjs \
+  --pattern <pattern-id> \
+  --summary "<what happened>" \
+  --body "<detail>" \
+  [--sequence "<actual actions>"] [--correct "<correct actions>"] [--scope global|local] \
+  [--lesson <lesson-episode-id>]...
+```
+
+Flags that matter:
+- `--lesson <id>` (repeatable) forward-links the violation to the lesson(s) whose
+  surfacing failed — this is what feeds a lesson's earned 8-9 band (see "Lesson
+  activation"). Each id must resolve to an existing `category: lesson` episode.
+- The episode carries a typed `violated_pattern: <pattern-id>` field (T6); the
+  legacy `violated:<id>` tag remains as a burn-in shim only.
+
+Missing-args output:
+
+```json
+{"status":"error","message":"Missing required args. Usage: --pattern <pattern_id> --summary \"<text>\" (--body \"<text>\" | --body-file <path>) [--sequence \"<actions>\"] [--correct \"<actions>\"] [--project <name>] [--tags \"<extra>\"] [--scope global|local]"}
+```
+
+### em-seed-patterns
+
+Seed the shipped behavioral patterns into the global store. Idempotent: already
+seeded patterns are skipped.
+
+- WHEN TO USE: once after install, or after adding a new pattern file, so patterns
+  surface in normal search and recall.
+- WHEN NOT TO USE: repeatedly in a session (it is a no-op after the first seed).
+
+```
+node ~/.episodic-memory/scripts/em-seed-patterns.mjs
+```
+
+Output:
+
+```json
+{"status":"ok","seeded":0,"skipped":11,"total":11}
+```
+
+---
+
+## Operator-only / heavyweight scripts
+
+These are for operators and specific workflows, not routine agent recall or storage.
+As an agent you should NOT invoke them unless the user explicitly asks. Deep docs are
+linked per entry.
+
+### em-backup
+
+Mirror the memory directories to a private GitHub repo with PII / secret redaction on
+the staging copy (source files are never modified). Do NOT run `--init` / `--sync`
+without a config; it refuses rather than ship raw personal memory. Deep docs:
+`docs/em-backup.md` and README.md "Backup" section. Agent rule: do not touch unless
+the user asks to back up.
+
+```
+node ~/.episodic-memory/scripts/em-backup.mjs --self-test    # built-in redaction tests
+node ~/.episodic-memory/scripts/em-backup.mjs --show-config  # resolved config, secrets/PII masked
+```
+
+### em-restore
+
+Selectively restore from a cloned backup repo (filter by tag / date / category /
+source). Dry-run by default; restore cannot undo redaction. Deep docs: README.md
+"Restore" section and `docs/USER_MANUAL.md`. Agent rule: do not touch unless the user
+asks to restore.
+
+### em-audit-compliance
+
+Heuristic measurement of rule-skip rates from Claude Code session transcripts (false
+positives expected; for trend tracking). Deep docs: README.md "Compliance Audit &
+Transcript Mining". Agent rule: operator reporting tool, not for recall.
+
+### em-mine-transcripts
+
+Surface decisions / lessons / violations buried in transcripts that were never
+captured as episodes. Writes a staging file under `.claude/scratch/`; never calls
+`em-store` directly (cold-storage discipline). Deep docs: README.md "Compliance Audit
+& Transcript Mining". Agent rule: driven by the scheduled daily-mining routine; do
+not invoke ad hoc.
+
+### em-rfc-validate
+
+CI-only validator that diffs prose-tier RFC content against the machine-readable
+source of truth. Deep docs: README.md "RFC Validation". Agent rule: CI runs it
+repo-relative; not part of the deployed recall flow.
+
+### em-workflow-validate
+
+Pure validator for the `workflow.lifecycle` episode chain at a given gate. Called by
+enforcement hooks. Deep docs: README.md "Workflow Validation". Agent rule: hooks
+shell out to it; do not call it by hand.
+
+### em-review-request
+
+Records that a review event happened in the workflow audit trail (refs to
+plan / approval / checkpoints / tests). Orthogonal to `second-opinion`, which runs the
+review. Deep docs: README.md "Review Request". Agent rule: lifecycle plumbing, not for
+recall.
+
+### em-lock
+
+Zero-dependency atomic lock CLI around `scripts/lib/lock.mjs`:
+
+```
+node ~/.episodic-memory/scripts/em-lock.mjs --file <path> --timeout <s> -- <cmd> [args...]
+```
+
+It releases the lock when the child exits and on `SIGINT` / `SIGTERM`. Clerk apply uses the same lock primitive internally through `scripts/lib/lock.mjs` for its whole-apply lock. Agent rule: infrastructure primitive; do not invoke directly.
+
+### em-watch-codex
+
+Polls the store for new Codex-authored reply episodes; the cursor mechanism behind
+the second-opinion `episodic` storage backend. Deep docs: README.md "Codex Watcher".
+Agent rule: prefer the `second-opinion` harness; do not poll by hand.
+
+### second-opinion
+
+The pluggable cross-tool review harness (request, provider dispatch, preamble
+composition, consensus loop). This is a capability, not a memory command. Deep docs:
+README.md "Second-Opinion Review Harness" and `docs/USER_MANUAL.md` Scenario 8b.
+Agent rule: use it only when the user asks for a second-opinion / cross-tool review,
+and route through the harness rather than invoking a provider CLI directly.
+P3 surfaces: `--timeout <ms>` (>= 1000) bounds each dispatch round (expiry kills the child,
+records `{round, timeoutMs}`, persists partial output to `.review-store/forensics/`); every
+dispatch prepends up to 3 matched lesson pointers from the trigger index (RFC-009 R7, bounded,
+`--no-track`, fail-open toward the dispatch).
+
+exec
+/bin/zsh -lc 'node "$HOME/.episodic-memory/scripts/em-search.mjs" --project meta-harness-t021 --query "b376afa a64a176 gateway revalidation namespace guard" --scope all --limit 5 --full --no-track --no-score' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+{"status":"ok","count":0,"episodes":[]}
+
+  → Inspect commit 4b6551a and confirm changed paths/content
+  • Trace each added test into gateway.py branch at lines 738-739
+  • Validate pre/post no-mutation assertions for all four fields
+  • Run focused tests read-only and issue RESOLVED/NOT-RESOLVED verdict
+exec
+/bin/zsh -lc 'git status --short && git show --stat --summary --format=fuller 4b6551a351273d0da1ecedcf995e2d273dc36fe9 && git show --format=fuller --find-renames --find-copies --no-ext-diff 4b6551a351273d0da1ecedcf995e2d273dc36fe9' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+commit 4b6551a351273d0da1ecedcf995e2d273dc36fe9
+Author:     Charlton D. Ho <dev@znp.pw>
+AuthorDate: Fri Jul 24 15:35:07 2026 +0800
+Commit:     Charlton D. Ho <dev@znp.pw>
+CommitDate: Fri Jul 24 15:35:07 2026 +0800
+
+    test: cover gateway revalidation namespace guard for pi owners (META-30 review fix)
+    
+    Panel P1 (codex): the revalidate owner_namespace_denied branch
+    (gateway.py:738-739) had no pi coverage. Two tests added: an active pi
+    claim revalidates when the replacement definition keeps pi; revalidation
+    excluding pi is denied without mutating definition, owner, revision, or
+    fencing_generation.
+    
+    Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+
+ tests/development/test_remote_workplan_gateway.py | 92 +++++++++++++++++++++++
+ 1 file changed, 92 insertions(+)
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+commit 4b6551a351273d0da1ecedcf995e2d273dc36fe9
+Author:     Charlton D. Ho <dev@znp.pw>
+AuthorDate: Fri Jul 24 15:35:07 2026 +0800
+Commit:     Charlton D. Ho <dev@znp.pw>
+CommitDate: Fri Jul 24 15:35:07 2026 +0800
+
+    test: cover gateway revalidation namespace guard for pi owners (META-30 review fix)
+    
+    Panel P1 (codex): the revalidate owner_namespace_denied branch
+    (gateway.py:738-739) had no pi coverage. Two tests added: an active pi
+    claim revalidates when the replacement definition keeps pi; revalidation
+    excluding pi is denied without mutating definition, owner, revision, or
+    fencing_generation.
+    
+    Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+
+diff --git a/tests/development/test_remote_workplan_gateway.py b/tests/development/test_remote_workplan_gateway.py
+index 38dc39a..da77c71 100644
+--- a/tests/development/test_remote_workplan_gateway.py
++++ b/tests/development/test_remote_workplan_gateway.py
+@@ -533,6 +533,98 @@ def test_revalidate_rotates_fence_and_returns_refreshed_frozen_bundle(setup):
+     assert gateway.heartbeat(card_id="META-2", fencing_token=2, credential=host_a)["fencing_token"] == 2
+ 
+ 
++def test_revalidate_allows_active_pi_owner_when_replacement_includes_pi(setup):
++    gateway, _, coordinator, _, _ = setup
++    pi_actor = "pi:host-c:revalidate"
++    pi_credential = gateway.issue_host_credential(
++        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
++    )["credential"]
++    initial = definition()
++    initial["allowedOwnerNamespaces"] = ["pi"]
++    initial["definitionHash"] = compute_definition_hash(initial)
++    ready = gateway.qualify_card(
++        card_id="PI-REVALIDATE-ALLOWED", title="pi revalidate allowed",
++        paths=("pi-revalidate-allowed",), definition=initial,
++        credential=coordinator, authority_grant=AUTHORITY_GRANT,
++        repository_id=REPOSITORY_ID,
++    )
++    claim = gateway.claim(
++        card_id="PI-REVALIDATE-ALLOWED", expected_revision=ready["revision"],
++        expected_definition_hash=ready["definition_hash"],
++        credential=pi_credential,
++    )
++
++    revised = definition("git:pi-revised")
++    revised["currentHead"] = "def"
++    revised["allowedOwnerNamespaces"] = ["pi"]
++    revised["definitionHash"] = compute_definition_hash(revised)
++    refreshed = gateway.revalidate(
++        card_id="PI-REVALIDATE-ALLOWED", expected_revision=claim["revision"],
++        credential=coordinator, definition=revised,
++    )
++
++    assert refreshed["revision"] == claim["revision"] + 1
++    assert refreshed["fencing_token"] == claim["fencing_token"] + 1
++    assert refreshed["task_bundle"]["owner"] == pi_actor
++    assert refreshed["task_bundle"]["definition_hash"] == revised["definitionHash"]
++
++
++def test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation(setup):
++    gateway, _, coordinator, _, _ = setup
++    pi_actor = "pi:host-c:revalidate-denied"
++    pi_credential = gateway.issue_host_credential(
++        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
++    )["credential"]
++    initial = definition()
++    initial["allowedOwnerNamespaces"] = ["pi"]
++    initial["definitionHash"] = compute_definition_hash(initial)
++    ready = gateway.qualify_card(
++        card_id="PI-REVALIDATE-DENIED", title="pi revalidate denied",
++        paths=("pi-revalidate-denied",), definition=initial,
++        credential=coordinator, authority_grant=AUTHORITY_GRANT,
++        repository_id=REPOSITORY_ID,
++    )
++    claim = gateway.claim(
++        card_id="PI-REVALIDATE-DENIED", expected_revision=ready["revision"],
++        expected_definition_hash=ready["definition_hash"],
++        credential=pi_credential,
++    )
++
++    with gateway.store.read() as db:
++        before = db.execute(
++            "SELECT definition_json,owner,revision,fencing_generation "
++            "FROM cards WHERE card_id=?",
++            ("PI-REVALIDATE-DENIED",),
++        ).fetchone()
++        before_definition = json.loads(before["definition_json"])
++        before_owner = before["owner"]
++        before_revision = before["revision"]
++        before_fence = before["fencing_generation"]
++
++    revised = definition("git:pi-excluded")
++    revised["currentHead"] = "def"
++    revised["allowedOwnerNamespaces"] = ["codex"]
++    revised["definitionHash"] = compute_definition_hash(revised)
++    with pytest.raises(GatewayError) as denied:
++        gateway.revalidate(
++            card_id="PI-REVALIDATE-DENIED", expected_revision=claim["revision"],
++            credential=coordinator, definition=revised,
++        )
++
++    assert denied.value.code == "owner_namespace_denied"
++    assert denied.value.message == "active owner is not allowed by revalidated definition"
++    with gateway.store.read() as db:
++        after = db.execute(
++            "SELECT definition_json,owner,revision,fencing_generation "
++            "FROM cards WHERE card_id=?",
++            ("PI-REVALIDATE-DENIED",),
++        ).fetchone()
++        assert json.loads(after["definition_json"]) == before_definition
++        assert after["owner"] == before_owner
++        assert after["revision"] == before_revision
++        assert after["fencing_generation"] == before_fence
++
++
+ def test_backend_epoch_requires_named_backend_snapshot_and_audits_transition(setup):
+     gateway, _, coordinator, _, _ = setup
+     with pytest.raises(GatewayError) as invalid:
+
+codex
+The commit changes exactly one path—the gateway test module—with 92 insertions and no production-code changes. I’m now checking whether the “allowed” case takes the guard’s false edge and the “denied” case takes its raising edge, including transaction rollback semantics.
+exec
+/bin/zsh -lc "git show 4b6551a351273d0da1ecedcf995e2d273dc36fe9:development/remote_workplan/gateway.py | nl -ba | sed -n '680,770p'
+git show 4b6551a351273d0da1ecedcf995e2d273dc36fe9:tests/development/test_remote_workplan_gateway.py | nl -ba | sed -n '520,650p'
+rg -n \"branch|coverage|pytest\" pyproject.toml setup.cfg tox.ini .coveragerc requirements*.txt 2>/dev/null" in /private/tmp/meta-harness-t021
+ exited 1 in 0ms:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+   680	        return result
+   681	
+   682	    def accept(self, *, card_id: str, expected_revision: int, credential: str, fencing_token: int, evidence: Sequence[str]) -> dict[str, Any]:
+   683	        if not evidence:
+   684	            raise GatewayError("evidence_required", "acceptance needs independent evidence")
+   685	        return self._coordinator_transition(scope="accept", card_id=card_id, expected_revision=expected_revision, credential=credential, allowed={"verifying"}, target="done", kind="accept", payload={"evidence": list(evidence)}, close_claim=True, release_paths=True, fencing_token=fencing_token)
+   686	
+   687	    def cancel(self, *, card_id: str, expected_revision: int, credential: str, reason: str) -> dict[str, Any]:
+   688	        if not reason: raise GatewayError("invalid_reason", "cancel reason must be non-empty")
+   689	        return self._coordinator_transition(scope="cancel", card_id=card_id, expected_revision=expected_revision, credential=credential, allowed=set(ACTIVE_STATUSES) | {"ready", "backlog"}, target="cancelled", kind="cancel", payload={"reason": reason}, close_claim=True, release_paths=True)
+   690	
+   691	    def requeue(self, *, card_id: str, expected_revision: int, credential: str, reason: str) -> dict[str, Any]:
+   692	        if not reason: raise GatewayError("invalid_reason", "requeue reason must be non-empty")
+   693	        return self._coordinator_transition(scope="requeue", card_id=card_id, expected_revision=expected_revision, credential=credential, allowed=set(ACTIVE_STATUSES), target="ready", kind="requeue", payload={"reason": reason}, close_claim=True, release_paths=False)
+   694	
+   695	    def reassign(self, *, card_id: str, expected_revision: int, credential: str, new_owner: str, lease_seconds: int = 120, reason: str) -> dict[str, Any]:
+   696	        if not new_owner or new_owner.startswith("coordinator:") or lease_seconds <= 0:
+   697	            raise GatewayError("invalid_owner", "reassignment needs a worker owner and positive lease")
+   698	        if not reason.strip():
+   699	            raise GatewayError("invalid_reason", "reassignment reason must be non-empty")
+   700	        with self.store.transaction() as db:
+   701	            actor = self._authorize(db, credential, "reassign", coordinator=True)
+   702	            card = self._card(db, card_id); self._expected(card, expected_revision)
+   703	            if card["status"] not in ACTIVE_STATUSES:
+   704	                raise GatewayError("invalid_transition", "only an active card can be reassigned", card["revision"])
+   705	            if db.execute("SELECT 1 FROM claims WHERE card_id=? AND closed_at IS NULL", (card_id,)).fetchone() is None:
+   706	                raise GatewayError("claim_not_active", "reassignment requires an active claim", card["revision"])
+   707	            if db.execute("SELECT 1 FROM claims WHERE owner=? AND closed_at IS NULL", (new_owner,)).fetchone():
+   708	                raise GatewayError("wip_limit", "new owner already has an active claim")
+   709	            now = self._now(); fence = card["fencing_generation"] + 1; claim_id = str(uuid4()); revision = card["revision"] + 1
+   710	            db.execute("UPDATE claims SET closed_at=?,close_reason='reassign' WHERE card_id=? AND closed_at IS NULL", (now, card_id))
+   711	            db.execute("UPDATE cards SET status='claimed',owner=?,revision=?,fencing_generation=?,attention_required=0,updated_at=? WHERE card_id=?", (new_owner, revision, fence, now, card_id))
+   712	            db.execute("INSERT INTO claims VALUES(?,?,?,?,?,?,?,?,NULL,NULL)", (claim_id, card_id, new_owner, fence, card["definition_hash"], now, now, now + lease_seconds))
+   713	            if new_owner.split(":", 1)[0] not in json.loads(card["definition_json"])["allowedOwnerNamespaces"]:
+   714	                raise GatewayError("owner_namespace_denied", "new owner namespace is not allowed")
+   715	            paths = self._paths(db, card_id)
+   716	            reservations = db.execute("SELECT card_id,path FROM path_reservations WHERE card_id<>?", (card_id,)).fetchall()
+   717	            for path in paths:
+   718	                for reservation in reservations:
+   719	                    if _overlaps(path, reservation["path"]):
+   720	                        raise GatewayError("path_conflict", f"path {path} conflicts with card {reservation['card_id']}")
+   721	            db.execute("DELETE FROM path_reservations WHERE card_id=?", (card_id,))
+   722	            db.executemany("INSERT INTO path_reservations(card_id,path,fencing_token) VALUES(?,?,?)", ((card_id, path, fence) for path in paths))
+   723	            refreshed_card = self._card(db, card_id)
+   724	            refreshed_claim = db.execute("SELECT * FROM claims WHERE claim_id=?", (claim_id,)).fetchone()
+   725	            self._store_claim_bundle(db, refreshed_card, refreshed_claim)
+   726	            receipt_hash = self._receipt(db, card_id=card_id, kind="reassign", actor=actor, revision_from=card["revision"], revision_to=revision, fencing_token=fence, payload={"new_owner": new_owner, "reason": reason, "claim_id": claim_id})
+   727	            return {"card_id": card_id, "status": "claimed", "owner": new_owner, "claim_id": claim_id, "fencing_token": fence, "revision": revision, "expires_at": now + lease_seconds, "receipt_hash": receipt_hash}
+   728	
+   729	    def revalidate(self, *, card_id: str, expected_revision: int, credential: str, definition: Mapping[str, Any]) -> dict[str, Any]:
+   730	        new_hash = self._validate_definition_contract(definition)
+   731	        with self.store.transaction() as db:
+   732	            actor = self._authorize(db, credential, "revalidate", coordinator=True)
+   733	            card = self._card(db, card_id); self._expected(card, expected_revision)
+   734	            revision = card["revision"] + 1
+   735	            claim = db.execute("SELECT * FROM claims WHERE card_id=? AND closed_at IS NULL", (card_id,)).fetchone()
+   736	            fence = card["fencing_generation"]
+   737	            if claim is not None:
+   738	                if claim["owner"].split(":", 1)[0] not in definition["allowedOwnerNamespaces"]:
+   739	                    raise GatewayError("owner_namespace_denied", "active owner is not allowed by revalidated definition")
+   740	                fence += 1
+   741	            db.execute("UPDATE cards SET definition_json=?,definition_hash=?,source_revision=?,revalidation_required=0,revision=?,fencing_generation=?,updated_at=? WHERE card_id=?", (_canonical(definition), new_hash, definition["sourceRevision"], revision, fence, self._now(), card_id))
+   742	            task_bundle = None
+   743	            if claim is not None:
+   744	                db.execute("UPDATE claims SET definition_hash=?,fencing_token=? WHERE claim_id=?", (new_hash, fence, claim["claim_id"]))
+   745	                db.execute("UPDATE path_reservations SET fencing_token=? WHERE card_id=?", (fence, card_id))
+   746	                db.execute("UPDATE worktree_bindings SET fencing_token=? WHERE claim_id=?", (fence, claim["claim_id"]))
+   747	                refreshed_card = self._card(db, card_id)
+   748	                refreshed_claim = db.execute("SELECT * FROM claims WHERE claim_id=?", (claim["claim_id"],)).fetchone()
+   749	                task_bundle = self._store_claim_bundle(db, refreshed_card, refreshed_claim)
+   750	            receipt_hash = self._receipt(db, card_id=card_id, kind="revalidate", actor=actor, revision_from=card["revision"], revision_to=revision, fencing_token=fence or None, payload={"definition_hash": new_hash, "fencing_token": fence})
+   751	            result = {"card_id": card_id, "status": card["status"], "revision": revision, "fencing_token": fence, "definition_hash": new_hash, "receipt_hash": receipt_hash}
+   752	            if task_bundle is not None:
+   753	                task_bundle["receipt_hash"] = receipt_hash
+   754	                result["task_bundle"] = task_bundle
+   755	            return result
+   756	
+   757	    def backend_epoch(self, *, credential: str | None = None, expected_epoch: int | None = None, backend: str | None = None, reconciled_snapshot_hash: str | None = None) -> dict[str, Any]:
+   758	        if backend is None:
+   759	            with self.store.read() as db:
+   760	                row = db.execute("SELECT epoch,backend FROM backend_state WHERE singleton=1").fetchone()
+   761	                return {"epoch": row["epoch"], "backend": row["backend"]}
+   762	        if credential is None: raise GatewayError("credential_required", "backend switch requires a credential")
+   763	        if backend not in BACKEND_NAMES:
+   764	            raise GatewayError("invalid_backend", "backend must be remote or filesystem")
+   765	        if not isinstance(reconciled_snapshot_hash, str) or len(reconciled_snapshot_hash) != 71 or not reconciled_snapshot_hash.startswith("sha256:") or any(character not in "0123456789abcdef" for character in reconciled_snapshot_hash[7:]):
+   766	            raise GatewayError("snapshot_required", "backend switch requires a reconciled sha256 snapshot hash")
+   767	        with self.store.transaction() as db:
+   768	            actor = self._authorize(db, credential, "backend_epoch", coordinator=True)
+   769	            row = db.execute("SELECT epoch,backend FROM backend_state WHERE singleton=1").fetchone()
+   770	            if expected_epoch != row["epoch"]:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+   520	    gateway, _, coordinator, host_a, _ = setup
+   521	    ready = qualify(gateway, coordinator)
+   522	    claim = gateway.claim(card_id="META-2", expected_revision=1, expected_definition_hash=ready["definition_hash"], credential=host_a)
+   523	    revised = definition("git:def")
+   524	    revised["currentHead"] = "def"
+   525	    revised["definitionHash"] = compute_definition_hash(revised)
+   526	    refreshed = gateway.revalidate(card_id="META-2", expected_revision=2, credential=coordinator, definition=revised)
+   527	    assert refreshed["fencing_token"] == 2
+   528	    assert refreshed["task_bundle"]["fencing_token"] == 2
+   529	    assert refreshed["task_bundle"]["definition_hash"] == revised["definitionHash"]
+   530	    with pytest.raises(GatewayError) as stale:
+   531	        gateway.heartbeat(card_id="META-2", fencing_token=claim["fencing_token"], credential=host_a)
+   532	    assert stale.value.code == "stale_fence"
+   533	    assert gateway.heartbeat(card_id="META-2", fencing_token=2, credential=host_a)["fencing_token"] == 2
+   534	
+   535	
+   536	def test_revalidate_allows_active_pi_owner_when_replacement_includes_pi(setup):
+   537	    gateway, _, coordinator, _, _ = setup
+   538	    pi_actor = "pi:host-c:revalidate"
+   539	    pi_credential = gateway.issue_host_credential(
+   540	        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
+   541	    )["credential"]
+   542	    initial = definition()
+   543	    initial["allowedOwnerNamespaces"] = ["pi"]
+   544	    initial["definitionHash"] = compute_definition_hash(initial)
+   545	    ready = gateway.qualify_card(
+   546	        card_id="PI-REVALIDATE-ALLOWED", title="pi revalidate allowed",
+   547	        paths=("pi-revalidate-allowed",), definition=initial,
+   548	        credential=coordinator, authority_grant=AUTHORITY_GRANT,
+   549	        repository_id=REPOSITORY_ID,
+   550	    )
+   551	    claim = gateway.claim(
+   552	        card_id="PI-REVALIDATE-ALLOWED", expected_revision=ready["revision"],
+   553	        expected_definition_hash=ready["definition_hash"],
+   554	        credential=pi_credential,
+   555	    )
+   556	
+   557	    revised = definition("git:pi-revised")
+   558	    revised["currentHead"] = "def"
+   559	    revised["allowedOwnerNamespaces"] = ["pi"]
+   560	    revised["definitionHash"] = compute_definition_hash(revised)
+   561	    refreshed = gateway.revalidate(
+   562	        card_id="PI-REVALIDATE-ALLOWED", expected_revision=claim["revision"],
+   563	        credential=coordinator, definition=revised,
+   564	    )
+   565	
+   566	    assert refreshed["revision"] == claim["revision"] + 1
+   567	    assert refreshed["fencing_token"] == claim["fencing_token"] + 1
+   568	    assert refreshed["task_bundle"]["owner"] == pi_actor
+   569	    assert refreshed["task_bundle"]["definition_hash"] == revised["definitionHash"]
+   570	
+   571	
+   572	def test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation(setup):
+   573	    gateway, _, coordinator, _, _ = setup
+   574	    pi_actor = "pi:host-c:revalidate-denied"
+   575	    pi_credential = gateway.issue_host_credential(
+   576	        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
+   577	    )["credential"]
+   578	    initial = definition()
+   579	    initial["allowedOwnerNamespaces"] = ["pi"]
+   580	    initial["definitionHash"] = compute_definition_hash(initial)
+   581	    ready = gateway.qualify_card(
+   582	        card_id="PI-REVALIDATE-DENIED", title="pi revalidate denied",
+   583	        paths=("pi-revalidate-denied",), definition=initial,
+   584	        credential=coordinator, authority_grant=AUTHORITY_GRANT,
+   585	        repository_id=REPOSITORY_ID,
+   586	    )
+   587	    claim = gateway.claim(
+   588	        card_id="PI-REVALIDATE-DENIED", expected_revision=ready["revision"],
+   589	        expected_definition_hash=ready["definition_hash"],
+   590	        credential=pi_credential,
+   591	    )
+   592	
+   593	    with gateway.store.read() as db:
+   594	        before = db.execute(
+   595	            "SELECT definition_json,owner,revision,fencing_generation "
+   596	            "FROM cards WHERE card_id=?",
+   597	            ("PI-REVALIDATE-DENIED",),
+   598	        ).fetchone()
+   599	        before_definition = json.loads(before["definition_json"])
+   600	        before_owner = before["owner"]
+   601	        before_revision = before["revision"]
+   602	        before_fence = before["fencing_generation"]
+   603	
+   604	    revised = definition("git:pi-excluded")
+   605	    revised["currentHead"] = "def"
+   606	    revised["allowedOwnerNamespaces"] = ["codex"]
+   607	    revised["definitionHash"] = compute_definition_hash(revised)
+   608	    with pytest.raises(GatewayError) as denied:
+   609	        gateway.revalidate(
+   610	            card_id="PI-REVALIDATE-DENIED", expected_revision=claim["revision"],
+   611	            credential=coordinator, definition=revised,
+   612	        )
+   613	
+   614	    assert denied.value.code == "owner_namespace_denied"
+   615	    assert denied.value.message == "active owner is not allowed by revalidated definition"
+   616	    with gateway.store.read() as db:
+   617	        after = db.execute(
+   618	            "SELECT definition_json,owner,revision,fencing_generation "
+   619	            "FROM cards WHERE card_id=?",
+   620	            ("PI-REVALIDATE-DENIED",),
+   621	        ).fetchone()
+   622	        assert json.loads(after["definition_json"]) == before_definition
+   623	        assert after["owner"] == before_owner
+   624	        assert after["revision"] == before_revision
+   625	        assert after["fencing_generation"] == before_fence
+   626	
+   627	
+   628	def test_backend_epoch_requires_named_backend_snapshot_and_audits_transition(setup):
+   629	    gateway, _, coordinator, _, _ = setup
+   630	    with pytest.raises(GatewayError) as invalid:
+   631	        gateway.backend_epoch(credential=coordinator, expected_epoch=1, backend="auto", reconciled_snapshot_hash="sha256:" + "a" * 64)
+   632	    assert invalid.value.code == "invalid_backend"
+   633	    switched = gateway.backend_epoch(credential=coordinator, expected_epoch=1, backend="filesystem", reconciled_snapshot_hash="sha256:" + "a" * 64)
+   634	    assert switched["epoch"] == 2 and switched["receipt_hash"].startswith("sha256:")
+   635	    with gateway.store.read() as db:
+   636	        assert db.execute("SELECT COUNT(*) FROM backend_receipts").fetchone()[0] == 1
+   637	        assert db.execute("SELECT COUNT(*) FROM projection_outbox WHERE dedupe_key LIKE 'backend:%'").fetchone()[0] == 1
+   638	
+   639	
+   640	def test_protected_webhook_freezes_once_and_stale_outbox_lease_recovers(setup):
+   641	    gateway, _, coordinator, host_a, _ = setup
+   642	    ready = qualify(gateway, coordinator)
+   643	    gateway.claim(card_id="META-2", expected_revision=1, expected_definition_hash=ready["definition_hash"], credential=host_a)
+   644	    payload = json.dumps({"type": "Issue", "action": "update", "updatedFrom": {"description": "old"}, "data": {"identifier": "META-2"}})
+   645	    first = gateway.record_webhook_delivery(delivery_id="delivery-1", event_timestamp_ms=1, received_at_ms=2, payload_json=payload)
+   646	    duplicate = gateway.record_webhook_delivery(delivery_id="delivery-1", event_timestamp_ms=1, received_at_ms=3, payload_json=payload)
+   647	    assert first.inserted is True and duplicate.inserted is False
+   648	    card = gateway.list_cards()[0]
+   649	    assert card["revalidation_required"] is True and card["revision"] == 3
+   650	    item = gateway.claim_projection_outbox(now_ms=100_000, limit=1, lease_ms=10_000)[0]
+zsh:3: no matches found: requirements*.txt
+
+exec
+/bin/zsh -lc "git rev-parse HEAD && git merge-base --is-ancestor 4b6551a351273d0da1ecedcf995e2d273dc36fe9 HEAD; printf '%s\\n' \""'$?"' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+4b6551a351273d0da1ecedcf995e2d273dc36fe9
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+0
+
+exec
+/bin/zsh -lc "python -m coverage --version
+rg -n \"\\[tool\\.coverage|branch\\s*=|pytest\" pyproject.toml .coveragerc setup.cfg tox.ini 2>/dev/null || true" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+zsh:1: command not found: python
+pyproject.toml:18:dev = ["pytest", "pytest-asyncio", "httpx"]
+pyproject.toml:19:e2e = ["playwright", "pytest-playwright"]
+pyproject.toml:32:[tool.pytest.ini_options]
+
+exec
+/bin/zsh -lc "python3 -m coverage --version
+sed -n '1,70p' pyproject.toml" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+/opt/homebrew/opt/python@3.14/bin/python3.14: No module named coverage
+[project]
+name = "metaharness"
+version = "0.1.0"
+description = "An intelligent meta agent harness that orchestrates, steers, and learns from other agent harnesses"
+requires-python = ">=3.11"
+dependencies = [
+    "cryptography",
+    "fastapi",
+    "jsonschema>=4.18",
+    "uvicorn[standard]",
+    "opentelemetry-sdk",
+    "opentelemetry-api",
+    "pydantic",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+e2e = ["playwright", "pytest-playwright"]
+mcp = ["mcp>=1.2,<2"]
+
+[project.scripts]
+metaharness = "metaharness.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+exec
+/bin/zsh -lc "command -v pytest || true
+pytest --version || true
+rg --files -g 'coverage*' -g '"'!*.pyc'"' . | head -50" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+/opt/homebrew/bin/pytest
+pytest 9.0.3
+
+exec
+/bin/zsh -lc 'python3 -m pytest --version' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+pytest 9.0.3
+
+exec
+/bin/zsh -lc 'PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider -q tests/development/test_remote_workplan_gateway.py::test_revalidate_allows_active_pi_owner_when_replacement_includes_pi tests/development/test_remote_workplan_gateway.py::test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation' in /private/tmp/meta-harness-t021
+ exited 1 in 0ms:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/opt/homebrew/lib/python3.14/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+                     ~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/config/__init__.py", line 223, in console_main
+    code = main()
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/config/__init__.py", line 193, in main
+    config = _prepareconfig(new_args, plugins)
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/config/__init__.py", line 361, in _prepareconfig
+    config: Config = pluginmanager.hook.pytest_cmdline_parse(
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pluginmanager=pluginmanager, args=args
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/helpconfig.py", line 124, in pytest_cmdline_parse
+    config = yield
+             ^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/config/__init__.py", line 1192, in pytest_cmdline_parse
+    self.parse(args)
+    ~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/config/__init__.py", line 1562, in parse
+    self.hook.pytest_load_initial_conftests(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        early_config=self, args=args, parser=self._parser
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/warnings.py", line 128, in pytest_load_initial_conftests
+    return (yield)
+            ^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/pluggy/_callers.py", line 116, in _multicall
+    next(function_gen)  # first yield
+    ~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/capture.py", line 170, in pytest_load_initial_conftests
+    capman.start_global_capturing()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/capture.py", line 773, in start_global_capturing
+    self._global_capturing = _get_multicapture(self._method)
+                             ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/capture.py", line 714, in _get_multicapture
+    return MultiCapture(in_=FDCapture(0), out=FDCapture(1), err=FDCapture(2))
+                                              ~~~~~~~~~^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/_pytest/capture.py", line 493, in __init__
+    TemporaryFile(buffering=0),
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py", line 652, in TemporaryFile
+    prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+                                       ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py", line 127, in _sanitize_params
+    dir = gettempdir()
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py", line 312, in gettempdir
+    return _os.fsdecode(_gettempdir())
+                        ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py", line 305, in _gettempdir
+    tempdir = _get_default_tempdir()
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py", line 222, in _get_default_tempdir
+    raise FileNotFoundError(_errno.ENOENT,
+                            "No usable temporary directory found in %s" %
+                            dirlist)
+FileNotFoundError: [Errno 2] No usable temporary directory found in ['/var/folders/qr/ghg7c8h54k10lm7dzv848qy00000gn/T/', '/tmp', '/var/tmp', '/usr/tmp', '/private/tmp/meta-harness-t021']
+
+codex
+The focused pytest invocation is blocked by the enforced read-only filesystem: Python cannot create even its capture/temp directory. I’m continuing with static control-flow and transaction analysis, and I’ll distinguish that limitation from the code evidence in the verdict.
+exec
+/bin/zsh -lc "sed -n '1,180p' tests/development/test_remote_workplan_gateway.py
+rg -n \"class .*Store|def transaction|@contextmanager|class GatewayStore|sqlite\" development/remote_workplan src tests/development/test_remote_workplan_gateway.py" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+import json
+import sqlite3
+
+import pytest
+
+from development.remote_workplan import GatewayError, RemoteWorkplanGateway
+from development.remote_workplan.gateway import compute_definition_hash
+
+
+ALL_WORKER = {
+    "claim", "bind", "heartbeat", "checkpoint", "block", "resume", "submit", "list"
+}
+ALL_COORDINATOR = {
+    "qualify", "integrate", "accept", "revalidate", "requeue", "reassign",
+    "cancel", "backend_epoch", "list",
+}
+AUTHORITY_GRANT = {
+    "executionCoordination": True,
+    "evaluator": False,
+    "merge": False,
+    "promotion": False,
+    "deployment": False,
+    "credentials": False,
+    "runtime": False,
+}
+REPOSITORY_ID = "sha256:" + "a" * 64
+
+
+class Clock:
+    def __init__(self, value: int = 1_000):
+        self.value = value
+
+    def __call__(self) -> int:
+        return self.value
+
+
+@pytest.fixture
+def setup(tmp_path):
+    clock = Clock()
+    gateway = RemoteWorkplanGateway(str(tmp_path / "gateway.sqlite3"), clock=clock)
+    coordinator = gateway.issue_host_credential(
+        actor="coordinator:control:run", scopes=ALL_COORDINATOR, ttl_seconds=10_000
+    )["credential"]
+    host_a = gateway.issue_host_credential(
+        actor="codex:host-a:seat", scopes=ALL_WORKER, ttl_seconds=10_000
+    )["credential"]
+    host_b = gateway.issue_host_credential(
+        actor="claude:host-b:seat", scopes=ALL_WORKER, ttl_seconds=10_000
+    )["credential"]
+    return gateway, clock, coordinator, host_a, host_b
+
+
+def definition(source="git:abc"):
+    result = {
+        "sourceRevision": source,
+        "worktreePath": "/work/meta-2",
+        "branch": "dev/meta-2",
+        "baseCommit": "abc",
+        "currentHead": "abc",
+        "plane": "development",
+        "frozenAxes": ["H", "E", "W"],
+        "budget": "bounded",
+        "stopCondition": "tests pass",
+        "evaluatorAuthority": "independent coordinator",
+        "acceptanceCommands": ["pytest -q tests/development"],
+        "nextCheckpoint": "gateway tests",
+        "allowedOwnerNamespaces": ["codex", "claude"],
+    }
+    result["definitionHash"] = compute_definition_hash(result)
+    return result
+
+
+def qualify(gateway, coordinator, card_id="META-2", paths=("development/remote_workplan",), dependencies=()):
+    return gateway.qualify_card(
+        card_id=card_id,
+        title=card_id,
+        paths=paths,
+        definition=definition(),
+        dependencies=dependencies,
+        credential=coordinator,
+        authority_grant=AUTHORITY_GRANT,
+        repository_id=REPOSITORY_ID,
+    )
+
+
+def test_credentials_are_hashed_scoped_and_short_lived(setup):
+    gateway, clock, coordinator, host_a, _ = setup
+    raw = host_a
+    with gateway.store.read() as db:
+        stored = db.execute("SELECT secret_hash FROM credentials WHERE actor LIKE 'codex:%'").fetchone()[0]
+    assert raw not in stored
+    with pytest.raises(GatewayError, match="does not allow qualify") as denied:
+        qualify(gateway, host_a)
+    assert denied.value.code == "scope_denied"
+    clock.value = 20_000
+    with pytest.raises(GatewayError) as expired:
+        gateway.list_cards(credential=coordinator)
+    assert expired.value.code == "credential_expired"
+
+
+def test_two_connections_racing_yield_one_winner_and_one_fence(setup):
+    gateway, _, coordinator, host_a, host_b = setup
+    ready = qualify(gateway, coordinator)
+
+    def claim(credential):
+        contender = RemoteWorkplanGateway(gateway.store.db_path, clock=gateway._clock)
+        try:
+            return contender.claim(
+                card_id="META-2",
+                expected_revision=ready["revision"],
+                expected_definition_hash=ready["definition_hash"],
+                credential=credential,
+            )
+        except GatewayError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(claim, (host_a, host_b)))
+    winners = [result for result in results if isinstance(result, dict)]
+    losers = [result for result in results if isinstance(result, GatewayError)]
+    assert len(winners) == len(losers) == 1
+    assert winners[0]["fencing_token"] == 1
+    assert losers[0].code in {"stale_revision", "card_not_ready"}
+    assert gateway.list_cards()[0]["owner"] == winners[0]["owner"]
+
+
+def test_paths_are_cross_platform_normalized_and_parent_child_exclusive(setup):
+    gateway, _, coordinator, host_a, host_b = setup
+    with pytest.raises(GatewayError) as invalid:
+        qualify(gateway, coordinator, paths=(r"development\remote_workplan",))
+    assert invalid.value.code == "invalid_path"
+    qualify(gateway, coordinator, paths=("development/remote_workplan",))
+    with pytest.raises(GatewayError) as conflict:
+        qualify(gateway, coordinator, card_id="META-3", paths=("development/remote_workplan/seat",))
+    assert conflict.value.code == "path_conflict"
+
+
+def test_dependency_and_one_card_wip_fail_closed(setup):
+    gateway, _, coordinator, host_a, _ = setup
+    qualify(gateway, coordinator, card_id="BASE", paths=("base",))
+    with pytest.raises(GatewayError) as unmet:
+        qualify(gateway, coordinator, card_id="NEXT", paths=("next",), dependencies=("BASE",))
+    assert unmet.value.code == "dependency_unmet"
+    base = gateway.list_cards()[0]
+    gateway.claim(card_id="BASE", expected_revision=1, expected_definition_hash=base["definition_hash"], credential=host_a)
+    other = qualify(gateway, coordinator, card_id="OTHER", paths=("other",))
+    with pytest.raises(GatewayError) as wip:
+        gateway.claim(card_id="OTHER", expected_revision=1, expected_definition_hash=other["definition_hash"], credential=host_a)
+    assert wip.value.code == "wip_limit"
+
+
+def test_task_bundle_and_bind_receipt_are_secret_free(setup):
+    gateway, _, coordinator, host_a, _ = setup
+    ready = qualify(gateway, coordinator)
+    claim = gateway.claim(card_id="META-2", expected_revision=1, expected_definition_hash=ready["definition_hash"], credential=host_a)
+    serialized = json.dumps(claim["task_bundle"])
+    assert host_a not in serialized and coordinator not in serialized
+    bound = gateway.bind_worktree(
+        card_id="META-2", expected_revision=2, fencing_token=claim["fencing_token"],
+        credential=host_a, repository_id=REPOSITORY_ID, worktree_path="/work/meta-2",
+        branch="dev/meta-2", base_commit="abc",
+    )
+    assert bound["status"] == "in_progress"
+    assert gateway.receipts(card_id="META-2")[-1]["kind"] == "bind_worktree"
+
+
+def test_bind_rejects_repository_other_than_coordinator_frozen_identity(setup):
+    gateway, _, coordinator, host_a, _ = setup
+    ready = qualify(gateway, coordinator)
+    claim = gateway.claim(
+        card_id="META-2",
+        expected_revision=ready["revision"],
+        expected_definition_hash=ready["definition_hash"],
+        credential=host_a,
+    )
+    with pytest.raises(GatewayError) as mismatch:
+        gateway.bind_worktree(
+tests/development/test_remote_workplan_gateway.py:5:import sqlite3
+tests/development/test_remote_workplan_gateway.py:43:    gateway = RemoteWorkplanGateway(str(tmp_path / "gateway.sqlite3"), clock=clock)
+tests/development/test_remote_workplan_gateway.py:243:        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+tests/development/test_remote_workplan_gateway.py:272:    with pytest.raises(sqlite3.IntegrityError, match="projection rejected"):
+development/remote_workplan/linear.py:180:class LinearProjectionStore(Protocol):
+development/remote_workplan/gateway.py:16:import sqlite3
+development/remote_workplan/gateway.py:161:    def _authorize(self, db: sqlite3.Connection, credential: str, scope: str, *, coordinator: bool = False) -> str:
+development/remote_workplan/gateway.py:178:    def _card(db: sqlite3.Connection, card_id: str) -> sqlite3.Row:
+development/remote_workplan/gateway.py:185:    def _expected(card: sqlite3.Row, expected_revision: int) -> None:
+development/remote_workplan/gateway.py:194:    def _definition(card: sqlite3.Row, expected_definition_hash: str | None) -> None:
+development/remote_workplan/gateway.py:239:    def _bundle_material(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+development/remote_workplan/gateway.py:256:    def _store_claim_bundle(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+development/remote_workplan/gateway.py:266:    def _validate_claim_bundle(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+development/remote_workplan/gateway.py:280:        self, db: sqlite3.Connection, *, card_id: str, kind: str, actor: str,
+development/remote_workplan/gateway.py:315:    def _paths(db: sqlite3.Connection, card_id: str) -> list[str]:
+development/remote_workplan/gateway.py:319:    def _dependencies(db: sqlite3.Connection, card_id: str) -> list[str]:
+development/remote_workplan/gateway.py:322:    def _card_dict(self, db: sqlite3.Connection, card: sqlite3.Row) -> dict[str, Any]:
+development/remote_workplan/gateway.py:427:    def _active_claim(self, db: sqlite3.Connection, card: sqlite3.Row, fencing_token: int, actor: str) -> sqlite3.Row:
+development/remote_workplan/gateway.py:440:    def _coordinator_fence(self, db: sqlite3.Connection, card: sqlite3.Row, fencing_token: int) -> sqlite3.Row:
+development/remote_workplan/gateway.py:455:        self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row, *,
+development/remote_workplan/gateway.py:458:    ) -> sqlite3.Row:
+development/remote_workplan/gateway.py:818:            except sqlite3.IntegrityError:
+development/remote_workplan/store.py:5:import sqlite3
+development/remote_workplan/store.py:190:class SQLiteStore:
+development/remote_workplan/store.py:219:    def connect(self) -> sqlite3.Connection:
+development/remote_workplan/store.py:220:        connection = sqlite3.connect(
+development/remote_workplan/store.py:223:        connection.row_factory = sqlite3.Row
+development/remote_workplan/store.py:229:    @contextmanager
+development/remote_workplan/store.py:230:    def transaction(self) -> Iterator[sqlite3.Connection]:
+development/remote_workplan/store.py:242:    @contextmanager
+development/remote_workplan/store.py:243:    def read(self) -> Iterator[sqlite3.Connection]:
+src/metaharness/web/app.py:270:@contextmanager
+src/metaharness/web/app.py:306:@contextmanager
+src/metaharness/harness/isolation.py:86:@contextmanager
+src/metaharness/observability/tracing.py:45:class InMemorySpanStore(SpanExporter):
+src/metaharness/memory/broker.py:6:import sqlite3
+src/metaharness/memory/broker.py:922:                    "SELECT name FROM sqlite_master WHERE name='records_fts'"
+src/metaharness/memory/broker.py:935:            except sqlite3.OperationalError:
+src/metaharness/memory/stores.py:20:import sqlite3
+src/metaharness/memory/stores.py:58:class MemoryStore:
+src/metaharness/memory/stores.py:88:        # isolation_level=None puts sqlite3 in autocommit mode; that gives
+src/metaharness/memory/stores.py:94:        self._conn = sqlite3.connect(self._path, isolation_level=None, check_same_thread=False)
+src/metaharness/memory/stores.py:337:            except sqlite3.OperationalError:
+src/metaharness/memory/stores.py:368:    @contextmanager
+src/metaharness/memory/stores.py:382:        # also strip the decimal `id(self)` to keep the name sqlite-safe.
+src/metaharness/memory/stores.py:785:class EpisodicMemoryStore(MemoryStore):
+src/metaharness/memory/stores.py:789:class SemanticMemoryStore(MemoryStore):
+src/metaharness/memory/stores.py:793:class WorkingMemoryStore(MemoryStore):
+src/metaharness/memory/stores.py:797:class ProceduralMemoryStore(MemoryStore):
+src/metaharness/workflows/journal.py:363:    def transaction(self, *, refresh: bool = True) -> Iterator["Journal"]:
+src/metaharness/memory/audit.py:72:class CommitOrderedMemoryStore(MemoryStore):
+src/metaharness/blueprints/store.py:24:class BlueprintStoreError(RuntimeError):
+src/metaharness/blueprints/store.py:28:class BlueprintNotFoundError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:32:class BlueprintAlreadyExistsError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:36:class BlueprintCorruptionError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:40:class RevisionConflictError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:50:class InvalidRevisionError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:58:class BlueprintArchivedError(BlueprintStoreError):
+src/metaharness/blueprints/store.py:65:class BlueprintStore:
+src/metaharness/blueprints/store.py:122:    @contextmanager
+src/metaharness/optimization/suites.py:174:@contextmanager
+src/metaharness/evals/artifact_store.py:18:class EvalArtifactStoreError(RuntimeError):
+src/metaharness/evals/artifact_store.py:22:class EvalArtifactNotFoundError(EvalArtifactStoreError):
+src/metaharness/evals/artifact_store.py:26:class EvalArtifactAlreadyExistsError(EvalArtifactStoreError):
+src/metaharness/evals/artifact_store.py:30:class EvalArtifactCorruptionError(EvalArtifactStoreError):
+src/metaharness/evals/artifact_store.py:37:class _ImmutableModelStore(Generic[T]):
+src/metaharness/evals/artifact_store.py:163:class EvaluationReportStore(_ImmutableModelStore[EvaluationReport]):
+src/metaharness/evals/artifact_store.py:168:class TuningProposalStore(_ImmutableModelStore[TuningProposal]):
+src/metaharness/evals/store.py:26:class EvalSuiteStoreError(RuntimeError):
+src/metaharness/evals/store.py:30:class EvalSuiteNotFoundError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:34:class EvalSuiteAlreadyExistsError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:38:class EvalSuiteCorruptionError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:42:class EvalSuiteRevisionConflictError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:53:class InvalidEvalSuiteRevisionError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:62:class EvalSuiteArchivedError(EvalSuiteStoreError):
+src/metaharness/evals/store.py:66:class EvalSuiteStore:
+src/metaharness/evals/store.py:146:    @contextmanager
+
+exec
+/bin/zsh -lc "nl -ba development/remote_workplan/store.py | sed -n '185,255p'
+nl -ba development/remote_workplan/gateway.py | sed -n '210,280p'
+rg -n \"CREATE TABLE cards|owner .*|definition_json|fencing_generation\" development/remote_workplan/store.py | head -80" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+   185	CREATE TRIGGER IF NOT EXISTS backend_receipts_immutable_delete
+   186	BEFORE DELETE ON backend_receipts BEGIN SELECT RAISE(ABORT, 'backend receipts are immutable'); END;
+   187	"""
+   188	
+   189	
+   190	class SQLiteStore:
+   191	    def __init__(self, db_path: str | Path):
+   192	        self.db_path = str(db_path)
+   193	        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+   194	        connection = self.connect()
+   195	        try:
+   196	            connection.executescript(SCHEMA)
+   197	            card_columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
+   198	            if "authority_grant_json" not in card_columns:
+   199	                connection.execute(
+   200	                    "ALTER TABLE cards ADD COLUMN authority_grant_json TEXT NOT NULL DEFAULT '{}'"
+   201	                )
+   202	            if "repository_id" not in card_columns:
+   203	                connection.execute(
+   204	                    "ALTER TABLE cards ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''"
+   205	                )
+   206	            backend_columns = {
+   207	                row[1] for row in connection.execute("PRAGMA table_info(backend_state)")
+   208	            }
+   209	            if "snapshot_hash" not in backend_columns:
+   210	                connection.execute("ALTER TABLE backend_state ADD COLUMN snapshot_hash TEXT")
+   211	            connection.execute(
+   212	                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
+   213	                (str(SCHEMA_VERSION),),
+   214	            )
+   215	            connection.commit()
+   216	        finally:
+   217	            connection.close()
+   218	
+   219	    def connect(self) -> sqlite3.Connection:
+   220	        connection = sqlite3.connect(
+   221	            self.db_path, timeout=30.0, isolation_level=None, check_same_thread=False
+   222	        )
+   223	        connection.row_factory = sqlite3.Row
+   224	        connection.execute("PRAGMA foreign_keys = ON")
+   225	        connection.execute("PRAGMA busy_timeout = 30000")
+   226	        connection.execute("PRAGMA journal_mode = WAL")
+   227	        return connection
+   228	
+   229	    @contextmanager
+   230	    def transaction(self) -> Iterator[sqlite3.Connection]:
+   231	        connection = self.connect()
+   232	        try:
+   233	            connection.execute("BEGIN IMMEDIATE")
+   234	            yield connection
+   235	            connection.commit()
+   236	        except BaseException:
+   237	            connection.rollback()
+   238	            raise
+   239	        finally:
+   240	            connection.close()
+   241	
+   242	    @contextmanager
+   243	    def read(self) -> Iterator[sqlite3.Connection]:
+   244	        connection = self.connect()
+   245	        try:
+   246	            yield connection
+   247	        finally:
+   248	            connection.close()
+   210	            raise GatewayError("definition_hash_mismatch", "declared definition hash is not canonical")
+   211	        scalar_fields = (
+   212	            "sourceRevision", "worktreePath", "branch", "baseCommit", "currentHead",
+   213	            "budget", "stopCondition", "evaluatorAuthority", "nextCheckpoint",
+   214	        )
+   215	        if any(not isinstance(definition[field], str) or not definition[field].strip() for field in scalar_fields):
+   216	            raise GatewayError("invalid_definition", "required definition strings must be non-empty")
+   217	        if definition["plane"] != "development":
+   218	            raise GatewayError("invalid_definition", "remote workplan cards must use the development plane")
+   219	        if definition["frozenAxes"] != ["H", "E", "W"]:
+   220	            raise GatewayError("invalid_definition", "definition must freeze H, E, and W")
+   221	        worktree_path = definition["worktreePath"]
+   222	        if (
+   223	            not worktree_path.startswith("/")
+   224	            or "\\" in worktree_path
+   225	            or posixpath.normpath(worktree_path) != worktree_path
+   226	        ):
+   227	            raise GatewayError(
+   228	                "invalid_definition", "worktreePath must be an absolute normalized POSIX path"
+   229	            )
+   230	        for field in ("acceptanceCommands", "allowedOwnerNamespaces"):
+   231	            value = definition[field]
+   232	            if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item for item in value):
+   233	                raise GatewayError("invalid_definition", f"{field} must be a non-empty string list")
+   234	        namespaces = definition["allowedOwnerNamespaces"]
+   235	        if len(namespaces) != len(set(namespaces)) or not set(namespaces) <= {"codex", "claude", "dev-orchestrator", "pi"}:
+   236	            raise GatewayError("invalid_definition", "allowedOwnerNamespaces must be a unique supported subset")
+   237	        return canonical_hash
+   238	
+   239	    def _bundle_material(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+   240	        return {
+   241	            "schema_version": 1,
+   242	            "card_id": card["card_id"],
+   243	            "title": card["title"],
+   244	            "definition": json.loads(card["definition_json"]),
+   245	            "definition_hash": card["definition_hash"],
+   246	            "source_revision": card["source_revision"],
+   247	            "authority_grant": json.loads(card["authority_grant_json"]),
+   248	            "repository_id": card["repository_id"],
+   249	            "paths": self._paths(db, card["card_id"]),
+   250	            "dependencies": self._dependencies(db, card["card_id"]),
+   251	            "claim_id": claim["claim_id"],
+   252	            "owner": claim["owner"],
+   253	            "fencing_token": claim["fencing_token"],
+   254	        }
+   255	
+   256	    def _store_claim_bundle(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+   257	        bundle = self._bundle_material(db, card, claim)
+   258	        bundle_hash = _sha256(_canonical(bundle))
+   259	        db.execute(
+   260	            "INSERT INTO claim_bundles(claim_id,fencing_token,bundle_json,bundle_hash,created_at) VALUES(?,?,?,?,?)",
+   261	            (claim["claim_id"], claim["fencing_token"], _canonical(bundle), bundle_hash, self._now()),
+   262	        )
+   263	        bundle["bundle_hash"] = bundle_hash
+   264	        return bundle
+   265	
+   266	    def _validate_claim_bundle(self, db: sqlite3.Connection, card: sqlite3.Row, claim: sqlite3.Row) -> dict[str, Any]:
+   267	        row = db.execute(
+   268	            "SELECT bundle_json,bundle_hash FROM claim_bundles WHERE claim_id=? AND fencing_token=?",
+   269	            (claim["claim_id"], claim["fencing_token"]),
+   270	        ).fetchone()
+   271	        if row is None or _sha256(row["bundle_json"]) != row["bundle_hash"]:
+   272	            raise GatewayError("claim_bundle_invalid", "immutable claim bundle is missing or corrupt", card["revision"])
+   273	        bundle = json.loads(row["bundle_json"])
+   274	        if bundle != self._bundle_material(db, card, claim):
+   275	            raise GatewayError("claim_bundle_invalid", "claim bundle no longer matches canonical state", card["revision"])
+   276	        bundle["bundle_hash"] = row["bundle_hash"]
+   277	        return bundle
+   278	
+   279	    def _receipt(
+   280	        self, db: sqlite3.Connection, *, card_id: str, kind: str, actor: str,
+35:    owner TEXT,
+37:    definition_json TEXT NOT NULL,
+43:    fencing_generation INTEGER NOT NULL DEFAULT 0,
+85:    owner TEXT NOT NULL,
+
+exec
+/bin/zsh -lc "nl -ba development/remote_workplan/store.py | sed -n '20,100p'
+rg -n \"def claim\\(|UPDATE cards SET status='claimed'|INSERT INTO claims\" development/remote_workplan/gateway.py" in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+    20	);
+    21	
+    22	CREATE TABLE IF NOT EXISTS backend_state (
+    23	    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    24	    epoch INTEGER NOT NULL,
+    25	    backend TEXT NOT NULL,
+    26	    snapshot_hash TEXT
+    27	);
+    28	INSERT OR IGNORE INTO backend_state(singleton, epoch, backend)
+    29	VALUES (1, 1, 'remote');
+    30	
+    31	CREATE TABLE IF NOT EXISTS cards (
+    32	    card_id TEXT PRIMARY KEY,
+    33	    title TEXT NOT NULL,
+    34	    status TEXT NOT NULL,
+    35	    owner TEXT,
+    36	    revision INTEGER NOT NULL,
+    37	    definition_json TEXT NOT NULL,
+    38	    definition_hash TEXT NOT NULL,
+    39	    authority_grant_json TEXT NOT NULL DEFAULT '{}',
+    40	    repository_id TEXT NOT NULL DEFAULT '',
+    41	    source_revision TEXT NOT NULL,
+    42	    priority INTEGER NOT NULL DEFAULT 0,
+    43	    fencing_generation INTEGER NOT NULL DEFAULT 0,
+    44	    attention_required INTEGER NOT NULL DEFAULT 0,
+    45	    revalidation_required INTEGER NOT NULL DEFAULT 0,
+    46	    integrated_by TEXT,
+    47	    integrated_commit TEXT,
+    48	    created_at INTEGER NOT NULL,
+    49	    updated_at INTEGER NOT NULL
+    50	);
+    51	
+    52	CREATE TABLE IF NOT EXISTS dependencies (
+    53	    card_id TEXT NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+    54	    dependency_id TEXT NOT NULL,
+    55	    PRIMARY KEY(card_id, dependency_id)
+    56	);
+    57	
+    58	CREATE TABLE IF NOT EXISTS card_paths (
+    59	    card_id TEXT NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+    60	    path TEXT NOT NULL,
+    61	    PRIMARY KEY(card_id, path)
+    62	);
+    63	
+    64	CREATE TABLE IF NOT EXISTS path_reservations (
+    65	    card_id TEXT NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+    66	    path TEXT NOT NULL,
+    67	    fencing_token INTEGER NOT NULL,
+    68	    PRIMARY KEY(card_id, path)
+    69	);
+    70	CREATE INDEX IF NOT EXISTS reservations_path_idx ON path_reservations(path);
+    71	
+    72	CREATE TABLE IF NOT EXISTS credentials (
+    73	    credential_id TEXT PRIMARY KEY,
+    74	    actor TEXT NOT NULL,
+    75	    secret_hash TEXT NOT NULL UNIQUE,
+    76	    scopes_json TEXT NOT NULL,
+    77	    issued_at INTEGER NOT NULL,
+    78	    expires_at INTEGER NOT NULL,
+    79	    revoked_at INTEGER
+    80	);
+    81	
+    82	CREATE TABLE IF NOT EXISTS claims (
+    83	    claim_id TEXT PRIMARY KEY,
+    84	    card_id TEXT NOT NULL REFERENCES cards(card_id),
+    85	    owner TEXT NOT NULL,
+    86	    fencing_token INTEGER NOT NULL,
+    87	    definition_hash TEXT NOT NULL,
+    88	    claimed_at INTEGER NOT NULL,
+    89	    heartbeat_at INTEGER NOT NULL,
+    90	    expires_at INTEGER NOT NULL,
+    91	    closed_at INTEGER,
+    92	    close_reason TEXT
+    93	);
+    94	CREATE UNIQUE INDEX IF NOT EXISTS one_open_claim_per_card
+    95	ON claims(card_id) WHERE closed_at IS NULL;
+    96	CREATE INDEX IF NOT EXISTS open_claim_owner
+    97	ON claims(owner) WHERE closed_at IS NULL;
+    98	
+    99	CREATE TABLE IF NOT EXISTS worktree_bindings (
+   100	    claim_id TEXT PRIMARY KEY REFERENCES claims(claim_id),
+485:    def claim(
+519:            db.execute("UPDATE cards SET status='claimed',owner=?,revision=revision+1,fencing_generation=?,attention_required=0,updated_at=? WHERE card_id=?", (actor, fence, now, card_id))
+520:            db.execute("INSERT INTO claims VALUES(?,?,?,?,?,?,?,?,NULL,NULL)", (claim_id, card_id, actor, fence, card["definition_hash"], now, now, now + lease_seconds))
+711:            db.execute("UPDATE cards SET status='claimed',owner=?,revision=?,fencing_generation=?,attention_required=0,updated_at=? WHERE card_id=?", (new_owner, revision, fence, now, card_id))
+712:            db.execute("INSERT INTO claims VALUES(?,?,?,?,?,?,?,?,NULL,NULL)", (claim_id, card_id, new_owner, fence, card["definition_hash"], now, now, now + lease_seconds))
+
+exec
+/bin/zsh -lc "nl -ba development/remote_workplan/gateway.py | sed -n '145,210p'
+git diff-tree --no-commit-id --name-status -r 4b6551a351273d0da1ecedcf995e2d273dc36fe9
+git diff --check 4b6551a351273d0da1ecedcf995e2d273dc36fe9"'^ 4b6551a351273d0da1ecedcf995e2d273dc36fe9
+git status --short' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+   145	        with self.store.transaction() as db:
+   146	            db.execute(
+   147	                "INSERT INTO credentials VALUES (?, ?, ?, ?, ?, ?, NULL)",
+   148	                (credential_id, actor, self._credential_hash(secret), _canonical(normalized_scopes), now, now + ttl_seconds),
+   149	            )
+   150	        return IssuedCredential(secret, credential_id, actor, normalized_scopes, now + ttl_seconds).to_dict()
+   151	
+   152	    def revoke_host_credential(self, *, credential: str) -> None:
+   153	        with self.store.transaction() as db:
+   154	            cursor = db.execute(
+   155	                "UPDATE credentials SET revoked_at=? WHERE secret_hash=? AND revoked_at IS NULL",
+   156	                (self._now(), self._credential_hash(credential)),
+   157	            )
+   158	            if cursor.rowcount != 1:
+   159	                raise GatewayError("invalid_credential", "credential is unknown or revoked")
+   160	
+   161	    def _authorize(self, db: sqlite3.Connection, credential: str, scope: str, *, coordinator: bool = False) -> str:
+   162	        row = db.execute(
+   163	            "SELECT * FROM credentials WHERE secret_hash=?", (self._credential_hash(credential),)
+   164	        ).fetchone()
+   165	        now = self._now()
+   166	        if row is None or row["revoked_at"] is not None:
+   167	            raise GatewayError("invalid_credential", "credential is unknown or revoked")
+   168	        if row["expires_at"] <= now:
+   169	            raise GatewayError("credential_expired", "credential has expired")
+   170	        if scope not in json.loads(row["scopes_json"]):
+   171	            raise GatewayError("scope_denied", f"credential does not allow {scope}")
+   172	        actor = row["actor"]
+   173	        if coordinator and not actor.startswith("coordinator:"):
+   174	            raise GatewayError("coordinator_required", f"{scope} requires coordinator authority")
+   175	        return actor
+   176	
+   177	    @staticmethod
+   178	    def _card(db: sqlite3.Connection, card_id: str) -> sqlite3.Row:
+   179	        row = db.execute("SELECT * FROM cards WHERE card_id=?", (card_id,)).fetchone()
+   180	        if row is None:
+   181	            raise GatewayError("card_not_found", f"card {card_id} does not exist")
+   182	        return row
+   183	
+   184	    @staticmethod
+   185	    def _expected(card: sqlite3.Row, expected_revision: int) -> None:
+   186	        if card["revision"] != expected_revision:
+   187	            raise GatewayError(
+   188	                "stale_revision",
+   189	                f"expected revision {expected_revision}, current revision is {card['revision']}",
+   190	                card["revision"],
+   191	            )
+   192	
+   193	    @staticmethod
+   194	    def _definition(card: sqlite3.Row, expected_definition_hash: str | None) -> None:
+   195	        if expected_definition_hash is not None and not hmac.compare_digest(
+   196	            card["definition_hash"], expected_definition_hash
+   197	        ):
+   198	            raise GatewayError("definition_changed", "card definition hash no longer matches")
+   199	
+   200	    @staticmethod
+   201	    def _validate_definition_contract(definition: Mapping[str, Any]) -> str:
+   202	        missing = sorted(REQUIRED_DEFINITION_FIELDS - set(definition))
+   203	        if missing:
+   204	            raise GatewayError("invalid_definition", "definition missing required fields: " + ", ".join(missing))
+   205	        extra = sorted(set(definition) - REQUIRED_DEFINITION_FIELDS)
+   206	        if extra:
+   207	            raise GatewayError("invalid_definition", "definition contains unsupported fields: " + ", ".join(extra))
+   208	        canonical_hash = compute_definition_hash(definition)
+   209	        if definition["definitionHash"] != canonical_hash:
+   210	            raise GatewayError("definition_hash_mismatch", "declared definition hash is not canonical")
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+M	tests/development/test_remote_workplan_gateway.py
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+
+exec
+/bin/zsh -lc "python3 -B -c \"import importlib.util\\nimport sqlite3\\nimport sys\\nfrom pathlib import Path\\n\\nfrom development.remote_workplan import RemoteWorkplanGateway\\nfrom development.remote_workplan.store import SQLiteStore\\n\\nclass NonClosingConnection:\\n    def __init__(self, raw):\\n        self.raw = raw\\n    def close(self):\\n        pass\\n    def __getattr__(self, name):\\n        return getattr(self.raw, name)\\n\\ndef memory_connect(self):\\n    raw = getattr(self, \\\"_review_memory_connection\\\", None)\\n    if raw is None:\\n        raw = sqlite3.connect(\\\":memory:\\\", timeout=30.0, isolation_level=None, check_same_thread=False)\\n        raw.row_factory = sqlite3.Row\\n        raw.execute(\\\"PRAGMA foreign_keys = ON\\\")\\n        raw.execute(\\\"PRAGMA busy_timeout = 30000\\\")\\n        self._review_memory_connection = raw\\n    return NonClosingConnection(raw)\\n\\nSQLiteStore.connect = memory_connect\\nspec = importlib.util.spec_from_file_location(\\\"gateway_tests_review\\\", Path(\\\"tests/development/test_remote_workplan_gateway.py\\\"))\\nmodule = importlib.util.module_from_spec(spec)\\nspec.loader.exec_module(module)\\n\\ndef make_setup():\\n    clock = module.Clock()\\n    gateway = RemoteWorkplanGateway(\\\":memory:\\\", clock=clock)\\n    coordinator = gateway.issue_host_credential(actor=\\\"coordinator:control:run\\\", scopes=module.ALL_COORDINATOR, ttl_seconds=10000)[\\\"credential\\\"]\\n    host_a = gateway.issue_host_credential(actor=\\\"codex:host-a:seat\\\", scopes=module.ALL_WORKER, ttl_seconds=10000)[\\\"credential\\\"]\\n    host_b = gateway.issue_host_credential(actor=\\\"claude:host-b:seat\\\", scopes=module.ALL_WORKER, ttl_seconds=10000)[\\\"credential\\\"]\\n    return gateway, clock, coordinator, host_a, host_b\\n\\ndef run_with_trace(test_name):\\n    hits = {738: 0, 739: 0, 740: 0, 741: 0}\\n    def trace(frame, event, arg):\\n        if event == \\\"line\\\" and frame.f_code.co_filename.endswith(\\\"development/remote_workplan/gateway.py\\\") and frame.f_lineno in hits:\\n            hits[frame.f_lineno] += 1\\n        return trace\\n    sys.settrace(trace)\\n    try:\\n        getattr(module, test_name)(make_setup())\\n    finally:\\n        sys.settrace(None)\\n    print(test_name, \\\"PASS\\\", hits)\\n\\nrun_with_trace(\\\"test_revalidate_allows_active_pi_owner_when_replacement_includes_pi\\\")\\nrun_with_trace(\\\"test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation\\\")\\n\"" in /private/tmp/meta-harness-t021
+ exited 1 in 0ms:
+  File "<string>", line 1
+    import importlib.util\nimport sqlite3\nimport sys\nfrom pathlib import Path\n\nfrom development.remote_workplan import RemoteWorkplanGateway\nfrom development.remote_workplan.store import SQLiteStore\n\nclass NonClosingConnection:\n    def __init__(self, raw):\n        self.raw = raw\n    def close(self):\n        pass\n    def __getattr__(self, name):\n        return getattr(self.raw, name)\n\ndef memory_connect(self):\n    raw = getattr(self, "_review_memory_connection", None)\n    if raw is None:\n        raw = sqlite3.connect(":memory:", timeout=30.0, isolation_level=None, check_same_thread=False)\n        raw.row_factory = sqlite3.Row\n        raw.execute("PRAGMA foreign_keys = ON")\n        raw.execute("PRAGMA busy_timeout = 30000")\n        self._review_memory_connection = raw\n    return NonClosingConnection(raw)\n\nSQLiteStore.connect = memory_connect\nspec = importlib.util.spec_from_file_location("gateway_tests_review", Path("tests/development/test_remote_workplan_gateway.py"))\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n\ndef make_setup():\n    clock = module.Clock()\n    gateway = RemoteWorkplanGateway(":memory:", clock=clock)\n    coordinator = gateway.issue_host_credential(actor="coordinator:control:run", scopes=module.ALL_COORDINATOR, ttl_seconds=10000)["credential"]\n    host_a = gateway.issue_host_credential(actor="codex:host-a:seat", scopes=module.ALL_WORKER, ttl_seconds=10000)["credential"]\n    host_b = gateway.issue_host_credential(actor="claude:host-b:seat", scopes=module.ALL_WORKER, ttl_seconds=10000)["credential"]\n    return gateway, clock, coordinator, host_a, host_b\n\ndef run_with_trace(test_name):\n    hits = {738: 0, 739: 0, 740: 0, 741: 0}\n    def trace(frame, event, arg):\n        if event == "line" and frame.f_code.co_filename.endswith("development/remote_workplan/gateway.py") and frame.f_lineno in hits:\n            hits[frame.f_lineno] += 1\n        return trace\n    sys.settrace(trace)\n    try:\n        getattr(module, test_name)(make_setup())\n    finally:\n        sys.settrace(None)\n    print(test_name, "PASS", hits)\n\nrun_with_trace("test_revalidate_allows_active_pi_owner_when_replacement_includes_pi")\nrun_with_trace("test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation")\n
+                          ^
+SyntaxError: unexpected character after line continuation character
+
+exec
+/bin/zsh -lc "python3 -B -c 'import base64;exec(base64.b64decode(\"aW1wb3J0IGltcG9ydGxpYi51dGlsCmltcG9ydCBzcWxpdGUzCmltcG9ydCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpmcm9tIGRldmVsb3BtZW50LnJlbW90ZV93b3JrcGxhbiBpbXBvcnQgUmVtb3RlV29ya3BsYW5HYXRld2F5CmZyb20gZGV2ZWxvcG1lbnQucmVtb3RlX3dvcmtwbGFuLnN0b3JlIGltcG9ydCBTUUxpdGVTdG9yZQoKY2xhc3MgTm9uQ2xvc2luZ0Nvbm5lY3Rpb246CiAgICBkZWYgX19pbml0X18oc2VsZiwgcmF3KToKICAgICAgICBzZWxmLnJhdyA9IHJhdwogICAgZGVmIGNsb3NlKHNlbGYpOgogICAgICAgIHBhc3MKICAgIGRlZiBfX2dldGF0dHJfXyhzZWxmLCBuYW1lKToKICAgICAgICByZXR1cm4gZ2V0YXR0cihzZWxmLnJhdywgbmFtZSkKCmRlZiBtZW1vcnlfY29ubmVjdChzZWxmKToKICAgIHJhdyA9IGdldGF0dHIoc2VsZiwgIl9yZXZpZXdfbWVtb3J5X2Nvbm5lY3Rpb24iLCBOb25lKQogICAgaWYgcmF3IGlzIE5vbmU6CiAgICAgICAgcmF3ID0gc3FsaXRlMy5jb25uZWN0KCI6bWVtb3J5OiIsIHRpbWVvdXQ9MzAuMCwgaXNvbGF0aW9uX2xldmVsPU5vbmUsIGNoZWNrX3NhbWVfdGhyZWFkPUZhbHNlKQogICAgICAgIHJhdy5yb3dfZmFjdG9yeSA9IHNxbGl0ZTMuUm93CiAgICAgICAgcmF3LmV4ZWN1dGUoIlBSQUdNQSBmb3JlaWduX2tleXMgPSBPTiIpCiAgICAgICAgcmF3LmV4ZWN1dGUoIlBSQUdNQSBidXN5X3RpbWVvdXQgPSAzMDAwMCIpCiAgICAgICAgc2VsZi5fcmV2aWV3X21lbW9yeV9jb25uZWN0aW9uID0gcmF3CiAgICByZXR1cm4gTm9uQ2xvc2luZ0Nvbm5lY3Rpb24ocmF3KQoKU1FMaXRlU3RvcmUuY29ubmVjdCA9IG1lbW9yeV9jb25uZWN0CnNwZWMgPSBpbXBvcnRsaWIudXRpbC5zcGVjX2Zyb21fZmlsZV9sb2NhdGlvbigiZ2F0ZXdheV90ZXN0c19yZXZpZXciLCBQYXRoKCJ0ZXN0cy9kZXZlbG9wbWVudC90ZXN0X3JlbW90ZV93b3JrcGxhbl9nYXRld2F5LnB5IikpCm1vZHVsZSA9IGltcG9ydGxpYi51dGlsLm1vZHVsZV9mcm9tX3NwZWMoc3BlYykKc3BlYy5sb2FkZXIuZXhlY19tb2R1bGUobW9kdWxlKQoKZGVmIG1ha2Vfc2V0dXAoKToKICAgIGNsb2NrID0gbW9kdWxlLkNsb2NrKCkKICAgIGdhdGV3YXkgPSBSZW1vdGVXb3JrcGxhbkdhdGV3YXkoIjptZW1vcnk6IiwgY2xvY2s9Y2xvY2spCiAgICBjb29yZGluYXRvciA9IGdhdGV3YXkuaXNzdWVfaG9zdF9jcmVkZW50aWFsKGFjdG9yPSJjb29yZGluYXRvcjpjb250cm9sOnJ1biIsIHNjb3Blcz1tb2R1bGUuQUxMX0NPT1JESU5BVE9SLCB0dGxfc2Vjb25kcz0xMDAwMClbImNyZWRlbnRpYWwiXQogICAgaG9zdF9hID0gZ2F0ZXdheS5pc3N1ZV9ob3N0X2NyZWRlbnRpYWwoYWN0b3I9ImNvZGV4Omhvc3QtYTpzZWF0Iiwgc2NvcGVzPW1vZHVsZS5BTExfV09SS0VSLCB0dGxfc2Vjb25kcz0xMDAwMClbImNyZWRlbnRpYWwiXQogICAgaG9zdF9iID0gZ2F0ZXdheS5pc3N1ZV9ob3N0X2NyZWRlbnRpYWwoYWN0b3I9ImNsYXVkZTpob3N0LWI6c2VhdCIsIHNjb3Blcz1tb2R1bGUuQUxMX1dPUktFUiwgdHRsX3NlY29uZHM9MTAwMDApWyJjcmVkZW50aWFsIl0KICAgIHJldHVybiBnYXRld2F5LCBjbG9jaywgY29vcmRpbmF0b3IsIGhvc3RfYSwgaG9zdF9iCgpkZWYgcnVuX3dpdGhfdHJhY2UodGVzdF9uYW1lKToKICAgIGhpdHMgPSB7NzM4OiAwLCA3Mzk6IDAsIDc0MDogMCwgNzQxOiAwfQogICAgZGVmIHRyYWNlKGZyYW1lLCBldmVudCwgYXJnKToKICAgICAgICBpZiBldmVudCA9PSAibGluZSIgYW5kIGZyYW1lLmZfY29kZS5jb19maWxlbmFtZS5lbmRzd2l0aCgiZGV2ZWxvcG1lbnQvcmVtb3RlX3dvcmtwbGFuL2dhdGV3YXkucHkiKSBhbmQgZnJhbWUuZl9saW5lbm8gaW4gaGl0czoKICAgICAgICAgICAgaGl0c1tmcmFtZS5mX2xpbmVub10gKz0gMQogICAgICAgIHJldHVybiB0cmFjZQogICAgc3lzLnNldHRyYWNlKHRyYWNlKQogICAgdHJ5OgogICAgICAgIGdldGF0dHIobW9kdWxlLCB0ZXN0X25hbWUpKG1ha2Vfc2V0dXAoKSkKICAgIGZpbmFsbHk6CiAgICAgICAgc3lzLnNldHRyYWNlKE5vbmUpCiAgICBwcmludCh0ZXN0X25hbWUsICJQQVNTIiwgaGl0cykKCnJ1bl93aXRoX3RyYWNlKCJ0ZXN0X3JldmFsaWRhdGVfYWxsb3dzX2FjdGl2ZV9waV9vd25lcl93aGVuX3JlcGxhY2VtZW50X2luY2x1ZGVzX3BpIikKcnVuX3dpdGhfdHJhY2UoInRlc3RfcmV2YWxpZGF0ZV9yZWplY3RzX3BpX293bmVyX3doZW5fcmVwbGFjZW1lbnRfZXhjbHVkZXNfcGlfd2l0aG91dF9tdXRhdGlvbiIpCg==\"))'" in /private/tmp/meta-harness-t021
+ succeeded in 118ms:
+test_revalidate_allows_active_pi_owner_when_replacement_includes_pi PASS {738: 1, 739: 0, 740: 1, 741: 1}
+test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation PASS {738: 1, 739: 1, 740: 0, 741: 0}
+
+Commit/path inspection and dynamic line tracing are complete. The exact added test functions passed against unchanged gateway logic using an in-memory SQLite connection because the read-only sandbox forbids pytest temp files.
+  ✓ Inspect commit 4b6551a and confirm changed paths/content
+  ✓ Trace each added test into gateway.py branch at lines 738-739
+  ✓ Validate pre/post no-mutation assertions for all four fields
+  → Run focused tests read-only and issue RESOLVED/NOT-RESOLVED verdict
+exec
+/bin/zsh -lc 'git rev-parse 4b6551a351273d0da1ecedcf995e2d273dc36fe9''^ && git show --format= --name-only 4b6551a351273d0da1ecedcf995e2d273dc36fe9 && git show --format= --numstat 4b6551a351273d0da1ecedcf995e2d273dc36fe9 && git status --short' in /private/tmp/meta-harness-t021
+ succeeded in 0ms:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+a64a1764e694fd49eb16117a19f1824f4a017ac4
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+tests/development/test_remote_workplan_gateway.py
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+92	0	tests/development/test_remote_workplan_gateway.py
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+
+  ✓ Inspect commit 4b6551a and confirm changed paths/content
+  ✓ Trace each added test into gateway.py branch at lines 738-739
+  ✓ Validate pre/post no-mutation assertions for all four fields
+  ✓ Run focused tests read-only and issue RESOLVED/NOT-RESOLVED verdict
+codex
+RESOLVED
+
+Evidence:
+
+- Dynamic line trace of the exact committed tests:
+  - Allowed test: line 738 hit; line 739 not hit; continued through lines 740–741.
+  - Denied test: lines 738–739 hit; lines 740–741 not hit.
+  - Both test functions passed.
+- The denied test compares fresh database reads before and after for:
+  - parsed `definition_json`
+  - `owner`
+  - `revision`
+  - `fencing_generation`
+  
+  These assertions are sound. The exception occurs before the update at [gateway.py](/private/tmp/meta-harness-t021/development/remote_workplan/gateway.py:741), and the transaction rolls back exceptions at [store.py](/private/tmp/meta-harness-t021/development/remote_workplan/store.py:229).
+- The tests and assertions are at [test_remote_workplan_gateway.py](/private/tmp/meta-harness-t021/tests/development/test_remote_workplan_gateway.py:536).
+- `4b6551a` is directly based on `a64a176` and is test-only: one changed file, `tests/development/test_remote_workplan_gateway.py`, with 92 insertions and no production changes.
+- Worktree remained clean.
+
+Native pytest could not create its temporary directory under the enforced read-only sandbox, so I executed the exact test functions with SQLite redirected to memory and traced the unchanged gateway source.
+tokens used
+96,002
+RESOLVED
+
+Evidence:
+
+- Dynamic line trace of the exact committed tests:
+  - Allowed test: line 738 hit; line 739 not hit; continued through lines 740–741.
+  - Denied test: lines 738–739 hit; lines 740–741 not hit.
+  - Both test functions passed.
+- The denied test compares fresh database reads before and after for:
+  - parsed `definition_json`
+  - `owner`
+  - `revision`
+  - `fencing_generation`
+  
+  These assertions are sound. The exception occurs before the update at [gateway.py](/private/tmp/meta-harness-t021/development/remote_workplan/gateway.py:741), and the transaction rolls back exceptions at [store.py](/private/tmp/meta-harness-t021/development/remote_workplan/store.py:229).
+- The tests and assertions are at [test_remote_workplan_gateway.py](/private/tmp/meta-harness-t021/tests/development/test_remote_workplan_gateway.py:536).
+- `4b6551a` is directly based on `a64a176` and is test-only: one changed file, `tests/development/test_remote_workplan_gateway.py`, with 92 insertions and no production changes.
+- Worktree remained clean.
+
+Native pytest could not create its temporary directory under the enforced read-only sandbox, so I executed the exact test functions with SQLite redirected to memory and traced the unchanged gateway source.
