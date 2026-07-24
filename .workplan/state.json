@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 129,
+  "revision": 130,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3710,7 +3710,7 @@
     {
       "id": "TASK-20260724-021",
       "title": "Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mbp.home.lan:t021-build-20260724",
       "paths": [
         "scripts/workplan.mjs",
@@ -3796,6 +3796,19 @@
             "branch": "dev/t021-pi-owner-namespace",
             "head": "4b6551a351273d0da1ecedcf995e2d273dc36fe9"
           }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:t021-integrate-20260724",
+          "revisionFrom": 129,
+          "revisionTo": 130,
+          "at": "2026-07-24T07:58:16.810Z",
+          "evidence": {
+            "reviewBranch": "dev/t021-pi-owner-namespace",
+            "reviewHead": "4b6551a351273d0da1ecedcf995e2d273dc36fe9",
+            "integrationCommit": "f081fb21d82672b89c7af4f4efa953267d7bc4a2"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3837,6 +3850,16 @@
         "revisionFrom": 128,
         "revisionTo": 129,
         "at": "2026-07-24T07:41:32.703Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:t021-integrate-20260724",
+        "reviewBranch": "dev/t021-pi-owner-namespace",
+        "reviewHead": "4b6551a351273d0da1ecedcf995e2d273dc36fe9",
+        "integrationCommit": "f081fb21d82672b89c7af4f4efa953267d7bc4a2",
+        "definitionHash": "sha256:0cdf3794a98fa78b8be564cfecbda32f49fb38da6036a937dadf8d168c1e566d",
+        "revisionFrom": 129,
+        "revisionTo": 130,
+        "at": "2026-07-24T07:58:16.810Z"
       }
     }
   ]
