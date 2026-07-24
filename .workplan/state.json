@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 131,
+  "revision": 132,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3467,8 +3467,8 @@
     {
       "id": "TASK-20260724-019",
       "title": "Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap",
-      "status": "backlog",
-      "owner": "workplan:add",
+      "status": "ready",
+      "owner": "",
       "paths": [
         "scripts/workplan.mjs",
         "scripts/workplan.test.mjs"
@@ -3482,6 +3482,52 @@
       ],
       "next": [
         "coordinator qualifies to Ready"
+      ],
+      "definition": {
+        "sourceRevision": "git:c30b06f681fc718f6dcb176270139d8edc2b5d52;trace:TASK-20260724-019;linear:META-28;decided-by:t018-panel-P3-defer-20260724;plan-review:kimi-k3-REVISE-folded-20260724",
+        "worktreePath": "/private/tmp/meta-harness-t019",
+        "branch": "dev/t019-receipt-ledger-binding",
+        "baseCommit": "c30b06f681fc718f6dcb176270139d8edc2b5d52",
+        "currentHead": "c30b06f681fc718f6dcb176270139d8edc2b5d52",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Bind card.integrationReceipt to the append-only receipts ledger and hash-chain new ledger records so a swapped or replayed integration receipt is detectable independent of the global revision bound, and pin the block-resume recovery path including retainPaths=false (the four deferred findings from the TASK-20260724-018 panel: GLM P3-1/P3-A, GLM P3-B, codex P3, GLM P3-C; Linear META-28). Threat boundary, stated precisely: this card makes LEDGER-INTACT tampering detectable - a swapped or replayed card.integrationReceipt, a middle-strip of chained ledger records, or any edit to a chained record that does not recompute its hashes. It does NOT defend wholesale ledger rewrite-with-recompute (the chain is keyless sha256) or co-tampering of reviewFreeze plus receipt together - that residual is the t018 panel's P3-A, explicitly still deferred; the git-committed history of state.json remains the external anchor. Exactly six work items, all inside the two reserved paths. (1) Ledger chaining in appendReceipt (scripts/workplan.mjs:1292-1314): each newly appended receipt record gains prevEntryHash (sha256 of the canonicalized predecessor record exactly as stored, or null for a card's first record) and entryHash (sha256 of the canonicalized record itself excluding entryHash), computed with the existing deepSortKeys + createHash pattern (model: computeAcceptanceReceiptHash, scripts/workplan.mjs:2040-2046). Records already present in a state file are never rewritten; chaining applies only to records appended after this change. (2) Route ready's inline genesis push (scripts/workplan.mjs:2705-2713) through appendReceipt so a new card's backlog-to-ready genesis record chains with prevEntryHash null - after this, appendReceipt is the sole ledger writer (existing callers: claim :1359, claim-next :1456, start :1788, submit :1875, integrate :1989, accept :2294, block :2476, resume :2585). (3) Thread the two new fields through validateBlockedReceipt (scripts/workplan.mjs:2340-2357), whose exact-field-set check would otherwise reject every post-change blocked record and make newly blocked cards permanently un-resumable: entryHash and prevEntryHash become presence-optional (legacy 7-field blocked receipts still pass; chained 9-field ones pass; any other extra field still fails closed). (4) Receipt-to-ledger binding: integrate's review-to-verifying ledger record (appended at scripts/workplan.mjs:1989-2001) additionally carries evidence.integrationReceiptHash = sha256 of the canonicalized card.integrationReceipt snapshot written at :1979-1988. validateIntegrationReceipt (scripts/workplan.mjs:2124-2193) enforces BOTH: (4a) if the latest to:\"verifying\" ledger record carries evidence.integrationReceiptHash, recompute the snapshot hash and fail closed on mismatch; and (4b) mandatory presence - if the card's ledger contains ANY record carrying entryHash but NO to:\"verifying\" record carrying evidence.integrationReceiptHash, fail closed (this closes the tail-strip hole: deleting the binding record leaves a valid shorter chain, so absence itself must be fatal once the ledger is chained). Fully legacy ledgers (zero chained records, including a missing receipts array treated as empty) skip both new checks and keep every existing check. Documented mixed-era caveat: a card integrated under the old code but blocked under the new code would trip 4b fail-closed; no such card can exist on the live board (zero cards in verifying or blocked at deployment) and the failure mode is a loud rejection, never silent acceptance. (5) A chain validator (validateReceiptChain(card) or equivalent): every record carrying entryHash recomputes correctly; every record carrying prevEntryHash matches the recomputed hash of its predecessor; once any record in a card's ledger carries entryHash, every later record must too; a fully legacy ledger passes; missing receipts array = empty legacy ledger. Called fail-closed before mutation from accept (alongside :2248), from block for ALL blocked-from statuses (alongside validateTransitionCardBasics at :2460, not inside the verifying-only branch at :2467-2469), and from resume (alongside :2565-2571) - NOT from validateState (:605-651), so legacy and foreign boards remain loadable and projectable. Append-side commands (ready/claim/start/submit/integrate) need no pre-append chain validation: a tampered chained record fails entryHash recomputation at the next accept/block/resume regardless of later appends re-anchoring prevEntryHash on top of it. (6) Comment scope (GLM P3-C): the invariant comment at scripts/workplan.mjs:2174-2182 gains an explicit parenthetical scoping it to operational paths, worded 'absent tampering with the receipts ledger' (not 'absent direct state.json tampering' - the ledger binding is exactly what narrows the tamper surface). Regression tests in scripts/workplan.test.mjs following existing conventions (repository/state/card builders :33-81, reachVerifying :349-381, blockCard :383-411, resumeCard :413-430): (a) post-drift block-then-resume - integrate, drift the board with an unrelated add, block from verifying, resume - the card returns to in_progress with all validations passing (GLM P3-B / codex P3, extending the drift test at :5592-5637), which also pins that post-change 9-field chained blocked records pass validateBlockedReceipt on resume; (b) post-drift block with retainPaths=false - a peer card can reserve the released path while blocked, and resume then fails closed via validateClaimPathExclusivity (scripts/workplan.mjs:2579) when the path is taken, and succeeds re-reserving when it is free - pin both directions; (c) chaining and binding - a new card's genesis record carries prevEntryHash null plus a valid entryHash, subsequent records chain, integrate's ledger record carries evidence.integrationReceiptHash; (d) tamper rejections, each fail-closed with canonical files byte-preserved: a chained record edited without recomputing (entryHash recompute fails), a middle-strip (successor prevEntryHash mismatch), a tail-strip of the binding record (mandatory-presence rule 4b fires), and a swapped card.integrationReceipt whose revisionTo passes the > bound (binding check 4a fires); (e) a legacy board with un-chained receipts (and one with no receipts array) still passes every transition it passed before.",
+        "stopCondition": "Stop and fail closed on: any edit outside the two reserved paths (scripts/workplan.mjs, scripts/workplan.test.mjs); any rewrite, re-hash, deletion, or reordering of ledger records already present in a state file - append-only is inviolable and legacy records stay unhashed forever; a chain or binding check that rejects a fully legacy board whose records predate this change; any change to acceptance receiptHash semantics (computeAcceptanceReceiptHash scripts/workplan.mjs:2040-2046, validateAcceptance :2048-2111) or to the definitionHash scheme; any weakening of an existing validation (reviewFreeze correlation :2151-2159, revision bound :2187-2189, blocked-receipt checks :2340-2407 - where admitting exactly entryHash and prevEntryHash as presence-optional fields and routing ready's genesis record through appendReceipt are in-scope changes, not weakenings; path exclusivity, actor separation, host and namespace checks); any new CLI flag or subcommand; any new dependency beyond the node:crypto import already present; validation ordered after mutation; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The implementing seat may not self-approve. Independent provider-diverse reviewers examine the frozen base..head diff read-only per AGENTS.md and return P0-P3 findings with file:line evidence, preserved verbatim under .review-store/. Any P0/P1 requires a new commit and a fresh frozen-diff review; after any fix round, re-freeze the card to the head actually reviewed before submit. Behavioral verification must drive the real workplan CLI against a disposable control root (throwaway git repo, not the live board): fresh transitions produce chained receipts including a chained genesis record; a hand-tampered state.json with a swapped integrationReceipt that passes the revision bound is rejected at accept and at block (binding check); a tail-strip of the binding record is rejected by the mandatory-presence rule; a post-change blocked card resumes cleanly (9-field blocked receipt); a legacy root whose receipts predate the change still transitions cleanly; block with retainPaths=false followed by a peer claim and a resume attempt demonstrates the fail-closed path live; the transcript is captured under .review-store/. A distinct coordinator actor runs integrate and accept. This card grants no promotion, deployment, evaluator-write, or credential authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t019 && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+          "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t019 diff --check c30b06f681fc718f6dcb176270139d8edc2b5d52"
+        ],
+        "nextCheckpoint": "New ledger records including genesis are hash-chained; integrate's ledger record binds the integrationReceipt snapshot and the binding is mandatory once a card's ledger is chained; a swapped, replayed, middle-stripped, tail-stripped, or non-recompute-edited receipt state is rejected fail-closed at accept, block, and resume with canonical files byte-preserved; newly blocked cards carry 9-field chained blocked receipts and resume cleanly; legacy un-chained boards remain fully operable; the post-drift block-resume path including retainPaths=false is pinned by tests in both directions; all acceptance suites are green against baselines node 128/128 and pytest 1774 passed 4 skipped 2 xfailed; and a real seat has demonstrated the tamper rejections and legacy tolerance against a disposable control root with the transcript preserved under .review-store/.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ],
+        "definitionHash": "sha256:a571e965e9a99f2282ffa65576fa9cce618e6abebfe286e9c3b49c7f49709c5f"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:t019-coordinator-20260724",
+          "revisionFrom": 131,
+          "revisionTo": 132,
+          "at": "2026-07-24T10:31:59.156Z"
+        }
       ]
     },
     {
