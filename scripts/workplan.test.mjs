@@ -7577,6 +7577,28 @@ test("post-drift block retainPaths=false: peer reserves path and resume fails cl
 
   await blockCard(root, "TASK-20260711-001", owner, "7", "release path", false);
 
+  // The post-block blocked receipt must carry an entryHash that recomputes
+  // (mirrors the retainPaths=true drift test above). This pins chaining for
+  // the release-path branch too.
+  const blockedStateDrift2 = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const blockedCardDrift2 = blockedStateDrift2.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const blockedReceiptDrift2 = blockedCardDrift2.receipts.at(-1);
+  assert.equal(blockedReceiptDrift2.to, "blocked");
+  assert.equal(
+    blockedReceiptDrift2.entryHash,
+    receiptChainHash(blockedReceiptDrift2),
+  );
+  const predecessorDrift2 =
+    blockedCardDrift2.receipts[blockedCardDrift2.receipts.length - 2];
+  assert.equal(
+    blockedReceiptDrift2.prevEntryHash,
+    receiptChainHash(predecessorDrift2),
+  );
+
   const peerAdd = await run([
     "add",
     "--control-root",
@@ -7661,6 +7683,29 @@ test("post-drift block retainPaths=false without peer claim: resume succeeds and
   assert.equal(driftAdd.code, 0, driftAdd.stderr);
 
   await blockCard(root, "TASK-20260711-001", owner, "7", "release path", false);
+
+  // The post-block blocked receipt must carry an entryHash that recomputes
+  // (mirrors the retainPaths=true drift test above and the peer-overlap
+  // drift test just below). This pins chaining for the resume-after-release
+  // path.
+  const blockedStateDrift3 = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const blockedCardDrift3 = blockedStateDrift3.cards.find(
+    (c) => c.id === "TASK-20260711-001",
+  );
+  const blockedReceiptDrift3 = blockedCardDrift3.receipts.at(-1);
+  assert.equal(blockedReceiptDrift3.to, "blocked");
+  assert.equal(
+    blockedReceiptDrift3.entryHash,
+    receiptChainHash(blockedReceiptDrift3),
+  );
+  const predecessorDrift3 =
+    blockedCardDrift3.receipts[blockedCardDrift3.receipts.length - 2];
+  assert.equal(
+    blockedReceiptDrift3.prevEntryHash,
+    receiptChainHash(predecessorDrift3),
+  );
 
   const resumeResult = await resumeCard(
     root,
@@ -8749,6 +8794,166 @@ test("multi-cycle tail-strip of latest verifying record with replayed integratio
     await readFile(join(root, ".workplan", "state.json")),
     stateBytesBefore,
   );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+// --- Round 3: entryHash:null demotion (ITEM 1) ---
+
+test("accept rejects nulling a single entryHash field and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Null entryHash tamper",
+        status: "backlog",
+        owner: "",
+        paths: ["src/nullentryhash"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  // Tamper ONE record's entryHash field to null (without removing the key).
+  // The validator must reject this: the presence of the key marks the
+  // record as chained, and a null value is a failed chain entry, not a
+  // demotion to legacy.
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tampered.cards[0];
+  const targetReceipt = tamperedCard.receipts.find(
+    (r) => r.to === "review",
+  );
+  targetReceipt.entryHash = null;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const cardBefore = tampered.cards[0];
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /receipt chain entryHash must not be null/,
+  );
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("wholesale removal of every chain field pins the declared residual (tampered integrationReceipt is accepted)", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Wholesale chain-field removal residual",
+        status: "backlog",
+        owner: "",
+        paths: ["src/wholesaleremoval"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { actor } = await reachVerifying(root, "TASK-20260711-001");
+
+  // RESIDUAL DOCUMENTATION TEST. Per the validator's declared residual,
+  // "wholesale removal of the chain fields (or rewrite-with-recompute)" is
+  // out of scope. This test pins that residual: a tampered card that
+  // deletes entryHash and prevEntryHash from every receipt, and rewrites
+  // card.integrationReceipt to a doctored copy that still passes every
+  // other validateIntegrationReceipt check, IS accepted by the current
+  // validator. Closing this residual requires a keyless anchor (e.g. a
+  // per-board hash) and is explicitly deferred. A future change that
+  // closes the residual MUST flip this test intentionally.
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const tamperedCard = tampered.cards[0];
+  for (const receipt of tamperedCard.receipts) {
+    delete receipt.entryHash;
+    delete receipt.prevEntryHash;
+  }
+  // Tamper the integrationReceipt's `at` timestamp to a different valid ISO
+  // value. The original integrationCommit is preserved (it exists in git)
+  // and every other field is left intact, so the only thing this attack
+  // changes is the binding hash. With chain fields stripped, the binding
+  // check is bypassed and accept succeeds -- pinning the declared residual.
+  const tamperedAt = new Date(
+    new Date(tamperedCard.integrationReceipt.at).getTime() + 60_000,
+  ).toISOString();
+  tamperedCard.integrationReceipt = {
+    ...tamperedCard.integrationReceipt,
+    at: tamperedAt,
+  };
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const cardBefore = tampered.cards[0];
+  const acceptancePath = join(parent, "acceptance.json");
+  await writeAcceptance(acceptancePath, cardBefore, actor);
+
+  const result = await run([
+    "accept",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--actor",
+    actor,
+    "--acceptance-json",
+    acceptancePath,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const finalCard = finalState.cards[0];
+  assert.equal(finalCard.status, "done");
+  assert.equal(finalCard.integrationReceipt.at, tamperedAt);
+
   await assert.rejects(stat(join(root, ".workplan", "lock")), {
     code: "ENOENT",
   });

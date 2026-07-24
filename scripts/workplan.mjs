@@ -1342,6 +1342,14 @@ function appendReceipt(
 // at the next accept/block/resume regardless of later appends re-anchoring
 // prevEntryHash on top of it.
 //
+// Chained-vs-legacy is decided by the presence of the `entryHash` KEY, not
+// its value: a record with the key set to null is still a chained record
+// that failed to compute and must be rejected (not silently demoted to
+// legacy, which would demote the entire trailing ledger to legacy and
+// silently disable the binding check). The same is true for `prevEntryHash`
+// on a chained record: only the first record is allowed to carry
+// prevEntryHash:null (genesis).
+//
 // Uniform prevRecord rule: for every chained record,
 //   receipt.prevEntryHash === (prevRecord === null
 //                                 ? null
@@ -1356,6 +1364,16 @@ function appendReceipt(
 // A tampered middle-strip leaves the gap visible: the successor's stored
 // prevEntryHash points to the deleted record's hash, but the recomputed
 // predecessor is the one immediately before it in the surviving array.
+//
+// Residual (out of scope): wholesale removal of the chain fields (or
+// rewrite-with-recompute). A tampered card that deletes entryHash /
+// prevEntryHash keys from every receipt and rewrites the rest still
+// passes this validator (the ledger reads as fully legacy), and the
+// validateIntegrationReceiptBinding check is disabled too: with zero
+// chained records, it early-returns. Only the pre-existing
+// reviewFreeze correlation checks (and the revision bound) remain in
+// play for the integrationReceipt. Closing that residual requires
+// keyless anchoring (e.g. a per-board hash) and is explicitly deferred.
 function validateReceiptChain(card) {
   const receipts = Array.isArray(card.receipts) ? card.receipts : [];
   let prevRecord = null;
@@ -1368,9 +1386,10 @@ function validateReceiptChain(card) {
     ) {
       fail("receipt chain entry must be an object");
     }
-    const hasEntryHash =
-      "entryHash" in receipt && receipt.entryHash !== null;
-    if (hasEntryHash) {
+    if ("entryHash" in receipt) {
+      if (receipt.entryHash === null) {
+        fail("receipt chain entryHash must not be null");
+      }
       if (!("prevEntryHash" in receipt)) {
         fail("receipt chain entry missing prevEntryHash");
       }
@@ -2288,13 +2307,16 @@ function computeIntegrationReceiptHash(receipt) {
 
 function validateIntegrationReceiptBinding(card) {
   const receipts = Array.isArray(card.receipts) ? card.receipts : [];
+  // A record is "chained" if the `entryHash` KEY is present (null or not);
+  // validateReceiptChain rejects nulls upstream, but this binding check is
+  // robust regardless so a future refactor that loosens the upstream
+  // check cannot silently disable the binding enforcement here.
   const hasChainedRecord = receipts.some(
     (receipt) =>
       receipt !== null &&
       typeof receipt === "object" &&
       !Array.isArray(receipt) &&
-      receipt.entryHash !== undefined &&
-      receipt.entryHash !== null,
+      "entryHash" in receipt,
   );
   if (!hasChainedRecord) {
     return;
