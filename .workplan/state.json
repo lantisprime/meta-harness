@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 136,
+  "revision": 137,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3467,12 +3467,9 @@
     {
       "id": "TASK-20260724-019",
       "title": "Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap",
-      "status": "verifying",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:t019-build-20260724",
-      "paths": [
-        "scripts/workplan.mjs",
-        "scripts/workplan.test.mjs"
-      ],
+      "paths": [],
       "priority": 3,
       "trace": "Three deferred P3s from the TASK-20260724-018 panel. GLM P3-1: card.integrationReceipt is a standalone snapshot; appendReceipt creates un-chained records (workplan.mjs:1292-1313) and validateState does not bind a verifying card to a fresh receipt, so a hand-swapped receipt is caught only by reviewFreeze correlation. Codex P3: the post-drift block test neither resumes the card nor exercises retainPaths=false, leaving the recovery path unpinned. GLM P3-C: scope the new comment invariant against direct state.json tampering.",
       "evidence": [
@@ -3568,6 +3565,46 @@
             "reviewHead": "eed775d43843a353f2b1ba8544f53429f557eeda",
             "integrationCommit": "f972484d46029ffdd84f5be73456ab8880ff520e"
           }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+          "revisionFrom": 136,
+          "revisionTo": 137,
+          "at": "2026-07-24T12:42:04.660Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+            "definitionHash": "sha256:a571e965e9a99f2282ffa65576fa9cce618e6abebfe286e9c3b49c7f49709c5f",
+            "integrationCommit": "f972484d46029ffdd84f5be73456ab8880ff520e",
+            "commands": [
+              "cd /private/tmp/meta-harness-t019 && node --test scripts/workplan.test.mjs",
+              "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+              "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+              "git -C /private/tmp/meta-harness-t019 diff --check c30b06f681fc718f6dcb176270139d8edc2b5d52"
+            ],
+            "evidenceRefs": [
+              "git:integration:f972484d46029ffdd84f5be73456ab8880ff520e",
+              "git:review-head:eed775d43843a353f2b1ba8544f53429f557eeda",
+              "github:pull/70:merged",
+              "node-test:workplan:143-pass-0-fail",
+              "pytest:gateway:28-passed",
+              "pytest:root:1774-passed:4-skipped:2-xfailed",
+              "git-diff-check:clean",
+              "plan-review:.review-store/t019-kimi-plan-review-raw.txt:kimi-k3-REVISE-2p1-folded-pre-freeze",
+              "review:.review-store/t019-glm-gate-review-b141afd.txt:sha256:f7e6559c663f1da7e11d34988ae3bc924ec47392a8e7a9b9142d4f115b9a56c4:glm-5.2-approve-0p0p1-1p2-3p3",
+              "review:.review-store/t019-glm-gate-review-eed775d.txt:sha256:79554a38c7420060f9f8b1a14d79ee667c2f0f091d39cdd83acc3fc96fa8b59b:glm-5.2-approve-r2-no-new-issues",
+              "review:.review-store/t019-codex-review-b141afd.txt:sha256:b634a8c481285084111609396865ffeb8c3d9bc980f880d028219d63a4bdac26:codex-request-changes-2p1-1p2",
+              "review:.review-store/t019-codex-confirm-eed775d.txt:sha256:010c78631efdfc55deb3d292b0660f01c5ced7edc6720db155d6c450bb7e5a1c:codex-approve-p1b-resolved-dispositions-accepted",
+              "behavioral-verify:.review-store/t019-behavioral-verify-b141afd.txt:7-of-7-pass-disposable-roots",
+              "behavioral-verify:.review-store/t019-behavioral-verify-eed775d.txt:4-of-4-pass-delta-incl-null-tamper-and-residual",
+              "deferred:codex-p2-append-side-transition-completeness-follow-up-card",
+              "residual:wholesale-chain-key-removal-or-rewrite-with-recompute-documented-and-test-pinned"
+            ],
+            "receiptHash": "sha256:f1b9665ecec7f780b5116a7caa2e36f3c0725427e147500e95ed0d32c6431c66"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3616,6 +3653,50 @@
         "revisionFrom": 135,
         "revisionTo": 136,
         "at": "2026-07-24T12:36:31.782Z"
+      },
+      "releasedPaths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+        "definitionHash": "sha256:a571e965e9a99f2282ffa65576fa9cce618e6abebfe286e9c3b49c7f49709c5f",
+        "integrationCommit": "f972484d46029ffdd84f5be73456ab8880ff520e",
+        "commands": [
+          "cd /private/tmp/meta-harness-t019 && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider tests/development/test_remote_workplan_gateway.py",
+          "cd /private/tmp/meta-harness-t019 && .venv/bin/python -m pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t019 diff --check c30b06f681fc718f6dcb176270139d8edc2b5d52"
+        ],
+        "evidenceRefs": [
+          "git:integration:f972484d46029ffdd84f5be73456ab8880ff520e",
+          "git:review-head:eed775d43843a353f2b1ba8544f53429f557eeda",
+          "github:pull/70:merged",
+          "node-test:workplan:143-pass-0-fail",
+          "pytest:gateway:28-passed",
+          "pytest:root:1774-passed:4-skipped:2-xfailed",
+          "git-diff-check:clean",
+          "plan-review:.review-store/t019-kimi-plan-review-raw.txt:kimi-k3-REVISE-2p1-folded-pre-freeze",
+          "review:.review-store/t019-glm-gate-review-b141afd.txt:sha256:f7e6559c663f1da7e11d34988ae3bc924ec47392a8e7a9b9142d4f115b9a56c4:glm-5.2-approve-0p0p1-1p2-3p3",
+          "review:.review-store/t019-glm-gate-review-eed775d.txt:sha256:79554a38c7420060f9f8b1a14d79ee667c2f0f091d39cdd83acc3fc96fa8b59b:glm-5.2-approve-r2-no-new-issues",
+          "review:.review-store/t019-codex-review-b141afd.txt:sha256:b634a8c481285084111609396865ffeb8c3d9bc980f880d028219d63a4bdac26:codex-request-changes-2p1-1p2",
+          "review:.review-store/t019-codex-confirm-eed775d.txt:sha256:010c78631efdfc55deb3d292b0660f01c5ced7edc6720db155d6c450bb7e5a1c:codex-approve-p1b-resolved-dispositions-accepted",
+          "behavioral-verify:.review-store/t019-behavioral-verify-b141afd.txt:7-of-7-pass-disposable-roots",
+          "behavioral-verify:.review-store/t019-behavioral-verify-eed775d.txt:4-of-4-pass-delta-incl-null-tamper-and-residual",
+          "deferred:codex-p2-append-side-transition-completeness-follow-up-card",
+          "residual:wholesale-chain-key-removal-or-rewrite-with-recompute-documented-and-test-pinned"
+        ],
+        "receiptHash": "sha256:f1b9665ecec7f780b5116a7caa2e36f3c0725427e147500e95ed0d32c6431c66",
+        "actor": "coordinator:charltons-mbp.home.lan:t019-closeout-20260724",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "revisionFrom": 136,
+        "revisionTo": 137,
+        "at": "2026-07-24T12:42:04.659Z"
       }
     },
     {
