@@ -1,0 +1,45 @@
+I now have all the evidence I need. Let me write the formal review.
+
+---
+
+# Independent Frozen-Diff Review — TASK-20260724-021 / META-30 (pi owner namespace) — ROUND 2
+
+**Reviewer:** Pi / NeuralWatt GLM-5.2 (read-only, bounded one-shot) — acting as independent second-opinion reviewer per AGENTS.md §"Independent Second-Opinion Review".
+**Base:** `b376afa0` · **Head (frozen, Round 2):** `4b6551a` · **Round 1 head:** `a64a176` (APPROVE, P3-1..P3-4 recorded)
+**Delta under focus:** `a64a176..4b6551a` — stated test-only, two gateway revalidation tests.
+
+## VERDICT: APPROVE
+
+The delta cleanly resolves the codex P1 (no pi coverage of `gateway.py:738-739`) with two genuine behavior-pinning tests, is test-only, and stays within the five reserved paths. The full diff still holds across all five review lenses. No P0/P1/P2. Four non-blocking P3s below (three pre-existing, one a verification disclosure).
+
+## Round-2 delta focus (the new commit)
+
+The two added tests target exactly the gap the codex P1 named — the revalidate active-owner-vs-new-definition namespace check:
+
+- `test_remote_workplan_gateway.py:536` — `test_revalidate_allows_active_pi_owner_when_replacement_includes_pi`: qualifies+claims a card as `pi:host-c:revalidate` with `allowedOwnerNamespaces=["pi"]`, then revalidates with a revised definition still containing `pi`, asserting `revision+1`, `fencing_token+1`, `task_bundle.owner == pi_actor`, and `definition_hash` updated. Pins that pi owners are not wrongly rejected on the success path and that owner identity survives the bundle.
+- `test_remote_workplan_gateway.py:572` — `test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation`: same setup, then revalidates with `allowedOwnerNamespaces=["codex"]`, asserting `owner_namespace_denied` / `"active owner is not allowed by revalidated definition"` (matches `gateway.py:739`) **and** no persisted mutation (`definition_json`/`owner`/`revision`/`fencing_generation` unchanged, `:622-625`).
+
+**Tautology check (Lens 3):** neither test passes under pre-pi code — both qualify a card with `allowedOwnerNamespaces=["pi"]`, which `_validate_definition_contract` (`gateway.py:235`) would reject before the pi addition, failing at setup. The negative test would also fail if the `:738-739` check were neutered (it expects a raise). So they genuinely pin behavior, not no-ops.
+
+**Codex P1 resolution:** confirmed. `gateway.py:738-739` now has pi positive AND negative coverage. The production revalidate code was already namespace-correct from Round 1 (the check is host/namespace-agnostic; pi works because pi was added to the `gateway.py:235` set in Round 1) — so no production change was required, consistent with the "test-only" characterization.
+
+## Full-diff re-confirmation (Round 1 APPROVE still holds)
+
+1. **Correctness vs intent** — every enumerated item is present and exact:
+   - `workplan.mjs:192` regex `/^(codex|claude|pi):([^:]+):([^:]+)$/` (anchored, grouped, no prefix-collision among the three); `:194` message lists all three; `:1177` whitelist `["codex","claude","pi"]`; `:1183` message enumerates all three.
+   - `gateway.py:235` qualified-time set `{"codex","claude","dev-orchestrator","pi"}`.
+   - `AGENTS.md:37` adds the `pi` lane label; `:46` adds the disambiguating paragraph distinguishing the `pi` owner namespace from the Pi/GLM reviewer role (in-scope; AGENTS.md is a reserved path).
+2. **No validation weakening (Lens 2)** — per-card frozen `allowedOwnerNamespaces` enforced at all four sites: claim `gateway.py:502-503`, reassign `:713-714`, revalidate `:738-739`, and workplan client `workplan.mjs:1191-1193` (fail-closed via `?.includes`). Host checks unchanged and namespace-agnostic (`isThisHost` `workplan.mjs:43-45`); coordinator-as-owner still blocked at reassign `gateway.py:707` and claim `:497-498`. Regex anchoring intact; uppercase `PI`/non-namespace prefixes correctly rejected (case-sensitive). Unknown namespaces still rejected everywhere + covered by `test_remote_workplan_gateway.py:393` (`bogus`).
+3. **Test adequacy (Lens 3)** — full matrix present: positive pi lifecycle `workplan.test.mjs:3935` (claim→start→submit) and `:3225` (claim-next); negative frozen-namespace rejection at workplan claim (`workplan.test.mjs:2707`) and gateway claim (`:384`), reassign (`:416`), and now revalidate (`:572`); unknown-namespace qualification rejection (`:393`); whitelist negative `workplan.test.mjs:2088/2110` matching the updated message. No tautologies found.
+4. **Consistency (Lens 4)** — no stale `codex|claude`-only enumeration in any reserved file; gateway denial messages (`:503/:714/:739`) are generic by design and correct; test message assertions match production (`workplan.test.mjs:2110`, `test_remote_workplan_gateway.py:409`).
+5. **Scope (Lens 5)** — all observed changes confined to the five reserved paths.
+
+## Findings (all P3 — non-blocking)
+
+- **P3-1 (pre-existing, not from this diff; likely already recorded).** `workplan.mjs:201-203` — `if (session.length === 0) fail(...)` is unreachable: the regex `([^:]+)` at `:192` already mandates ≥1 non-colon session char, so `session` is never empty post-match. *Scenario:* dead branch; cannot fire. Harmless.
+- **P3-2 (pre-existing, consistent with the brief's stated intent).** `gateway.py:235` supported set `{"codex","claude","dev-orchestrator","pi"}` is a superset of the workplan.mjs client whitelist `["codex","claude","pi"]` (`workplan.mjs:1177`) — `dev-orchestrator` is server-side only. The brief explicitly frames the gateway set as `{codex,claude,dev-orchestrator}+pi`, so this asymmetry is intentional and untouched by the diff (pi added to both consistently). *Scenario:* only server-side qualify can mint dev-orchestrator cards; client CLI cannot. Not a weakening introduced here.
+- **P3-3 (delta-adjacent test robustness).** `test_remote_workplan_gateway.py:622-625` no-mutation assertions confirm rejection outcome but, because `gateway.py:738-739` raises *before* the `UPDATE cards` at `:746` (and the transaction rolls back regardless), these assertions would not independently catch a hypothetical future regression that reordered the check to after the UPDATE. Current code is correct (check precedes write). *Scenario:* if someone moved the check below the UPDATE, the test would still pass via rollback while masking a logic error. Optional hardening only.
+- **P3-4 (verification disclosure, not a code defect).** Bash/git were disabled in this read-only review invocation, so I could not run `git diff --stat a64a176 4b6551a` to programmatically enumerate the delta's file list or byte-confirm "test-only." I verified instead via (a) the brief's assertion, (b) the production code being internally consistent with the Round 1-approved intent (no production change was needed for pi revalidate), and (c) the two new tests being exactly the claimed pair with no collateral edits observed. If the coordinator wants hard diff-stat proof of test-only, attach `git diff --stat a64a176 4b6551a`. *Scenario:* low residual risk that the delta touched a non-reserved file undetected.
+
+## Recommendation
+Integrate. The Round 1 P3s remain non-blocking and unaffected (delta is test-only), P3-3 above is optional future hardening, and P3-4 is a process disclosure. The codex P1 is fully resolved with no new defects.

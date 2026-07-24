@@ -1,3 +1,64 @@
+# Session Handoff — meta-harness (2026-07-24, session 54: META-30 accepted and done at board 131; closeout PR pending)
+
+## State in one line
+
+META-30 / `TASK-20260724-021` (generic `pi` owner namespace) is **`done`** at
+board revision **131**; PR #66 (META-29 closeout) and PR #67 (this card's code)
+are both merged; the only outstanding action is merging this session's closeout
+PR with the board records.
+
+## What happened (full quality-process orchestration, per pinned seat rule v2)
+
+- Merged PR #66 (session-53 closeout) at the user's instruction → main `b376afa`.
+- **Qualified** `TASK-20260724-021` at base `b376afa`: definition
+  `.agents/t021-definition.json` (hash `sha256:0cdf3794…566d`), worktree
+  `/private/tmp/meta-harness-t021`, branch `dev/t021-pi-owner-namespace`,
+  namespaces `["claude"]`. Board 125→126 (`bd9a4a9`), claim+start 126→128
+  (`aa7db2b`), owner `claude:charltons-mbp.home.lan:t021-build-20260724`.
+- **Seats** (herdr private session `drv-meta-harness-t021`, torn down after):
+  2 Sonnet scouts; adversarial Sonnet plan review (APPROVE, 2 findings folded
+  in); builder pi/MiniMax-M3 ($0.325) — regex+whitelist in workplan.mjs,
+  gateway set, AGENTS.md pi lane, 7 node + 4 gateway tests; verify seat
+  pi/MiniMax-M3 ($0.007).
+- **Panel at frozen `a64a176`**: GLM-5.2 gate APPROVE (4 P3); Kimi APPROVE
+  (zero findings); codex REQUEST CHANGES — 1 P1: no pi coverage of the gateway
+  *revalidate* namespace guard (gateway.py:738-739). ACCEPTED → builder added
+  2 tests (test-only commit `4b6551a`) → GLM r2 APPROVE ("integrate"), codex
+  RESOLVED (dynamic line trace of both branches). Artifacts + shasums in
+  `.review-store/t021-*`.
+- **Behavioral verify (card's hard requirement)**: real pi seat drove the real
+  CLI on disposable root `/private/tmp/t021-verify-root`: claim→start→submit
+  as `pi:charltons-mbp.home.lan:minimax-t021-verify-20260724`, receipts
+  verbatim (ground-truthed); claude-only card rejected with exact message, no
+  receipt written. Transcript `.review-store/t021-behavioral-verify-a64a176.txt`
+  (valid for `4b6551a`: workplan.mjs byte-identical, fix was test-only).
+- **PR #67** (dev branch) merged by user instruction →
+  `f081fb21d82672b89c7af4f4efa953267d7bc4a2`. Integrate 129→130 (`9f4589f`).
+- **Acceptance** at `f081fb2` in the worktree venv: node 128/128; gateway 28
+  passed; root **1777 passed/1 skipped/2 xfailed**; diff --check clean.
+  Receipt `.workplan/t021-acceptance.json`
+  (`sha256:b046264db9cddb90d1a7e7b02759789284d5c89960ae25693dddb0ac7894843c`).
+  Accept 130→131. NOTE: in-worktree baseline was 1771/1/2 (NOT session-53's
+  1768/4/2 — different venv skip-set); post-change = baseline + 6, zero
+  regressions.
+
+## Next steps
+
+1. **Merge this session's closeout PR** (card/t021-qualify → main; board
+   118-era→131 records, review artifacts, definition, receipt, this handoff).
+2. Coordinator qualifies next: `TASK-20260724-019` (receipt hash-chaining)
+   is now the only backlog card sharing workplan.mjs paths — free to qualify.
+3. Deferred P3s recorded in the acceptance receipt: gateway/CLI
+   `dev-orchestrator` supported-set asymmetry (pre-existing); dead unreachable
+   session-empty branch workplan.mjs:201-203; optional no-mutation-assertion
+   hardening vs check-after-write reordering.
+4. 8 unmerged agent/* branches still await a human decision (session-50 list).
+5. Worktrees `/private/tmp/meta-harness-t020` (done) and
+   `/private/tmp/meta-harness-t021` (done, detached at f081fb2) plus
+   `/private/tmp/t021-verify-root` are all deletable.
+
+---
+
 # Session Handoff — meta-harness (2026-07-24, session 53: META-29 accepted and done at board 125; closeout PR #66 open)
 
 ## State in one line
