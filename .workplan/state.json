@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 124,
+  "revision": 125,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3487,12 +3487,9 @@
     {
       "id": "TASK-20260724-020",
       "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
-      "status": "verifying",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
-      "paths": [
-        "selflearn/src/selflearn/compilation",
-        "selflearn/tests/test_compilation_runtime.py"
-      ],
+      "paths": [],
       "priority": 3,
       "trace": "META-17 gate-6 finding F1 (P2, pre-existing). _ast_preflight calls ast.parse at an unguarded call site (runtime.py:275); ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, escaping every guard unjournalled. Only reachable via a tampered hash-matched file since json.dumps escapes NUL in legitimate compiler output. The path-resolution subclass of this escape class was closed in 5d2fb52; this source-NUL subclass was not, so the class is NOT exhaustively closed.",
       "evidence": [
@@ -3586,6 +3583,41 @@
             "reviewHead": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
             "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9"
           }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+          "revisionFrom": 124,
+          "revisionTo": 125,
+          "at": "2026-07-24T06:28:49.495Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+            "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+            "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+            "commands": [
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+              "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+            ],
+            "evidenceRefs": [
+              "git:integration:c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+              "git:review-head:345134e3ece39b9166114bb5729e2c4facb9e2f4",
+              "github:pull/65:merged",
+              "pytest:compilation-runtime:32-passed",
+              "pytest:selflearn:339-passed:1-skipped",
+              "pytest:root:1768-passed:4-skipped:2-xfailed",
+              "git-diff-check:clean",
+              "review:.review-store/t020-glm-gate-review-811ef42.txt:sha256:07e66f553788341fec8bf9161f437926af7d77d152d98316d59c8569e5cee715:glm-5.2-approve-no-p0-p1-p2-3-p3",
+              "review:.review-store/t020-glm-gate-review-345134e.txt:sha256:d9b5f8a1ecae15fe53fd9063ab1606836998a274a4abfec5cfd5d19514d6a53d:glm-5.2-approve-no-p0-p1-p2",
+              "behavioral-verify:.review-store/t020-behavioral-verify-811ef42.txt:sha256:b6747f9d3791a0c6f15fdd111d38b5dad6bb64d01e6c6ab43ba96cb4a97003a3:6-of-6-pass-py310-py312",
+              "deferred-p3:glm-p3-1-escape-kind-taxonomy,glm-p3-2-recursionerror-memoryerror-unjournalled"
+            ],
+            "receiptHash": "sha256:22c4176c54e6ce84dc825c109b70cf716eb14a3346dab5fe2667b236c92f6c43"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3634,6 +3666,45 @@
         "revisionFrom": 123,
         "revisionTo": 124,
         "at": "2026-07-24T06:16:14.855Z"
+      },
+      "releasedPaths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+        "commands": [
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+        ],
+        "evidenceRefs": [
+          "git:integration:c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+          "git:review-head:345134e3ece39b9166114bb5729e2c4facb9e2f4",
+          "github:pull/65:merged",
+          "pytest:compilation-runtime:32-passed",
+          "pytest:selflearn:339-passed:1-skipped",
+          "pytest:root:1768-passed:4-skipped:2-xfailed",
+          "git-diff-check:clean",
+          "review:.review-store/t020-glm-gate-review-811ef42.txt:sha256:07e66f553788341fec8bf9161f437926af7d77d152d98316d59c8569e5cee715:glm-5.2-approve-no-p0-p1-p2-3-p3",
+          "review:.review-store/t020-glm-gate-review-345134e.txt:sha256:d9b5f8a1ecae15fe53fd9063ab1606836998a274a4abfec5cfd5d19514d6a53d:glm-5.2-approve-no-p0-p1-p2",
+          "behavioral-verify:.review-store/t020-behavioral-verify-811ef42.txt:sha256:b6747f9d3791a0c6f15fdd111d38b5dad6bb64d01e6c6ab43ba96cb4a97003a3:6-of-6-pass-py310-py312",
+          "deferred-p3:glm-p3-1-escape-kind-taxonomy,glm-p3-2-recursionerror-memoryerror-unjournalled"
+        ],
+        "receiptHash": "sha256:22c4176c54e6ce84dc825c109b70cf716eb14a3346dab5fe2667b236c92f6c43",
+        "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "releasedPaths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "revisionFrom": 124,
+        "revisionTo": 125,
+        "at": "2026-07-24T06:28:49.495Z"
       }
     },
     {
