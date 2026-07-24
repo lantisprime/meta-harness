@@ -1,0 +1,698 @@
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s8 && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const r =
+ c.receipts.find(x => x.to
+ === 'verifying');
+ console.log('before
+ entryHash:',
+ r.entryHash);
+ console.log('before
+ prevEntryHash:',
+ r.prevEntryHash);
+ r.entryHash = null;
+ console.log('after
+ entryHash:',
+ r.entryHash);
+ console.log('after
+ prevEntryHash:',
+ r.prevEntryHash);
+ fs.writeFileSync('.workpl
+ an/state.json',
+ JSON.stringify(s,null,2)
+ + '\n');
+ "
+
+ ... (8 earlier lines, ...
+ after entryHash: null
+ after prevEntryHash:
+ sha256:cb4afe3c310c05ee2d
+ 08af82b54ab6aa128bc16f4af
+ cd7c3edf5758ad0dbcb8a
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s8 && node -e "
+ const fs = require('fs');
+ const { createHash } =
+ require('crypto');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const acc = {
+   schemaVersion: 1,
+   verdict: 'pass',
+   evaluator:
+ 'coordinator:'+require('o
+ s').hostname()+':eval-1',
+   definitionHash:
+ c.definition.definitionHa
+ sh,
+   integrationCommit:
+ c.integrationReceipt.inte
+ grationCommit,
+   commands:
+ [...c.definition.acceptan
+ ceCommands],
+   evidenceRefs:
+ ['evidence-1']
+ };
+ function
+ deepSortKeys(value) {
+   if
+ (Array.isArray(value))
+ return
+ value.map(deepSortKeys);
+   if (value !== null &&
+ typeof value ===
+ 'object') {
+     const sorted =
+ Object.create(null);
+     for (const key of
+ Object.keys(value).sort()
+ ) sorted[key] =
+ deepSortKeys(value[key]);
+     return sorted;
+   }
+   return value;
+ }
+ const copy = {...acc};
+ delete copy.receiptHash;
+ acc.receiptHash =
+ 'sha256:' +
+ createHash('sha256').upda
+ te(JSON.stringify(deepSor
+ tKeys(copy))).digest('hex
+ ');
+ fs.writeFileSync('accepta
+ nce.json',
+ JSON.stringify(acc, null,
+ 2) + '\n');
+ "
+
+ (no output)
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s8 &&
+ md5_before_state=$(md5 -q
+ .workplan/state.json) &&
+ md5_before_workplan=$(md5
+ -q WORKPLAN.md) && echo
+ "before-accept:
+ state=$md5_before_state
+ workplan=$md5_before_work
+ plan" && echo "---" &&
+ node workplan.mjs accept
+ TASK-20260724-019-s1
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 6
+ --actor
+ "coordinator:$(hostname):
+ eval-1" --acceptance-json
+ "$PWD/acceptance.json";
+ echo "exit=$?"; echo
+ "---" &&
+ md5_after_state=$(md5 -q
+ .workplan/state.json) &&
+ md5_after_workplan=$(md5
+ -q WORKPLAN.md) && echo
+ "after-accept:
+ state=$md5_after_state
+ workplan=$md5_after_workp
+ lan"
+
+ ... (11 earlier lines,...
+ after-accept:
+ state=ce18d95b4d976a79366
+ 27771c18cdba0
+ workplan=3675a2b51c6dd498
+ 159475b2c725bb35
+
+ Took 0.1s
+
+
+ R2-S8 PASS — accept
+ failed with receipt chain
+ entryHash must not be
+ null, exit=1, both files
+ byte-identical (md5
+ ce18d95b… / 3675a2b5…).
+
+ ─────────────────────────
+
+ R3 — NEW S9 (residual
+ documentation): wipe
+ chain keys from every
+ record, swap integration
+ commit to a valid
+ descendant of reviewHead,
+ run accept
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && git log
+ --oneline --all
+
+ 47b0813 integrate
+ 6297a0e review commit
+ a83ed07 init
+
+ Took 0.0s
+
+
+ The s9 dir was copied
+ from s1-base. Its commits
+ are 47b0813 (integrate,
+ descendant of
+ reviewHead), 6297a0e
+ (reviewHead), a83ed07
+ (init).
+
+ I need to:
+ 1. Delete entryHash +
+    prevEntryHash from
+    EVERY receipt
+ 2. Swap
+    integrationReceipt.int
+    egrationCommit to a
+    DIFFERENT valid sha of
+    the same repo whose
+    reviewHead correlation
+    still matches — i.e.
+    the new commit must
+    still be a descendant
+    of reviewHead
+ 3. The other fields
+    (reviewBranch,
+    reviewHead,
+    definitionHash) should
+    remain identical
+
+ A natural choice: take a
+ commit that is a
+ descendant of reviewHead
+ but DIFFERENT from the
+ original integration
+ commit. The original
+ integrationCommit is
+ 47b0813. I could either:
+ - Create a new commit on
+   main beyond the
+   integration commit (but
+   that's not a descendant
+   of reviewHead being a
+   strict one... actually
+   47b0813 IS the merge
+   commit, it has
+   reviewHead as an
+   ancestor)
+ - Actually, I need a new
+   commit that satisfies:
+   it's a descendant of
+   reviewHead AND is a
+   different valid 40-hex
+   sha. The simplest way:
+   create a new commit on
+   main that descends from
+   reviewHead.
+
+ Let me create a new
+ commit on main beyond the
+ integration commit. Wait,
+ but the test
+ infrastructure checks
+ integrationCommit and
+ freeze.head ancestry. So
+ the new commit must be a
+ descendant of reviewHead.
+ If I make a new commit on
+ top of the integration
+ commit, that commit is a
+ descendant of reviewHead
+ (descendant of
+ integration commit which
+ is descendant of
+ reviewHead).
+
+ Let me do that.
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && git checkout
+ main && git commit
+ --allow-empty -m
+ "post-integration" &&
+ POST_COMMIT=$(git
+ rev-parse HEAD) && echo
+ "POST_COMMIT=$POST_COMMIT
+ " && git rev-parse HEAD
+
+ ... (5 earlier lines, ...
+ POST_COMMIT=5e6546edc02f1
+ fa9d6207c6eaf2897235de2f5
+ 41
+ 5e6546edc02f1fa9d6207c6ea
+ f2897235de2f541
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const orig =
+ c.integrationReceipt.inte
+ grationCommit;
+ const replace =
+ '5e6546edc02f1fa9d6207c6e
+ af2897235de2f541';
+ console.log('original
+ integrationCommit:',
+ orig);
+ console.log('replacement
+ integrationCommit:',
+ replace);
+ console.log('reviewHead
+ (unchanged):',
+ c.reviewFreeze.head);
+ console.log('reviewBranch
+ (unchanged):',
+ c.reviewFreeze.branch);
+ console.log('definitionHa
+ sh (unchanged):',
+ c.definition.definitionHa
+ sh);
+
+ // Wipe entryHash +
+ prevEntryHash from EVERY
+ receipt
+ let chainKeys = 0;
+ for (const r of
+ c.receipts) {
+   if ('entryHash' in r) {
+ delete r.entryHash;
+ chainKeys++; }
+   if ('prevEntryHash' in
+ r) { delete
+ r.prevEntryHash;
+ chainKeys++; }
+ }
+ console.log('removed',
+ chainKeys, 'chain keys
+ from', c.receipts.length,
+ 'receipts');
+
+ // Swap integration
+ commit (keep correlation
+ fields identical)
+ c.integrationReceipt.inte
+ grationCommit = replace;
+
+ fs.writeFileSync('.workpl
+ an/state.json',
+ JSON.stringify(s,null,2)
+ + '\n');
+ console.log('wrote
+ mutated state');
+ "
+
+ ... (16 earlier lines,...
+ 3b212dc3e1dc321fe26b654a5
+ 67f77d3801c3b76360255
+ removed 10 chain keys
+ from 5 receipts
+ wrote mutated state
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ // Verify no entryHash or
+ prevEntryHash keys remain
+ const remaining = [];
+ for (const r of
+ c.receipts) {
+   if ('entryHash' in r)
+ remaining.push('entryHash
+ ');
+   if ('prevEntryHash' in
+ r)
+ remaining.push('prevEntry
+ Hash');
+ }
+ console.log('remaining
+ chain keys:', remaining);
+ console.log('receipts:',
+ c.receipts.map(r =>
+ r.from + '->' + r.to));
+ console.log('integration
+ commit:',
+ c.integrationReceipt.inte
+ grationCommit);
+ console.log('verify
+ record
+ evidence.integrationRecei
+ ptHash:',
+ c.receipts.find(r=>r.to==
+ ='verifying').evidence.in
+ tegrationReceiptHash);
+ "
+
+ ... (12 earlier lines,...
+ evidence.integrationRecei
+ ptHash:
+ sha256:1a2cd30e7bf862337e
+ 2e7ec8969861f852fd7ffd975
+ 1b4eafbeee60ce62b594c
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && node -e "
+ const fs = require('fs');
+ const { createHash } =
+ require('crypto');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const acc = {
+   schemaVersion: 1,
+   verdict: 'pass',
+   evaluator:
+ 'coordinator:'+require('o
+ s').hostname()+':eval-1',
+   definitionHash:
+ c.definition.definitionHa
+ sh,
+   integrationCommit:
+ c.integrationReceipt.inte
+ grationCommit,
+   commands:
+ [...c.definition.acceptan
+ ceCommands],
+   evidenceRefs:
+ ['evidence-1']
+ };
+ function
+ deepSortKeys(value) {
+   if
+ (Array.isArray(value))
+ return
+ value.map(deepSortKeys);
+   if (value !== null &&
+ typeof value ===
+ 'object') {
+     const sorted =
+ Object.create(null);
+     for (const key of
+ Object.keys(value).sort()
+ ) sorted[key] =
+ deepSortKeys(value[key]);
+     return sorted;
+   }
+   return value;
+ }
+ const copy = {...acc};
+ delete copy.receiptHash;
+ acc.receiptHash =
+ 'sha256:' +
+ createHash('sha256').upda
+ te(JSON.stringify(deepSor
+ tKeys(copy))).digest('hex
+ ');
+ fs.writeFileSync('accepta
+ nce.json',
+ JSON.stringify(acc, null,
+ 2) + '\n');
+ console.log('wrote
+ acceptance.json with
+ integrationCommit',
+ acc.integrationCommit);
+ "
+
+ wrote acceptance.json
+ with integrationCommit
+ 5e6546edc02f1fa9d6207c6ea
+ f2897235de2f541
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 &&
+ md5_before_state=$(md5 -q
+ .workplan/state.json) &&
+ md5_before_workplan=$(md5
+ -q WORKPLAN.md) && echo
+ "before-accept:
+ state=$md5_before_state
+ workplan=$md5_before_work
+ plan" && echo "---" &&
+ node workplan.mjs accept
+ TASK-20260724-019-s1
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 6
+ --actor
+ "coordinator:$(hostname):
+ eval-1" --acceptance-json
+ "$PWD/acceptance.json";
+ echo "exit=$?"; echo
+ "---" &&
+ md5_after_state=$(md5 -q
+ .workplan/state.json) &&
+ md5_after_workplan=$(md5
+ -q WORKPLAN.md) && echo
+ "after-accept:
+ state=$md5_after_state
+ workplan=$md5_after_workp
+ lan"
+
+ ... (10 earlier lines,...
+ after-accept:
+ state=135a12ba1481c5a82df
+ aaff231127374
+ workplan=cb67beff8f051208
+ a4832f9c45653871
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s9 && node -e "
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ const c = s.cards[0];
+ console.log('status=',
+ c.status);
+ console.log('acceptanceRe
+ ceipt.integrationCommit='
+ ,
+ c.acceptanceReceipt.integ
+ rationCommit);
+ console.log('card
+ integrationReceipt.integr
+ ationCommit=',
+ c.integrationReceipt.inte
+ grationCommit);
+ console.log('reviewHead
+ (frozen)=',
+ c.reviewFreeze.head);
+ console.log('number of
+ receipts after accept:',
+ c.receipts.length);
+ console.log('last
+ receipt:',
+ c.receipts[c.receipts.len
+ gth-1].to);
+ "
+
+ ... (11 earlier lines,...
+ 6297a0e1ac0210c090cde31a4
+ f9ab5a0c444f8d4
+ number of receipts after
+ accept: 6
+ last receipt: done
+
+ Took 0.1s
+
+
+ R3-S9 PASS — Observed
+ verbatim: accept
+ succeeded with
+ {"revision":7,"accepted":
+ true}, exit=0. The card
+ status is done, the
+ acceptanceReceipt.integra
+ tionCommit is
+ 5e6546edc02f1fa9d6207c6ea
+ f2897235de2f541 (the
+ swapped commit), and the
+ frozen reviewHead
+ 6297a0e1ac0210c090cde31a4
+ f9ab5a0c444f8d4 is the
+ same one the original
+ integrating coordinator
+ froze. This documents the
+ declared residual: with
+ all chain keys wiped, the
+ ledger reads as fully
+ legacy, the binding check
+ early-returns, and only
+ the pre-existing
+ reviewFreeze correlation
+ checks (plus the revision
+ bound) remain in play.
+ Verbatim command chain
+ ran without error.
+
+ ─────────────────────────
+
+ Delta re-verify summary
+
+ ┌──────┬─────┬──────────┐
+ │ Scen │ Res │ Evidence │
+ │ ario │ ult │          │
+ ├──────┼─────┼──────────┤
+ │ R1-S │ PAS │ integrat │
+ │ 2    │ S   │ ionRecei │
+ │ swap │     │ pt       │
+ │ reje │     │ binding  │
+ │ ctio │     │ hash     │
+ │ n at │     │ mismatch │
+ │ acce │     │ ,        │
+ │ pt   │     │ exit=1,  │
+ │      │     │ files    │
+ │      │     │ byte-ide │
+ │      │     │ ntical   │
+ │      │     │ (dfbc78e │
+ │      │     │ 3… /     │
+ │      │     │ aa7be195 │
+ │      │     │ …).      │
+ ├──────┼─────┼──────────┤
+ │ R1-S │ PAS │ integrat │
+ │ 4    │ S   │ ionRecei │
+ │ tail │     │ pt       │
+ │ -str │     │ binding  │
+ │ ip   │     │ record   │
+ │ reje │     │ missing  │
+ │ ctio │     │ in       │
+ │ n    │     │ ledger,  │
+ │      │     │ exit=1,  │
+ │      │     │ files    │
+ │      │     │ byte-ide │
+ │      │     │ ntical   │
+ │      │     │ (eb74ab2 │
+ │      │     │ 8… /     │
+ │      │     │ aa7be195 │
+ │      │     │ …).      │
+ ├──────┼─────┼──────────┤
+ │ R2-S │ PAS │ receipt  │
+ │ 8    │ S   │ chain    │
+ │ null │     │ entryHas │
+ │ entr │     │ h must   │
+ │ yHas │     │ not be   │
+ │ h on │     │ null,    │
+ │ chai │     │ exit=1,  │
+ │ ned  │     │ files    │
+ │ reco │     │ byte-ide │
+ │ rd   │     │ ntical   │
+ │      │     │ (ce18d95 │
+ │      │     │ b… /     │
+ │      │     │ 3675a2b5 │
+ │      │     │ …).      │
+ ├──────┼─────┼──────────┤
+ │ R3-S │ PAS │ accept   │
+ │ 9    │ S   │ succeede │
+ │ resi │     │ d with   │
+ │ dual │     │ {"revisi │
+ │ :    │     │ on":7,"a │
+ │ wipe │     │ ccepted" │
+ │ chai │     │ :true},  │
+ │ n    │     │ exit=0;  │
+ │ keys │     │ card is  │
+ │ +    │     │ done;    │
+ │ swap │     │ the      │
+ │ inte │     │ swapped  │
+ │ grat │     │ commit   │
+ │ ion  │     │ 5e6546e… │
+ │ comm │     │  was     │
+ │ it   │     │ accepted │
+ │      │     │ against  │
+ │      │     │ the      │
+ │      │     │ original │
+ │      │     │ frozen   │
+ │      │     │ reviewHe │
+ │      │     │ ad       │
+ │      │     │ 6297a0e… │
+ │      │     │  — the   │
+ │      │     │ binding  │
+ │      │     │ check is │
+ │      │     │ disabled │
+ │      │     │ (no      │
+ │      │     │ chained  │
+ │      │     │ records) │
+ │      │     │ , per    │
+ │      │     │ the      │
+ │      │     │ document │
+ │      │     │ ed       │
+ │      │     │ residual │
+ │      │     │ .        │
+ └──────┴─────┴──────────┘
+
+ RESULT: 4/4 PASS
+
+───────────────────────────
+
+───────────────────────────
+/private/tmp/t019-verify...
+↑332k ↓30k R5.9M CH99.6%...

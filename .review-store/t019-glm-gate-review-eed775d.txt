@@ -1,0 +1,398 @@
+
+ Minor observation worth noting (P3): the residual
+ test pins ONLY the key-removal variant, not the
+ rewrite-with-recompute variant mentioned in the
+ comment. But pinning the recompute variant would
+ basically be a forge recipe, and both variants share
+ the same residual class + same fix. Not a blocker.
+
+ One more thing to verify: the round-1 concern about
+ a present-but-null entryHash on the GENESIS being
+ undetected (my round-1 P3-2). Round 2 closes this:
+ genesis entryHash:null now fails "entryHash must not
+ be null" at 1390. So that P3 is also closed.
+
+ Let me also sanity-check: does the null check fire
+ BEFORE the binding check's potential failure in some
+ ordering that could mask the null tamper? In accept:
+ validateIntegrationReceipt (→binding) at 2394 runs
+ before validateReceiptChain at 2395. The null-tamper
+ test targets the review receipt (not verifying), so
+ binding passes, then chain fails on null → test sees
+ "entryHash must not be null." But consider a
+ co-tamper: null entryHash on verifying record +
+ integrationReceipt tampered. Then binding fails
+ first ("binding hash mismatch"). The null is masked
+ but the outcome is still fail-closed. Not a security
+ issue, just a different error message. Fine.
+
+ No new issues. APPROVE.
+
+ Let me write the findings table and verdict.
+
+ I have fully traced the round-2 delta against the
+ live source at head eed775d. Here is the re-gate
+ review.
+
+ ────────────────────────────────────────────────────
+
+ Frozen-diff second-opinion review — RE-GATE round 2
+
+ Reviewer: Pi / NeuralWatt GLM-5.2 (read-only:
+ read/grep/find/ls only)
+ Base: c30b06f681fc718f6dcb176270139d8edc2b5d52
+ (unchanged) · Prior head: b141afd (APPROVE) · New
+ head: eed775d43843a353f2b1ba8544f53429f557eeda
+ Delta verified: ROUND2-DELTA-eed775d.patch —
+ scripts/workplan.mjs (validateReceiptChain
+ null-guard + validateIntegrationReceiptBinding
+ key-based hasChainedRecord + rewritten
+ residual/chain-vs-legacy comments) and
+ scripts/workplan.test.mjs (chain-shape assertions
+ added to both retainPaths=false drift tests; two new
+ tests). Live source at head matches the patch
+ byte-for-behavior.
+
+ ### Trace of each change
+
+ (1) validateReceiptChain fails closed on
+ present-but-null entryHash — workplan.mjs:1389-1391.
+ - if ("entryHash" in receipt) { if
+   (receipt.entryHash === null) fail("receipt chain
+   entryHash must not be null"); … }. The null check
+   fires first, before prevEntryHash
+   presence/recompute and entryHash recompute —
+   correct ordering, all within validation
+   (pre-mutation in accept at 2394-2395, block at
+   2613, resume at 2726).
+ - Legitimate records never carry entryHash:null:
+   appendReceipt sets receipt.entryHash =
+   computeRecordEntryHash(receipt)
+   (workplan.mjs:1328), which always returns a
+   sha256:… string. So no false-close on genesis,
+   legacy-prefix, no-receipts, or multi-cycle ledgers
+   — confirmed by re-reading the round-1 tests at
+   7692, 8050, 8150, 8333, 8464, 8596 (all still pass
+   under the stricter check on their non-null
+   records).
+ - This closes my round-1 P2 (cheap null-demotion of
+   all entryHash) and my round-1 P3-2 (genesis
+   entryHash:null was undetected). Both are now
+   detected at the first nulled record.
+
+ (2) validateIntegrationReceiptBinding counts chained
+ by KEY presence — workplan.mjs:2310-2324.
+ - Old: receipt.entryHash !== undefined &&
+   receipt.entryHash !== null. New: "entryHash" in
+   receipt. The two definitions differ only on a
+   null-valued entryHash, which change (1) now
+   rejects upstream. On every legitimate ledger the
+   two definitions agree (no record has
+   entryHash:null), so no new false-close path.
+ - Defense-in-depth is real and correctly commented
+   (2310-2314): every caller of
+   validateIntegrationReceipt also calls
+   validateReceiptChain (accept 2394-2395;
+   block-from-verifying 2621→2613;
+   resume-from-verifying 2724→2726), so a null ledger
+   is always caught by the chain check too; the
+   broader binding definition ensures a future
+   refactor that loosened the upstream null-guard
+   cannot silently disable binding enforcement.
+ - No spurious binding failure on a null-entryHash
+   ledger: if the null is on a non-verifying receipt,
+   the binding record (last to:"verifying") is intact
+   and passes; the chain check then fails on null. If
+   the null is on the verifying record itself, the
+   binding hash still matches (evidence is intact)
+   and the chain check fails on null. Either way
+   fail-closed.
+
+ (3) Residual comment rewritten —
+ workplan.mjs:1345-1352 (chain-vs-legacy) + 1367-1378
+ (residual). Accurate against live code:
+ - "wholesale removal of the chain fields … the
+   ledger reads as fully legacy" — correct:
+   validateReceiptChain else-branch (1398-1402) keeps
+   chainStarted=false, no fail.
+ - "the validateIntegrationReceiptBinding check is
+   disabled too: with zero chained records, it
+   early-returns" — correct: new key-based
+   hasChainedRecord=false → return at 2325-2327.
+ - "Only the pre-existing reviewFreeze correlation
+   checks (and the revision bound) remain in play for
+   the integrationReceipt" — correct:
+   validateIntegrationReceipt (2209-2281) retains
+   field-shape, actor≠owner,
+   reviewBranch/reviewHead/definitionHash
+   correlation, revisionTo ≤ expectedRevision,
+   ISO-at.
+ - The comment no longer over-credits the binding
+   check (my round-1 P2 framing concern) and no
+   longer under-states the closure (snapshot-only
+   co-tamper is now detected while the ledger is
+   intact). The residual is now precisely "key
+   removal OR rewrite-with-recompute," both of which
+   reduce the surface to the keyless-sha256 class.
+
+ (4) Tests — workplan.test.mjs:7577-7603 and
+ 7684-7710 (chain-shape assertions added to the two
+ retainPaths=false drift tests); 8798-8919 (two new
+ tests).
+ - The two modified drift tests retain their original
+   behavioral assertions (/overlap/ fail-closed +
+   byte-preservation at 7639-7650; re-reserve success
+   at 7745-7762) and additionally assert the
+   post-block receipt's entryHash recomputes and
+   prevEntryHash anchors to the predecessor. Correct
+   mirrors of the round-1 retainPaths=true test;
+   would fail on a regression where appendReceipt
+   stops stamping chain fields.
+ - Null-tamper test (8800-8870): targets the review
+   receipt's entryHash (sets to null, keeps the key).
+   Binding runs first (accept 2394 before 2395):
+   hasChainedRecord=true, binding record = last
+   verifying receipt (intact), binding hash matches
+   card.integrationReceipt (unchanged), positional
+   rule passes (tail is verifying). Then
+   validateReceiptChain hits the nulled review
+   receipt → fail("receipt chain entryHash must not
+   be null"). Test's regex /receipt chain entryHash
+   must not be null/ matches; byte-preservation
+   asserted. Pinned correctly — would fail on the
+   round-1 code (which would emit /broken by legacy
+   record after chained record/ instead) and on any
+   regression that re-allows null.
+ - Wholesale-removal residual test (8872-8919):
+   deletes entryHash+prevEntryHash keys from every
+   receipt and tampers only integrationReceipt.at
+   (+60s, still valid ISO). With zero chain keys,
+   validateReceiptChain reads as fully-legacy
+   (passes) and validateIntegrationReceiptBinding
+   early-returns (2325-2327), so only reviewFreeze
+   correlation + revision bound + field shape apply —
+   none of which inspect at. accept succeeds; final
+   integrationReceipt.at === tamperedAt. Correctly
+   pins the declared residual; the "MUST flip this
+   test intentionally" comment (8891) correctly marks
+   it as an intentional-pass regression sentinel for
+   the deferred keyless-anchor fix.
+
+ ### Charter invariants (delta-scoped)
+
+ Append-only (no legacy record rewriting) ✓;
+ fail-closed (one new pre-mutation fail at 1390,
+ strictly tighter) ✓; no self-approval path added ✓;
+ bounded authority (no CLI/export surface;
+ appendReceipt signature unchanged) ✓; exact
+ revertibility (legacy 7-field records stay unhashed
+ forever; no state migration) ✓. Reviewer≠owner,
+ revision bound, path exclusivity, host/namespace
+ checks untouched.
+
+ ### Findings
+
+ ┌──────┬──────────────┬──────────────┬─────────────┐
+ │ SEVE │ FILE:LINE    │ FINDING      │ CONCRETE    │
+ │ RITY │              │              │ FAILURE     │
+ │      │              │              │ CASE        │
+ ├──────┼──────────────┼──────────────┼─────────────┤
+ │ P3   │ scripts/work │ The residual │ A future    │
+ │      │ plan.test.mj │ comment      │ refactor    │
+ │      │ s:8872-8919  │ names TWO    │ that, e.g., │
+ │      │ (residual    │ residual     │ added a     │
+ │      │ test) vs     │ variants —   │ per-receipt │
+ │      │ scripts/work │ "wholesale   │ presence    │
+ │      │ plan.mjs:136 │ removal of   │ counter or  │
+ │      │ 7-1378       │ the chain    │ signed the  │
+ │      │ (residual    │ fields (or   │ key set     │
+ │      │ comment      │ rewrite-with │ without     │
+ │      │ naming       │ -recompute). │ binding     │
+ │      │ "rewrite-wit │ " The new    │ content     │
+ │      │ h-recompute" │ residual     │ could pass  │
+ │      │ )            │ test pins    │ the         │
+ │      │              │ ONLY the     │ key-removal │
+ │      │              │ key-removal  │ test (test  │
+ │      │              │ variant      │ still       │
+ │      │              │ (delete      │ expects     │
+ │      │              │ entryHash/pr │ accept-succ │
+ │      │              │ evEntryHash  │ eeds and    │
+ │      │              │ + tamper     │ would have  │
+ │      │              │ integrationR │ to be       │
+ │      │              │ eceipt.at →  │ flipped)    │
+ │      │              │ accept). The │ while the   │
+ │      │              │ rewrite-with │ recompute-w │
+ │      │              │ -recompute   │ ith-forged- │
+ │      │              │ variant      │ hashes      │
+ │      │              │ (delete a    │ variant     │
+ │      │              │ middle       │ remains     │
+ │      │              │ receipt,     │ exploitable │
+ │      │              │ recompute    │ and         │
+ │      │              │ all          │ undetected. │
+ │      │              │ subsequent   │ Low         │
+ │      │              │ entryHash/pr │ likelihood; │
+ │      │              │ evEntryHash  │ the         │
+ │      │              │ via the      │ comment's   │
+ │      │              │ public       │ "keyless    │
+ │      │              │ receiptChain │ anchoring   │
+ │      │              │ Hash helper, │ (e.g. a     │
+ │      │              │ tamper       │ per-board   │
+ │      │              │ snapshot) is │ hash)"      │
+ │      │              │ mentioned in │ mitigation  │
+ │      │              │ the comment  │ addresses   │
+ │      │              │ but not      │ both. No    │
+ │      │              │ pinned by a  │ code        │
+ │      │              │ test. Both   │ defect.     │
+ │      │              │ variants     │ Suggest, if │
+ │      │              │ share the    │ a future    │
+ │      │              │ same         │ author      │
+ │      │              │ residual     │ tackles the │
+ │      │              │ class        │ residual,   │
+ │      │              │ (keyless     │ they add a  │
+ │      │              │ sha256 →     │ recompute-v │
+ │      │              │ self-consist │ ariant      │
+ │      │              │ ent forgery) │ regression  │
+ │      │              │ and the same │ test        │
+ │      │              │ eventual fix │ alongside   │
+ │      │              │ (keyless     │ any anchor  │
+ │      │              │ per-board    │ implementat │
+ │      │              │ anchor), so  │ ion. Not a  │
+ │      │              │ the          │ blocker for │
+ │      │              │ comment's    │ this delta. │
+ │      │              │ accuracy is  │             │
+ │      │              │ not          │             │
+ │      │              │ impaired.    │             │
+ │      │              │ Omitting the │             │
+ │      │              │ recompute-va │             │
+ │      │              │ riant test   │             │
+ │      │              │ is a         │             │
+ │      │              │ defensible   │             │
+ │      │              │ choice (it   │             │
+ │      │              │ is           │             │
+ │      │              │ essentially  │             │
+ │      │              │ a forge      │             │
+ │      │              │ recipe), but │             │
+ │      │              │ it means a   │             │
+ │      │              │ future       │             │
+ │      │              │ change that  │             │
+ │      │              │ silently     │             │
+ │      │              │ closed the   │             │
+ │      │              │ key-removal  │             │
+ │      │              │ path while   │             │
+ │      │              │ leaving the  │             │
+ │      │              │ recompute    │             │
+ │      │              │ path open    │             │
+ │      │              │ would not be │             │
+ │      │              │ caught by    │             │
+ │      │              │ this test    │             │
+ │      │              │ alone.       │             │
+ ├──────┼──────────────┼──────────────┼─────────────┤
+ │ P3   │ scripts/work │ In accept,   │ Co-tamper:  │
+ │      │ plan.mjs:139 │ validateInte │ set         │
+ │      │ 0 (null      │ grationRecei │ receipts[la │
+ │      │ entryHash    │ pt (which    │ st].entryHa │
+ │      │ fail)        │ calls the    │ sh = null   │
+ │      │ relative to  │ binding)     │ AND mutate  │
+ │      │ accept's     │ runs at 2394 │ card.integr │
+ │      │ call order   │ before       │ ationReceip │
+ │      │ at 2394-2395 │ validateRece │ t.at on a   │
+ │      │              │ iptChain at  │ verifying   │
+ │      │              │ 2395. For a  │ card →      │
+ │      │              │ co-tamper    │ accept      │
+ │      │              │ that nulls   │ exits with  │
+ │      │              │ the          │ integration │
+ │      │              │ verifying    │ Receipt     │
+ │      │              │ record's     │ binding     │
+ │      │              │ entryHash    │ hash        │
+ │      │              │ AND tampers  │ mismatch    │
+ │      │              │ card.integra │ rather than │
+ │      │              │ tionReceipt  │ entryHash   │
+ │      │              │ (or its      │ must not be │
+ │      │              │ evidence.int │ null. The   │
+ │      │              │ egrationRece │ null-tamper │
+ │      │              │ iptHash),    │ test        │
+ │      │              │ the binding  │ (8800-8870) │
+ │      │              │ check fails  │ does not    │
+ │      │              │ first with   │ exercise    │
+ │      │              │ integrationR │ this        │
+ │      │              │ eceipt       │ combination │
+ │      │              │ binding hash │ and         │
+ │      │              │ mismatch     │ continues   │
+ │      │              │ (2322-2324), │ to pass. No │
+ │      │              │ masking the  │ behavioral  │
+ │      │              │ more         │ or security │
+ │      │              │ specific     │ concern.    │
+ │      │              │ entryHash    │             │
+ │      │              │ must not be  │             │
+ │      │              │ null (1390). │             │
+ │      │              │ Both         │             │
+ │      │              │ outcomes are │             │
+ │      │              │ fail-closed  │             │
+ │      │              │ and          │             │
+ │      │              │ byte-preserv │             │
+ │      │              │ ing, so      │             │
+ │      │              │ there is no  │             │
+ │      │              │ security     │             │
+ │      │              │ impact; the  │             │
+ │      │              │ only effect  │             │
+ │      │              │ is that the  │             │
+ │      │              │ null-tamper  │             │
+ │      │              │ test's exact │             │
+ │      │              │ regex        │             │
+ │      │              │ assertion    │             │
+ │      │              │ relies on    │             │
+ │      │              │ the          │             │
+ │      │              │ verifying    │             │
+ │      │              │ record being │             │
+ │      │              │ intact       │             │
+ │      │              │ (which it is │             │
+ │      │              │ in the test  │             │
+ │      │              │ at           │             │
+ │      │              │ 8848-8851).  │             │
+ │      │              │ Not a defect │             │
+ │      │              │ — recording  │             │
+ │      │              │ for          │             │
+ │      │              │ traceability │             │
+ │      │              │ .            │             │
+ └──────┴──────────────┴──────────────┴─────────────┘
+
+ ### Disposition of the round-1 P2 / round-1 P3-2
+
+ - Round-1 P2 (residual framing stale + cheap
+   null-demotion not stated): ADDRESSED. The
+   null-demotion path is now closed by change (1) —
+   nulling even one entryHash fails closed at
+   workplan.mjs:1390, so nulling-all is no longer a
+   viable cheap technique. The comment at 1367-1378
+   now accurately states the residual as key-removal
+   (+ rewrite-with-recompute), and explicitly notes
+   it disables the binding check too, leaving only
+   reviewFreeze correlation + the revision bound.
+ - Round-1 P3-2 (genesis entryHash:null undetected
+   but harmless): ADDRESSED. Genesis null now fails
+   at 1390. No integrity loss was possible before
+   (genesis content was still bound via its
+   successor's prevEntryHash recompute at 1394-1397),
+   but the new strictness is a cleaner, more honest
+   invariant — "chained is decided by key presence,
+   and a null value is a failed chain entry, not a
+   demotion" (comment 1345-1351).
+
+ ### Delta on top of the prior APPROVE
+
+ No new issue introduced. The two production-code
+ changes are strictly tighter (one new pre-mutation
+ fail; one broadened detection predicate that
+ diverges from the old only on inputs the new fail
+ already rejects). The residual comment is now
+ accurate. The two new tests and the two strengthened
+ drift tests correctly pin the new behavior and the
+ declared residual.
+
+ VERDICT: APPROVE
+
+──────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────
+/private/tmp/meta-harness-t019 (dev/t019-receipt-le...
+↑95k ↓47k R904k CH98.7% $0.677 5.1%/1.0M (auto)  glm-5

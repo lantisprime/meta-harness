@@ -1,0 +1,898 @@
+ bindingRecord.evidence.integrationReceiptHash ===
+ undefined || === null) fail("binding record missing
+ in ledger");
+   const expectedHash =
+ computeIntegrationReceiptHash(card.integrationReceip
+ t);
+   if (bindingRecord.evidence.integrationReceiptHash
+ !== expectedHash) fail("binding hash mismatch");
+   if (card.status === "verifying") {
+     const tail = receipts[receipts.length - 1];
+     if (!tail || tail.to !== "verifying")
+ fail("ledger tail is not the verifying record");
+   }
+ ```
+
+ Edge case: verifyingRecords filter uses r.to ===
+ "verifying". If a receipt has no to field
+ (malformed), r.to is undefined ≠ "verifying" →
+ excluded. If NO verifying records → fail "binding
+ record missing." ✓.
+
+ Edge case: bindingRecord.evidence is undefined →
+ !bindingRecord.evidence → fail "binding record
+ missing." ✓.
+
+ Edge case:
+ bindingRecord.evidence.integrationReceiptHash is
+ undefined/null → fail "binding record missing." ✓.
+
+ Edge case: card.status="verifying", receipts empty?
+ Can't happen — hasChainedRecord would be false
+ (empty) → early-return. So the positional rule only
+ runs when there's at least one chained record. If
+ card.status="verifying" and hasChainedRecord=true
+ but no verifying records... that's caught by
+ "binding record missing." ✓.
+
+ Edge case: card.status="verifying" and the
+ positional rule. If receipts is non-empty and tail
+ exists, tail.to must be "verifying." Operationally,
+ integrating sets status="verifying" and appends the
+ verifying record as tail. ✓.
+
+ Edge case: what if card.status is something else
+ (e.g., "blocked" during
+ resume-from-verifying-block)? The positional rule is
+ skipped (status≠="verifying"). The binding hash
+ check still runs. ✓.
+
+ Looks robust. ✓.
+
+ One more: the order of checks in
+ validateIntegrationReceiptBinding.
+ verifyingRecords.length === 0 check is BEFORE the
+ bindingRecord.evidence check. So if there are
+ verifying records but the last one has no evidence,
+ we get "binding record missing in ledger" (same
+ message). The test for tail-strip (test 7) strips
+ the verifying record, leaving zero verifying records
+ → "binding record missing." ✓. Test asserts
+ /integrationReceipt binding record missing in
+ ledger/. ✓.
+
+ Good. All consistent.
+
+ Now, here's a FINAL thing I want to verify: the
+ brief claims "validation always precedes mutation
+ with canonical files byte-preserved on failure." The
+
+ accept/block/resume/integrate/ready/claim/claimNext/
+ start/submit all use the temp-file-then-rename
+ pattern for state.json and WORKPLAN.md, and all
+ fail() calls (including the new validateReceiptChain
+ + validateIntegrationReceiptBinding) happen BEFORE
+ the temp-file writes. So on failure, neither
+ state.json nor WORKPLAN.md is touched. ✓. The
+ byte-preservation is via the temp-then-rename. The
+ tests assert byte-preservation on tamper. ✓.
+
+ Also, the WORKPLAN_FAULT_AFTER_PROJECTION env var
+ injects a fault AFTER the WORKPLAN.md rename but
+ BEFORE the state.json rename — this is a
+ pre-existing test harness for crash-recovery,
+ unchanged by this diff. The new validators run
+ BEFORE projection, so they don't interact with this
+ fault injection. ✓.
+
+ OK. I'm confident. Final review:
+
+ P3 findings:
+ 1. entryHash:null semantics — analyzed, not
+    exploitable within declared boundary (probe #4
+    answer).
+ 2. Tests 2 & 3 are functional regression guards (not
+    chain-pinning); acceptable.
+ 3. Boundary wording: "wholesale ledger
+    rewrite-with-recompute" should mention
+    nulling/demotion as the trivial technique; code
+    is sound.
+
+ Actually, I want to consolidate. Let me also
+ reconsider: is there any concern about the
+ validateBlockedReceipt field-count change admitting
+ a 9-field receipt where evidence is present but
+ entryHash/prevEntryHash are NOT both present (e.g.,
+ 8-field with evidence+entryHash but no
+ prevEntryHash)? The check: (len !== 7 && len !== 9).
+ So 8-field → fail. So you can't have
+ evidence+entryHash without prevEntryHash (that's 8
+ fields → fail). ✓. And you can't have
+ evidence+prevEntryHash without entryHash (8 fields →
+ fail). ✓. So the only 9-field admission is exactly
+ {6 base + evidence + entryHash + prevEntryHash}. ✓.
+ No hole.
+
+ And a 7-field blocked receipt (legacy) is {6 base +
+ evidence} — wait, that's 7 fields
+ (from,to,actor,revisionFrom,revisionTo,at,evidence).
+ ✓. Admitted. And a 9-field (chained) is {6 base +
+ evidence + entryHash + prevEntryHash} = 9. ✓.
+ Admitted. What about a 7-field blocked receipt
+ WITHOUT evidence? {6 base} = 6 fields → fail (6 ≠ 7
+ and 6 ≠ 9). But wait, can a blocked receipt have no
+ evidence? validateBlockedReceipt requires evidence
+ (if (!receipt.evidence ...) fail). So a legacy
+ blocked receipt MUST have evidence (7 fields). The
+ new chained blocked receipt has evidence + 2 chain
+ fields (9 fields). So the field counts 7 and 9 are
+ exactly right. ✓.
+
+ Good. No hole.
+
+ Let me write the final review now. I'll be concise
+ but precise, with file:line evidence.
+
+ Let me get exact line numbers for my findings:
+ - canonicalizeRecordForHash: workplan.mjs:1292
+ - computeRecordEntryHash: workplan.mjs:1298
+ - appendReceipt: workplan.mjs:1304
+ - entryHash:null handling in validateReceiptChain:
+   workplan.mjs:1377 (hasEntryHash def) and 1396
+   (chainStarted check)
+ - validateIntegrationReceiptBinding:
+   workplan.mjs:2289
+ - hasChainedRecord early-return:
+   workplan.mjs:2296-2302
+ - positional rule: workplan.mjs:2333-2338
+ - validateBlockedReceipt field change:
+   workplan.mjs:2497-2510
+ - accept ordering: workplan.mjs:2393-2395
+ - block ordering: workplan.mjs:2613
+ - resume ordering: workplan.mjs:2724-2726
+ - integrate integrationReceiptHash:
+   workplan.mjs:2070-2085
+ - ready appendReceipt: workplan.mjs:2856-2865
+
+ Let me verify a couple line numbers by reading.
+
+ Actually I already have these from the grep and
+ reads. Let me finalize.
+
+ For the entryHash:null finding, the relevant line
+ for the hasEntryHash definition is 1377, and the
+ chainStarted check is at 1396-1398. Let me confirm
+ by reading 1375-1400.
+
+ I read 1359-1410 earlier. The function body:
+ - line 1359: function validateReceiptChain
+ - ~1376: const hasEntryHash = "entryHash" in receipt
+   && receipt.entryHash !== null;
+ - ~1386-1388: if (chainStarted) fail("receipt chain
+   broken by legacy record after chained record");
+
+ Let me get exact lines.
+
+ Let me confirm exact line numbers for the key
+ behaviors I'll cite.
+
+
+ read scripts/workplan.mjs:1372-1416
+
+
+
+ read scripts/workplan.mjs:2294-2308
+
+
+
+ read scripts/workplan.mjs:2390-2401
+
+
+ I have all the line numbers I need. Let me write the
+ final review.
+
+ Key line references:
+ - canonicalizeRecordForHash: 1292-1296
+ - computeRecordEntryHash: 1298-1302
+ - appendReceipt (prevEntryHash + entryHash
+   stamping): 1304-1330, specifically 1315-1317
+   (lastReceipt), 1326-1327 (prevEntryHash/entryHash
+   assignment)
+ - validateReceiptChain: 1359-1410
+     - hasEntryHash def: 1376 (entryHash in receipt
+       && !== null)
+     - chainStarted check (legacy-after-chained):
+       1391-1393
+ - appendReceipt genesis prevEntryHash=null:
+   1316-1317
+ - integrate integrationReceiptHash: 2070-2072
+ - integrate evidence.integrationReceiptHash: 2084
+ - validateIntegrationReceipt calls
+   validateIntegrationReceiptBinding: 2280
+ - validateIntegrationReceiptBinding: 2289-2338
+     - hasChainedRecord early-return: 2290-2303
+     - positional rule: 2333-2338
+ - accept ordering: validateIntegrationReceipt (2394)
+   → validateReceiptChain (2395), before
+   gitCommitExists (2397+) and mutation
+ - validateBlockedReceipt field change: 2491-2510
+   (allowedFields 2499, check 2501-2508)
+ - block validateReceiptChain: 2613
+ - resume validateReceiptChain: 2726
+ - ready appendReceipt: 2856-2865
+ - validateState doesn't call chain validators:
+   605-654 (confirmed by reading)
+
+ Now let me write the review. I'll produce the
+ mandatory findings table and VERDICT line.
+
+ I'll make the entryHash:null note a single P3
+ (consolidating the genesis-null and the
+ boundary-wording), and add the tests note as a P3.
+
+ Actually, let me reconsider the severity of the
+ entryHash:null / null-all finding once more, because
+ the brief specifically flags probe #4 and asks "is
+ that exploitable within the declared boundary?"
+
+ The honest answer:
+ - Nulling a SINGLE middle/tail chained entryHash →
+   CAUGHT ("broken by legacy after chained record")
+   at 1391-1393.
+ - Nulling the SINGLE genesis entryHash (first
+   receipt) → undetected, but harmless (content still
+   bound via successor's prevEntryHash at 1383-1386).
+ - Nulling ALL entryHashes → demotes to "fully
+   legacy," which triggers the early-return at
+   validateIntegrationReceiptBinding:2303, disabling
+   binding+positional. This is a wholesale-rewrite
+   residual (declared). To exploit (swap
+   integrationReceipt), must ALSO co-tamper
+   reviewFreeze+integrationReceipt (declared
+   residual). So the FULL exploit requires: null-all
+   + reviewFreeze+receipt co-tamper. Both are
+   wholesale state.json edits. The brief's declared
+   residual "reviewFreeze+receipt co-tamper" and
+   "wholesale ledger rewrite (keyless sha256)"
+   subsume this. The only nuance: null-all is EASIER
+   than recompute.
+
+ So within the declared boundary, NOT exploitable.
+ The finding is: the boundary wording
+ "rewrite-with-recompute" is narrower than the actual
+ residual (null-all is easier and equally effective
+ at disabling the binding). Recommend the
+ comment/brief acknowledge nulling/demotion. P3
+ (wording precision, code sound).
+
+ Hmm, but is the null-all + co-tamper really
+ "reviewFreeze+receipt co-tamper" residual? The brief
+ says: "Explicitly does NOT defend ...
+ reviewFreeze+receipt co-tamper." This refers to
+ co-tampering the snapshot fields (reviewFreeze +
+ integrationReceipt). But the binding check DEFENDS
+ reviewFreeze+receipt co-tamper WHEN the ledger is
+ intact (because the binding hash catches the swapped
+ receipt). So "reviewFreeze+receipt co-tamper" is
+ only a residual WHEN the ledger is also tampered (to
+ disable the binding check).
+
+ So the brief's listing of "reviewFreeze+receipt
+ co-tamper" as a standalone residual is slightly
+ imprecise — it's only a residual when combined with
+ ledger tampering (to disable the binding). The brief
+ DOES say "reviewFreeze+receipt co-tamper — deferred
+ residual from the t018 panel" — implying it was
+ already known/documented. So maybe the t018 context
+ established that reviewFreeze+receipt co-tamper is a
+ residual because ledger binding wasn't yet added.
+ NOW that binding IS added, reviewFreeze+receipt
+ co-tamper is defended (under ledger-intact). So the
+ brief's residual list is slightly STALE — it lists
+ reviewFreeze+receipt co-tamper as undeterred, but
+ the binding check now deters it (under
+ ledger-intact).
+
+ This is actually a positive: the new binding check
+ DEFENDS a previously-residual threat
+ (reviewFreeze+receipt co-tamper under intact
+ ledger). The residual now shrinks to
+ "reviewFreeze+receipt co-tamper UNDER ledger
+ tampering (null-all or recompute-all)."
+
+ So the brief's framing is slightly conservative
+ (lists reviewFreeze+receipt co-tamper as residual,
+ when it's now partially defended). The code is
+ SOUND. The finding is the residual-framing is
+ conservatively stale. P3.
+
+ Actually, I realize I should be careful not to
+ overclaim. Let me re-read the brief's exact residual
+ statement: "Explicitly does NOT defend wholesale
+ ledger rewrite-with-recompute (keyless sha256) or
+ reviewFreeze+receipt co-tamper — deferred residual
+ from the t018 panel."
+
+ Reading this as: the change does NOT defend (a)
+ wholesale ledger rewrite-with-recompute [an attacker
+ who rewrites the ledger and recomputes all hashes
+ can forge], OR (b) reviewFreeze+receipt co-tamper
+ [an attacker who co-tampers the snapshot fields].
+
+ But (b) alone is now defended (binding catches
+ swapped receipt under intact ledger). So (b) is only
+ a residual when COMBINED with (a) (ledger rewrite to
+ disable binding). The brief lists them as separate
+ residuals, but they're actually coupled now.
+
+ This is a minor imprecision in the brief's residual
+ framing. The CODE correctly implements the binding
+ defense (which deters (b) under intact ledger). The
+ residual is really "(a) OR (a)+(b)" — i.e., you need
+ ledger rewrite to enable (b).
+
+ OK so my P3 finding: the brief's residual framing
+ couples "wholesale ledger rewrite" with
+ "reviewFreeze+receipt co-tamper" imprecisely; under
+ the new binding defense, snapshot co-tamper alone
+ (ledger intact) is now DETECTED, so the residual is
+ specifically "ledger rewrite (incl. the trivial
+ entryHash-nulling demotion) + snapshot co-tamper."
+ Recommend the residual note reflect that the binding
+ check now closes the snapshot-only co-tamper path.
+
+ This is a meaningful observation. I'll make it P2
+ actually, because it affects how future
+ panels/threat-modelers understand the residual
+ surface. But it doesn't block integration (P2
+ doesn't block). And the code is sound.
+
+ Hmm, let me reconsider. The verdict is APPROVE
+ regardless (P2/P3 don't block). The severity mainly
+ signals to the implementing seat whether to address.
+ A P2 "recommend updating the brief/residual framing"
+ is addressable by a doc/comment tweak. I'll make it
+ P2 to be candid, noting it's a documentation
+ precision issue (no code defect).
+
+ Let me finalize the findings:
+
+ P2:
+ 1. Boundary/residual framing precision
+    (workplan.mjs:1359-1410 comment;
+    workplan.mjs:2289-2338 comment + early-return at
+    2303): The declared residual in the brief lists
+    "wholesale ledger rewrite-with-recompute" and
+    "reviewFreeze+receipt co-tamper" as separate
+    undeterred threats. Under the newly-added binding
+    check (validateIntegrationReceiptBinding at
+    2289-2338), snapshot-only
+    reviewFreeze+integrationReceipt co-tamper is now
+    DETECTED when the ledger is intact (the binding
+    hash mismatch fires at 2322-2324). The actual
+    residual is "ledger rewrite (including the
+    strictly-easier entryHash-nulling demotion that
+    hits the early-return at 2303) combined with
+    snapshot co-tamper." The code comments at
+    1359-1410 and 2289-2338 are accurate about what
+    they detect, but do not call out that
+    nulling-all-entryHashes is the trivial
+    ledger-rewrite technique (vs. recompute).
+    Recommend the commit message / brief frame the
+    residual as "any wholesale ledger edit (recompute
+    OR nulling/demotion to legacy) disables the
+    binding+positional defenses, reducing the surface
+    back to reviewFreeze correlation." No code change
+    required; code is sound within the
+    (correctly-broadly-read) boundary.
+
+ P3:
+ 2. entryHash:null semantics (workplan.mjs:1376
+ hasEntryHash def, 1391-1393 chainStarted check,
+ 1316-1317 genesis prevEntryHash=null): Direct answer
+ to probe #4 — a present-but-null entryHash is
+ treated as "not chained" (legacy). Nulling a
+ MIDDLE/TAIL chained receipt's entryHash is caught by
+ the chainStarted check at 1391-1393 ("broken by
+ legacy record after chained record"). Nulling the
+ GENESIS (first) receipt's entryHash is undetected
+ but HARMLESS: the genesis content is still
+ integrity-bound by its successor's prevEntryHash
+ recompute at 1383-1386 (computeRecordEntryHash
+ strips entryHash, so the hash is independent of
+ entryHash's value), and the binding/positional
+ checks (2290-2338) are unaffected by the genesis
+ entryHash value. The only way to defeat content
+ integrity is to null ALL entryHashes (wholesale
+ demotion to legacy), which is the declared residual.
+ Not exploitable within the declared boundary. No
+ change required.
+
+ 3. Test isolation (scripts/workplan.test.mjs:~7460,
+    ~7550 — the two "post-drift block
+    retainPaths=false" tests): These two tests are
+    functional regression guards for the
+    drift/block/resume path; they also pass on the
+    BASE code (no chain-specific assertions) and
+    therefore do not, by themselves, pin the new
+    chaining behavior. This is acceptable
+    (belt-and-braces regression coverage, ensuring
+    the chain change didn't break existing flows),
+    and the chain-specific behaviors are pinned by
+    tests 4–13 (chain shape, tamper entryHash,
+    middle-strip, tail-strip binding, swapped
+    integrationReceipt, legacy-prefix DEFECT 1,
+    multi-cycle DEFECT 2, multi-cycle tail-strip
+    positional). Each of tests 4–13 fails on base or
+    on a plausible regression. No change required.
+
+ Hmm, let me get the exact line numbers for the drift
+ tests. From the patch, the tests start at line 7435
+ (after the existing test). The two retainPaths=false
+ tests are the 2nd and 3rd new tests. Let me find
+ them. Actually the patch shows the new tests
+ appended after line 7432. The first new test
+ (post-drift block resume retainPaths=true) starts at
+ ~7435. The 2nd (retainPaths=false peer overlap)
+ starts at ~7544. The 3rd (retainPaths=false no peer)
+ at ~7640. Let me not pin exact lines for the test
+ observation since I'd need to count. I'll reference
+ them by name and approximate location.
+
+ Actually, let me just grep for the test names to get
+ exact lines.
+
+ Let me get exact line numbers for the test
+ observations.
+
+
+ grep /^test\("(post-drift block
+ retainPaths=false|chained ledger carries
+ genesis|accept rejects chained receipt|accept
+ rejects middle-strip|accept rejects
+ tail-strip|accept rejects swapped|legacy un-chained
+ 7-field|card with no receipts|legacy-prefix
+ ledger|multi-cycle reachVerifying|multi-cycle
+ tail-strip)/ in scripts/workplan.test.mjs
+
+ workplan.test.mjs:7542: test("post-drift block
+ retainPaths=false: peer reserves path and resume
+ fails closed with overlap", async (context) => {
+ workplan.test.mjs:7627: test("post-drift block
+ retainPaths=false without peer claim: resume
+ succeeds and re-reserves", async (context) => {
+ workplan.test.mjs:7692: test("chained ledger carries
+ genesis null prevEntryHash, valid entryHash, and
+ chain integrationReceiptHash", async (context) => {
+ workplan.test.mjs:7753: test("accept rejects chained
+ receipt edited without recomputing entryHash and
+ preserves bytes", async (context) => {
+ workplan.test.mjs:7824: test("accept rejects
+ middle-strip of chained records and preserves
+ bytes", async (context) => {
+ workplan.test.mjs:7896: test("accept rejects
+ tail-strip of review->verifying binding record and
+ preserves bytes", async (context) => {
+ workplan.test.mjs:7969: test("accept rejects swapped
+ integrationReceipt whose revisionTo still passes
+ bound and preserves bytes", async (context) => {
+ workplan.test.mjs:8050: test("legacy un-chained
+ 7-field receipts continue to pass transitions",
+ async (context) => {
+ workplan.test.mjs:8150: test("card with no receipts
+ array is treated as empty legacy ledger", async
+ (context) => {
+ workplan.test.mjs:8333: test("legacy-prefix ledger
+ anchors chained records by predecessor hash and
+ survives submit->integrate->accept", async (context)
+ => {
+ workplan.test.mjs:8464: test("multi-cycle
+ reachVerifying -> block -> resume -> submit ->
+ integrate accepts against the LAST verifying
+ record", async (context) => {
+ workplan.test.mjs:8596: test("multi-cycle tail-strip
+ of latest verifying record with replayed
+ integrationReceipt fails closed at accept and
+ preserves bytes", async (context) => {
+
+
+ I have all the line numbers I need. Now let me write
+ the final review with the mandatory findings table
+ and VERDICT line.
+
+ Let me compose the review concisely but with
+ file:line evidence for every finding.
+
+ I have completed the frozen-diff review. Here is the
+ mandatory output.
+
+ ────────────────────────────────────────────────────
+
+ Frozen-diff second-opinion review —
+ TASK-20260724-019 / META-28
+
+ Reviewer: Pi / NeuralWatt GLM-5.2 (read-only:
+ read/grep/find/ls only)
+ Base: c30b06f681fc718f6dcb176270139d8edc2b5d52 ·
+ Head: b141afd6be562269b74d0849e79d0507f01fcbdc
+ Diff scope verified: scripts/workplan.mjs +
+ scripts/workplan.test.mjs only. No CLI surface, no
+ validateState/validateReviewFreeze/validateClaimPath
+ Exclusivity/parseCoordinatorActor/parseClaimOwner/re
+ vision-bound/path-exclusivity/actor/host-namespace
+ changes. sync (workplan.mjs:932-951) only rewrites
+ WORKPLAN.md; state.json byte-preserved →
+ legacy/foreign boards remain loadable/projectable.
+ claimNext (1488-) routes through appendReceipt
+ (chained) and intentionally does not pre-validate,
+ consistent with the stated append-side design.
+
+ ### Probe trace results (1–6)
+
+ 1. Chain detection claims — VERIFIED against real
+    code paths.
+     - Middle-strip: validateReceiptChain tracks the
+       surviving prevRecord; a deleted middle record
+       makes the successor's stored prevEntryHash (→
+       deleted record's hash) diverge from
+       computeRecordEntryHash(prevRecord) of the new
+       predecessor → fail("receipt chain
+       prevEntryHash mismatch")
+       (workplan.mjs:1383-1386). Pinned by test at
+       workplan.test.mjs:7824 (/prevEntryHash
+       mismatch/).
+     - Non-recompute edit: receipt.entryHash !==
+       computeRecordEntryHash(receipt) →
+       fail("…entryHash recompute mismatch")
+       (workplan.mjs:1387-1390). Pinned at
+       workplan.test.mjs:7753. Note: the binding
+       check in accept fires before gitCommitExists
+       (workplan.mjs:2394-2397+), so the "swapped
+       snapshot" test cleanly isolates the new
+       defense.
+     - Tail-strip of binding record: zero
+       to:"verifying" records → fail("…binding record
+       missing in ledger") (workplan.mjs:2310-2312);
+       otherwise binding-hash mismatch (2322-2324).
+       Pinned at workplan.test.mjs:7896.
+     - Swapped/replayed integrationReceipt (ledger
+       intact):
+       bindingRecord.evidence.integrationReceiptHash
+       !==
+       computeIntegrationReceiptHash(card.integration
+       Receipt) → fail("…binding hash mismatch")
+       (workplan.mjs:2322-2324). Pinned at
+       workplan.test.mjs:7969.
+     - Multi-cycle tail-strip + snapshot replay:
+       positional rule card.status==="verifying" ⇒
+       ledger tail to==="verifying"
+       (workplan.mjs:2333-2338) fires after stripping
+       the 2nd verifying record. Pinned at
+       workplan.test.mjs:8596. Last-record selection
+       (verifyingRecords.at(-1)) at 2314-2316 closes
+       the DEFECT-2 fossil-replay hole; pinned at
+       workplan.test.mjs:8464.
+
+ 2. Operational paths — no false-close found. Traced
+    block-from-verifying (positional rule passes
+    pre-mutation since tail IS the verifying record),
+    resume-from-verifying-block (positional rule
+    correctly skipped because status==="blocked",
+    workplan.mjs:2333), multi-cycle
+    integrate→block→resume→submit→integrate→accept
+    (workplan.test.mjs:8464 passes), legacy-prefix
+    submit→integrate→accept (workplan.test.mjs:8333
+    passes), no-receipts genesis synthesis
+    (workplan.test.mjs:8150 passes), and
+    retainPaths=false peer-overlap
+    (workplan.test.mjs:7542 still fails closed on
+    path exclusivity). claimNext/sync/add unaffected.
+
+ 3. No weakening of validateBlockedReceipt. New
+    admission is strictly additive: exactly 7-field
+    (legacy) or 9-field = {6 base + evidence +
+    entryHash + prevEntryHash}
+    (workplan.mjs:2499-2508). 8-field and any
+    non-{entryHash,prevEntryHash} extra still fail. A
+    7-field receipt missing evidence is still caught
+    downstream (workplan.mjs:2539-2545).
+    validateReceiptChain/validateState behavior for
+    legacy inputs is byte-equivalent to base (state
+    validator never invoked the chain; confirmed
+    validateState 605-654 does not call
+    validateReceiptChain/validateIntegrationReceiptBi
+    nding).
+
+ 4. Canonicalization — sound. computeRecordEntryHash
+    strips entryHash before hashing
+    (workplan.mjs:1292-1302), so the hash is
+    independent of entryHash's value; deepSortKeys
+    (1075-1084) decouples from insertion order;
+    JSON.stringify omits undefined-valued keys, and
+    appendReceipt only sets evidence when
+    non-undefined (1322-1324), so no undefined-key
+    instability. See P3-2 below for the
+    entryHash:null edge.
+
+ 5. Ordering — all new fail() strictly pre-mutation.
+    accept: validate calls at 2393-2395 precede
+    card.status="done" and appendReceipt (post-2418).
+    block: 2613 precedes status mutation (2629+) and
+    appendReceipt (2633). resume: 2706-2738 precede
+    appendReceipt (2748+) and status mutation.
+    Temp-then-rename atomic writes preserve bytes on
+    failure (tests assert byte-identity of state.json
+     + WORKPLAN.md + lock removal).
+
+ 6. Tests pin the behaviors. chain-specific tests
+    (workplan.test.mjs:7692, 7753, 7824, 7896, 7969,
+    8050, 8150, 8333, 8464, 8596) fail on base or on
+    plausible regressions. Test helpers
+    receiptChainHash/integrationReceiptHash
+    (workplan.test.mjs:7448-7470) faithfully mirror
+    computeRecordEntryHash/computeIntegrationReceiptH
+    ash (incl. the delete copy.entryHash step). See
+    P3-3 for the two non-isolating regression guards.
+
+ ### Findings
+
+ ┌──────┬──────────────┬──────────────┬─────────────┐
+ │ SEVE │ FILE:LINE    │ FINDING      │ CONCRETE    │
+ │ RITY │              │              │ FAILURE     │
+ │      │              │              │ CASE        │
+ ├──────┼──────────────┼──────────────┼─────────────┤
+ │ P2   │ scripts/work │ The declared │ An attacker │
+ │      │ plan.mjs:230 │ boundary/res │ with        │
+ │      │ 3            │ idual in     │ state.json  │
+ │      │ (early-retur │ GLM-GATE-BRI │ write       │
+ │      │ n in         │ EF.md lists  │ access sets │
+ │      │ validateInte │ "wholesale   │ every       │
+ │      │ grationRecei │ ledger       │ entryHash   │
+ │      │ ptBinding) + │ rewrite-with │ to null (no │
+ │      │ 2289-2338 /  │ -recompute   │ recompute   │
+ │      │ 1359-1410    │ (keyless     │ needed),    │
+ │      │ comments;    │ sha256)" and │ then        │
+ │      │ brief        │ "reviewFreez │ co-tampers  │
+ │      │ residual     │ e+receipt    │ card.integr │
+ │      │ framing      │ co-tamper"   │ ationReceip │
+ │      │              │ as separate  │ t+card.revi │
+ │      │              │ undeterred   │ ewFreeze →  │
+ │      │              │ residuals.   │ validateInt │
+ │      │              │ Under the    │ egrationRec │
+ │      │              │ new binding  │ eiptBinding │
+ │      │              │ check,       │  returns at │
+ │      │              │ snapshot-onl │ 2303 (no    │
+ │      │              │ y            │ chained     │
+ │      │              │ reviewFreeze │ records),   │
+ │      │              │ +integration │ validateRec │
+ │      │              │ Receipt      │ eiptChain   │
+ │      │              │ co-tamper is │ treats the  │
+ │      │              │ now DETECTED │ ledger as   │
+ │      │              │  while the   │ fully-legac │
+ │      │              │ ledger is    │ y and       │
+ │      │              │ intact       │ passes      │
+ │      │              │ (integration │ (1391-1393  │
+ │      │              │ Receipt      │ never       │
+ │      │              │ binding hash │ fires),     │
+ │      │              │ mismatch,    │ validateInt │
+ │      │              │ 2322-2324).  │ egrationRec │
+ │      │              │ The true     │ eipt only   │
+ │      │              │ residual is  │ enforces    │
+ │      │              │ narrower:    │ reviewFreez │
+ │      │              │ "any         │ e           │
+ │      │              │ wholesale    │ correlation │
+ │      │              │ ledger edit  │ , so a      │
+ │      │              │ that demotes │ forged      │
+ │      │              │ the chain to │ snapshot is │
+ │      │              │ fully-legacy │ accepted.   │
+ │      │              │ (incl. the   │ This is     │
+ │      │              │ trivially-ea │ within the  │
+ │      │              │ sier         │ intended    │
+ │      │              │ entryHash=nu │ wholesale-r │
+ │      │              │ ll on every  │ ewrite      │
+ │      │              │ record,      │ residual    │
+ │      │              │ which hits   │ but is      │
+ │      │              │ the          │ cheaper     │
+ │      │              │ !hasChainedR │ than        │
+ │      │              │ ecord        │ "rewrite-wi │
+ │      │              │ early-return │ th-recomput │
+ │      │              │ at 2303 and  │ e" implies. │
+ │      │              │ disables     │ No code     │
+ │      │              │ BOTH binding │ defect;     │
+ │      │              │ and          │ recommend   │
+ │      │              │ positional   │ the         │
+ │      │              │ rules) plus  │ brief/commi │
+ │      │              │ snapshot     │ t note      │
+ │      │              │ co-tamper."  │ restate the │
+ │      │              │ The code     │ residual as │
+ │      │              │ comments are │ "any        │
+ │      │              │ individually │ wholesale   │
+ │      │              │ accurate but │ ledger edit │
+ │      │              │ never state  │ (recompute  │
+ │      │              │ that         │ OR          │
+ │      │              │ nulling-all  │ null/demoti │
+ │      │              │ is the cheap │ on) reduces │
+ │      │              │ ledger-rewri │ the surface │
+ │      │              │ te technique │ back to     │
+ │      │              │ (vs. full    │ reviewFreez │
+ │      │              │ recompute),  │ e           │
+ │      │              │ and the      │ correlation │
+ │      │              │ brief's      │ ."          │
+ │      │              │ residual     │             │
+ │      │              │ framing is   │             │
+ │      │              │ now          │             │
+ │      │              │ conservative │             │
+ │      │              │ ly stale (it │             │
+ │      │              │ under-credit │             │
+ │      │              │ s the        │             │
+ │      │              │ binding      │             │
+ │      │              │ check and    │             │
+ │      │              │ over-states  │             │
+ │      │              │ the          │             │
+ │      │              │ snapshot-onl │             │
+ │      │              │ y residual). │             │
+ ├──────┼──────────────┼──────────────┼─────────────┤
+ │ P3   │ scripts/work │ Direct       │ Setting     │
+ │      │ plan.mjs:137 │ answer to    │ receipts[0] │
+ │      │ 6            │ probe #4: a  │ .entryHash  │
+ │      │ (hasEntryHas │ present-but- │ = null on   │
+ │      │ h def),      │ null         │ an          │
+ │      │ 1391-1393    │ entryHash is │ otherwise-i │
+ │      │ (chainStarte │ treated as   │ ntact       │
+ │      │ d            │ "not         │ chained     │
+ │      │ legacy-after │ chained"/leg │ ledger:     │
+ │      │ -chained),   │ acy. Nulling │ validateRec │
+ │      │ 1316-1317    │ a            │ eiptChain   │
+ │      │ (genesis     │ MIDDLE/TAIL  │ passes      │
+ │      │ prevEntryHas │ chained      │ (genesis    │
+ │      │ h=null),     │ receipt's    │ treated as  │
+ │      │ 1383-1386    │ entryHash is │ legacy-pref │
+ │      │ (successor   │ caught by    │ ix,         │
+ │      │ prevEntryHas │ the          │ successor   │
+ │      │ h recompute) │ chainStarted │ still       │
+ │      │              │  guard at    │ chains      │
+ │      │              │ 1391-1393    │ correctly), │
+ │      │              │ ("broken by  │ and no      │
+ │      │              │ legacy       │ downstream  │
+ │      │              │ record after │ guard is    │
+ │      │              │ chained      │ weakened.   │
+ │      │              │ record").    │ No          │
+ │      │              │ Nulling the  │ forgeable   │
+ │      │              │ GENESIS      │ path        │
+ │      │              │ (first)      │ results.    │
+ │      │              │ receipt's    │ Not         │
+ │      │              │ entryHash is │ exploitable │
+ │      │              │ undetected   │ within the  │
+ │      │              │ but          │ declared    │
+ │      │              │ harmless:    │ boundary;   │
+ │      │              │ genesis      │ no change   │
+ │      │              │ content is   │ required.   │
+ │      │              │ still        │             │
+ │      │              │ integrity-bo │             │
+ │      │              │ und by its   │             │
+ │      │              │ successor's  │             │
+ │      │              │ prevEntryHas │             │
+ │      │              │ h recompute  │             │
+ │      │              │ at 1383-1386 │             │
+ │      │              │ (hash strips │             │
+ │      │              │ entryHash,   │             │
+ │      │              │ so           │             │
+ │      │              │ value-indepe │             │
+ │      │              │ ndent), and  │             │
+ │      │              │ binding/posi │             │
+ │      │              │ tional       │             │
+ │      │              │ checks       │             │
+ │      │              │ (2290-2338)  │             │
+ │      │              │ do not       │             │
+ │      │              │ consult the  │             │
+ │      │              │ genesis      │             │
+ │      │              │ entryHash.   │             │
+ │      │              │ Defeating    │             │
+ │      │              │ content      │             │
+ │      │              │ integrity    │             │
+ │      │              │ requires     │             │
+ │      │              │ nulling ALL  │             │
+ │      │              │ entryHash    │             │
+ │      │              │ (wholesale   │             │
+ │      │              │ demotion) —  │             │
+ │      │              │ the declared │             │
+ │      │              │ residual.    │             │
+ ├──────┼──────────────┼──────────────┼─────────────┤
+ │ P3   │ scripts/work │ These two    │ No failure  │
+ │      │ plan.test.mj │ are          │ case;       │
+ │      │ s:7542, 7627 │ functional   │ observation │
+ │      │ (the two     │ regression   │ only.       │
+ │      │ retainPaths= │ guards for   │ Suggest, if │
+ │      │ false drift  │ the          │ desired,    │
+ │      │ tests)       │ drift/block/ │ adding one  │
+ │      │              │ resume path; │ assertion   │
+ │      │              │ they contain │ per test    │
+ │      │              │ no           │ that the    │
+ │      │              │ chain-specif │ post-block  │
+ │      │              │ ic           │ receipt     │
+ │      │              │ assertions   │ carries a   │
+ │      │              │ and also     │ recomputed  │
+ │      │              │ pass on the  │ entryHash   │
+ │      │              │ BASE code,   │ (as 7692    │
+ │      │              │ so they do   │ already     │
+ │      │              │ not by       │ does) to    │
+ │      │              │ themselves   │ make the    │
+ │      │              │ pin the new  │ regression- │
+ │      │              │ chaining     │ vs-pin      │
+ │      │              │ behavior.    │ intent      │
+ │      │              │ Acceptable   │ explicit.   │
+ │      │              │ as           │ No blocker. │
+ │      │              │ belt-and-bra │             │
+ │      │              │ ces coverage │             │
+ │      │              │ (they prove  │             │
+ │      │              │ the chain    │             │
+ │      │              │ change did   │             │
+ │      │              │ not break    │             │
+ │      │              │ the existing │             │
+ │      │              │ overlap/re-r │             │
+ │      │              │ eserve       │             │
+ │      │              │ flows). The  │             │
+ │      │              │ chain        │             │
+ │      │              │ behavior is  │             │
+ │      │              │ adequately   │             │
+ │      │              │ pinned by    │             │
+ │      │              │ tests at     │             │
+ │      │              │ 7692, 7753,  │             │
+ │      │              │ 7824, 7896,  │             │
+ │      │              │ 7969, 8050,  │             │
+ │      │              │ 8150, 8333,  │             │
+ │      │              │ 8464, 8596   │             │
+ │      │              │ (each fails  │             │
+ │      │              │ on base or   │             │
+ │      │              │ on a         │             │
+ │      │              │ plausible    │             │
+ │      │              │ regression). │             │
+ └──────┴──────────────┴──────────────┴─────────────┘
+
+ ### Charter invariants
+
+ - Append-only evidence: ✅ new fields added only to
+   NEW records; legacy records never rewritten
+   (workplan.mjs:1304-1330, ready routed through
+   appendReceipt 2856-2865; sync never rewrites
+   state.json).
+ - Fail-closed guards: ✅ all new fail() calls
+   pre-mutation (workplan.mjs:2393-2395, 2613,
+   2724-2726, 2280→2289).
+ - No self-approval paths created: ✅ the
+   binding/positional checks add no approval surface;
+   actor !== card.owner and evaluator≠owner checks
+   unchanged.
+ - Bounded authority: ✅ no new CLI flags or exported
+   functions; change is internal to validators +
+   appendReceipt.
+ - Exact revertibility: ✅ no state migration; legacy
+   7-field records stay unhashed forever;
+   fully-legacy and legacy-prefix ledgers load and
+   transition unchanged.
+
+ ### Disposition of declared boundary
+
+ The six work items, legacy operability, migration
+ case (legacy-prefix → chained), fail-before-mutation
+ with byte-preservation, and non-weakening of
+ reviewFreeze/revision-bound/path-exclusivity/actor/h
+ ost-namespace are all satisfied. The declared threat
+ boundary ("LEDGER-INTACT tampering: swapped/replayed
+ integrationReceipt, middle-strip, non-recompute
+ edits") is honestly implemented and honestly
+ rescoped in the staleness comment
+ (workplan.mjs:2259-2271). The deferred residuals
+ (wholesale ledger rewrite; snapshot co-tamper once
+ the binding is disabled) are real but acknowledged;
+ the P2 above requests only a wording/precision
+ tightening of how those residuals are framed, not a
+ code change.
+
+ VERDICT: APPROVE
+
+──────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────
+/private/tmp/meta-harness-t019 (dev/t019-receipt-le...
+↑53k ↓36k R685k CH99.2% $0.488 6.4%/1.0M (auto)  glm-5
