@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 120,
+  "revision": 122,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3487,8 +3487,8 @@
     {
       "id": "TASK-20260724-020",
       "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
-      "status": "ready",
-      "owner": "",
+      "status": "in_progress",
+      "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
       "paths": [
         "selflearn/src/selflearn/compilation",
         "selflearn/tests/test_compilation_runtime.py"
@@ -3545,8 +3545,54 @@
           "revisionFrom": 118,
           "revisionTo": 119,
           "at": "2026-07-24T05:29:53.961Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:t020-build-20260724",
+          "revisionFrom": 120,
+          "revisionTo": 121,
+          "at": "2026-07-24T05:47:39.819Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:t020-build-20260724",
+          "revisionFrom": 121,
+          "revisionTo": 122,
+          "at": "2026-07-24T05:47:39.891Z"
         }
-      ]
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "sourceRevision": "git:c338ec094830dd6f4186935cf6130a4585fb1a68;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-gate6-F1-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-t020",
+        "branch": "dev/t020-ast-preflight-valueerror-guard",
+        "baseCommit": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "currentHead": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "paths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Close the unjournalled-ValueError escape class at the selflearn compilation runtime's AST preflight (META-17 gate-6 finding F1, P2, pre-existing). _ast_preflight (selflearn/src/selflearn/compilation/runtime.py:36) calls ast.parse at line 45 catching only SyntaxError; ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, so at the call site (runtime.py:277) that ValueError escapes run() raw and unjournalled, violating both the journalled-refusal evidence contract and the RuntimeCompError normalization contract. The path-resolution subclass of this escape class was closed in 5d2fb52 (control-character preflight plus (OSError, ValueError) on the read guards, journalled under executor.malformed-path); this source-NUL subclass at the AST preflight was explicitly left open. Only reachable via a tampered hash-matched executor file, since json.dumps escapes NUL in legitimate compiler output -- which is precisely the adversarial surface the tamper evidence record exists for. Required behaviour: a preflight failure on NUL-bearing or otherwise ValueError-raising source must journal an executor refusal via the established _journal_refusal mechanism under an honest kind consistent with the existing executor.* refusal kinds, then raise RuntimeCompError; no raw ValueError may escape run() from the preflight site. Bringing the preflight's existing SyntaxError and dunder/builtins refusal paths under the same journalled-refusal contract at that call site is in scope if the chosen guard shape covers them naturally; rewriting the preflight's detection logic is not. Add regression tests proving: NUL-bearing source with a matching hash journals a refusal and raises RuntimeCompError (not ValueError); legitimate executor sources still compile and run unchanged; and the refusal journal entry carries the entry_id and honest kind. Scope is exactly the reserved paths: selflearn/src/selflearn/compilation (runtime.py expected; sibling modules only if the guard genuinely requires a shared helper) and selflearn/tests/test_compilation_runtime.py. No workplan scripts, no discovery package, no prompt/evaluator/deployment wiring, no doctor.py (its NUL-path reporting gap is a separate recorded P3, out of scope).",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+        ],
+        "nextCheckpoint": "A hash-matched executor file containing NUL bytes is refused with a journalled executor refusal and RuntimeCompError instead of an unjournalled raw ValueError; every legitimate executor source compiles and runs exactly as before; all pre-existing selflearn and root suites stay green; and the ValueError escape class at the AST preflight call site is closed with regression tests pinning it shut.",
+        "revisionFrom": 120,
+        "revisionTo": 121,
+        "at": "2026-07-24T05:47:39.819Z"
+      }
     },
     {
       "id": "TASK-20260724-021",
