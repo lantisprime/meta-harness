@@ -140,6 +140,10 @@ function claudeOwner(session = "session-1") {
   return `claude:${hostname()}:${session}`;
 }
 
+function piOwner(session = "session-1") {
+  return `pi:${hostname()}:${session}`;
+}
+
 async function readyCard(root, id, overrides = {}, expectedRevision = "1") {
   const definitionPath = join(root, "definition.json");
   await writeDefinition(definitionPath, overrides, root);
@@ -2044,6 +2048,77 @@ test("ready rejects unmet dependency", async (context) => {
   assert.match(result.stderr, /dependency TASK-20260711-001 is not done/);
 });
 
+test("ready accepts pi and rejects an unknown allowed owner namespace", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-PI",
+        title: "Pi definition",
+        status: "backlog",
+        owner: "",
+        paths: ["src/pi-definition"],
+      }),
+      card({
+        id: "TASK-BAD",
+        title: "Bad definition namespace",
+        status: "backlog",
+        owner: "",
+        paths: ["src/bad-definition-namespace"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  const accepted = await readyCard(root, "TASK-PI", {
+    allowedOwnerNamespaces: ["pi"],
+  });
+  assert.equal(accepted.ready, true);
+  const acceptedState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.deepEqual(
+    acceptedState.cards.find((candidate) => candidate.id === "TASK-PI")
+      .definition.allowedOwnerNamespaces,
+    ["pi"],
+  );
+
+  const badDefinitionPath = join(parent, "bad-definition.json");
+  await writeDefinition(
+    badDefinitionPath,
+    { allowedOwnerNamespaces: ["pi", "bogus"] },
+    root,
+  );
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBefore = await readFile(join(root, ".workplan", "state.json"));
+  const rejected = await run([
+    "ready",
+    "TASK-BAD",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "2",
+    "--owner",
+    coordinatorOwner("definition-test"),
+    "--definition-json",
+    badDefinitionPath,
+  ]);
+  assert.notEqual(rejected.code, 0);
+  assert.match(
+    rejected.stderr,
+    /allowedOwnerNamespaces must be a nonempty unique subset of \["codex","claude","pi"\]/,
+  );
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
 test("ready rejects wrong frozenAxes", async (context) => {
   const { root, parent } = await repository(
     state([
@@ -2584,6 +2659,141 @@ test("claim rejects disallowed owner namespace and preserves bytes", async (cont
   });
 });
 
+test("claim accepts pi owner namespace and records its identity", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Pi namespace",
+        status: "backlog",
+        owner: "",
+        paths: ["src/pi"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  const owner = piOwner("pi-claim");
+  await readyCard(root, "TASK-20260711-001", {
+    allowedOwnerNamespaces: ["pi"],
+  });
+
+  const result = await run([
+    "claim",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "2",
+    "--owner",
+    owner,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const claimedCard = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(claimedCard.status, "claimed");
+  assert.equal(claimedCard.owner, owner);
+  const claimReceipt = claimedCard.receipts[claimedCard.receipts.length - 1];
+  assert.equal(claimReceipt.to, "claimed");
+  assert.equal(claimReceipt.actor, owner);
+});
+
+test("claim rejects pi owner when the frozen namespaces exclude pi and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Frozen namespace",
+        status: "backlog",
+        owner: "",
+        paths: ["src/pi-frozen"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  const owner = piOwner("pi-frozen");
+  await readyCard(root, "TASK-20260711-001", {
+    allowedOwnerNamespaces: ["claude"],
+  });
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBefore = await readFile(join(root, ".workplan", "state.json"));
+  const result = await run([
+    "claim",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "2",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /owner namespace pi is not allowed/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("claim rejects an unknown owner namespace with the supported namespace message", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Unknown namespace",
+        status: "backlog",
+        owner: "",
+        paths: ["src/unknown-namespace"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await readyCard(root, "TASK-20260711-001");
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBefore = await readFile(join(root, ".workplan", "state.json"));
+  const result = await run([
+    "claim",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "2",
+    "--owner",
+    "worker:host:session",
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /owner must be codex:<host>:<session>, claude:<host>:<session>, or pi:<host>:<session>/,
+  );
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
 test("claim rejects wrong owner host before lock and preserves bytes", async (context) => {
   const { root, parent } = await repository(
     state([
@@ -2994,6 +3204,68 @@ test("claim-next sorts priority then id, skips ineligible, claims first eligible
   await assert.rejects(stat(join(root, ".workplan", "lock")), {
     code: "ENOENT",
   });
+});
+
+test("claim-next selects a pi-only card for a pi owner", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-CLAUDE",
+        title: "Claude candidate",
+        status: "backlog",
+        owner: "",
+        paths: ["src/claim-next-claude"],
+        priority: 1,
+      }),
+      card({
+        id: "TASK-PI",
+        title: "Pi candidate",
+        status: "backlog",
+        owner: "",
+        paths: ["src/claim-next-pi"],
+        priority: 2,
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await readyCard(root, "TASK-CLAUDE", {
+    allowedOwnerNamespaces: ["claude"],
+  });
+  await readyCard(
+    root,
+    "TASK-PI",
+    { allowedOwnerNamespaces: ["pi"] },
+    "2",
+  );
+
+  const owner = piOwner("pi-claim-next");
+  const result = await run([
+    "claim-next",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.id, "TASK-PI");
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const claimed = finalState.cards.find((candidate) => candidate.id === "TASK-PI");
+  assert.equal(claimed.status, "claimed");
+  assert.equal(claimed.owner, owner);
+  assert.equal(claimed.receipts[claimed.receipts.length - 1].actor, owner);
+  assert.equal(
+    finalState.cards.find((candidate) => candidate.id === "TASK-CLAUDE").status,
+    "ready",
+  );
 });
 
 test("claim rejects stale expected revision and preserves bytes", async (context) => {
@@ -3457,6 +3729,61 @@ test("claim-next with all candidates namespace-ineligible fails and preserves by
   });
 });
 
+test("claim-next with only codex and claude candidates rejects a pi owner and preserves bytes", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-CODEX",
+        title: "Codex only",
+        status: "backlog",
+        owner: "",
+        paths: ["src/claim-next-codex"],
+      }),
+      card({
+        id: "TASK-CLAUDE",
+        title: "Claude only",
+        status: "backlog",
+        owner: "",
+        paths: ["src/claim-next-claude-only"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  await readyCard(root, "TASK-CODEX", { allowedOwnerNamespaces: ["codex"] });
+  await readyCard(
+    root,
+    "TASK-CLAUDE",
+    { allowedOwnerNamespaces: ["claude"] },
+    "2",
+  );
+
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const stateBefore = await readFile(join(root, ".workplan", "state.json"));
+  const result = await run([
+    "claim-next",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    piOwner("pi-claim-next-negative"),
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /no eligible ready card/);
+
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBefore,
+  );
+  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+    code: "ENOENT",
+  });
+});
+
 test("start transitions claimed card to in_progress and appends receipt", async (context) => {
   const { root, parent } = await repository(
     state([
@@ -3592,6 +3919,65 @@ test("submit transitions in_progress card to review and stores reviewFreeze with
   assert.match(projection, /TASK-20260711-001/);
   assert.match(projection, /review/);
   assert.match(projection, /submit-session/);
+});
+
+test("pi owner carries its identity through claim, start, and submit", async (context) => {
+  const { root, parent } = await repository(
+    state([
+      card({
+        id: "TASK-20260711-001",
+        title: "Pi lifecycle",
+        status: "backlog",
+        owner: "",
+        paths: ["src/pi-lifecycle"],
+      }),
+    ]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+
+  const owner = piOwner("pi-lifecycle");
+  await readyCard(root, "TASK-20260711-001", {
+    allowedOwnerNamespaces: ["pi"],
+  });
+  await claimCard(root, "TASK-20260711-001", owner);
+  await startCard(root, "TASK-20260711-001", owner);
+  await seedCommit(root);
+  const head = await currentHead(root);
+
+  const result = await run([
+    "submit",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "4",
+    "--owner",
+    owner,
+    "--expected-head",
+    head,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  const submittedCard = finalState.cards.find((c) => c.id === "TASK-20260711-001");
+  assert.equal(submittedCard.status, "review");
+  assert.equal(submittedCard.owner, owner);
+  assert.deepEqual(
+    submittedCard.receipts.slice(-3).map((receipt) => receipt.actor),
+    [owner, owner, owner],
+  );
+  assert.deepEqual(
+    submittedCard.receipts.slice(-3).map((receipt) => [receipt.from, receipt.to]),
+    [
+      ["ready", "claimed"],
+      ["claimed", "in_progress"],
+      ["in_progress", "review"],
+    ],
+  );
 });
 
 test("start rejects wrong owner and preserves bytes", async (context) => {

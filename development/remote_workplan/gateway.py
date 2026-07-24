@@ -232,7 +232,7 @@ class RemoteWorkplanGateway:
             if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item for item in value):
                 raise GatewayError("invalid_definition", f"{field} must be a non-empty string list")
         namespaces = definition["allowedOwnerNamespaces"]
-        if len(namespaces) != len(set(namespaces)) or not set(namespaces) <= {"codex", "claude", "dev-orchestrator"}:
+        if len(namespaces) != len(set(namespaces)) or not set(namespaces) <= {"codex", "claude", "dev-orchestrator", "pi"}:
             raise GatewayError("invalid_definition", "allowedOwnerNamespaces must be a unique supported subset")
         return canonical_hash
 

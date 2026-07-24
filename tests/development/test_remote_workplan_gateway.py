@@ -337,6 +337,132 @@ def test_qualification_requires_exact_frozen_contract_authority_and_namespace(se
     assert namespace.value.code == "owner_namespace_denied"
 
 
+def test_pi_credential_claims_pi_only_card_and_preserves_owner(setup):
+    gateway, _, coordinator, _, _ = setup
+    pi_actor = "pi:host-c:seat"
+    issued = gateway.issue_host_credential(
+        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
+    )
+    pi_definition = definition()
+    pi_definition["allowedOwnerNamespaces"] = ["pi"]
+    pi_definition["definitionHash"] = compute_definition_hash(pi_definition)
+    ready = gateway.qualify_card(
+        card_id="PI-ONLY", title="pi only", paths=("pi-only",),
+        definition=pi_definition, credential=coordinator,
+        authority_grant=AUTHORITY_GRANT, repository_id=REPOSITORY_ID,
+    )
+
+    claimed = gateway.claim(
+        card_id="PI-ONLY", expected_revision=ready["revision"],
+        expected_definition_hash=ready["definition_hash"],
+        credential=issued["credential"],
+    )
+
+    assert issued["actor"] == pi_actor
+    assert claimed["owner"] == pi_actor
+    assert claimed["task_bundle"]["owner"] == pi_actor
+    assert gateway.list_cards()[0]["owner"] == pi_actor
+    assert gateway.receipts(card_id="PI-ONLY")[-1]["actor"] == pi_actor
+
+
+def test_pi_claim_is_denied_when_frozen_namespaces_exclude_pi(setup):
+    gateway, _, coordinator, _, _ = setup
+    pi_credential = gateway.issue_host_credential(
+        actor="pi:host-c:seat", scopes=ALL_WORKER, ttl_seconds=10_000
+    )["credential"]
+    restricted = definition()
+    restricted["allowedOwnerNamespaces"] = ["codex"]
+    restricted["definitionHash"] = compute_definition_hash(restricted)
+    ready = gateway.qualify_card(
+        card_id="CODEX-ONLY", title="codex only", paths=("codex-only",),
+        definition=restricted, credential=coordinator,
+        authority_grant=AUTHORITY_GRANT, repository_id=REPOSITORY_ID,
+    )
+
+    with pytest.raises(GatewayError, match="owner namespace pi is not allowed") as denied:
+        gateway.claim(
+            card_id="CODEX-ONLY", expected_revision=ready["revision"],
+            expected_definition_hash=ready["definition_hash"],
+            credential=pi_credential,
+        )
+
+    assert denied.value.code == "owner_namespace_denied"
+    card_after = gateway.list_cards()[0]
+    assert card_after["status"] == "ready"
+    assert card_after["owner"] is None
+
+
+def test_qualification_rejects_unknown_owner_namespace(setup):
+    gateway, _, coordinator, _, _ = setup
+    invalid_definition = definition()
+    invalid_definition["allowedOwnerNamespaces"] = ["bogus"]
+    invalid_definition["definitionHash"] = compute_definition_hash(invalid_definition)
+
+    with pytest.raises(GatewayError) as invalid:
+        gateway.qualify_card(
+            card_id="BOGUS", title="bogus", paths=("bogus",),
+            definition=invalid_definition, credential=coordinator,
+            authority_grant=AUTHORITY_GRANT, repository_id=REPOSITORY_ID,
+        )
+
+    assert invalid.value.code == "invalid_definition"
+    assert invalid.value.message == "allowedOwnerNamespaces must be a unique supported subset"
+    assert gateway.list_cards() == []
+
+
+def test_reassign_to_pi_obeys_frozen_owner_namespaces(setup):
+    gateway, _, coordinator, host_a, _ = setup
+    allowed_definition = definition()
+    allowed_definition["allowedOwnerNamespaces"] = ["codex", "pi"]
+    allowed_definition["definitionHash"] = compute_definition_hash(allowed_definition)
+    allowed = gateway.qualify_card(
+        card_id="PI-ALLOWED", title="pi allowed", paths=("pi-allowed",),
+        definition=allowed_definition, credential=coordinator,
+        authority_grant=AUTHORITY_GRANT, repository_id=REPOSITORY_ID,
+    )
+    original = gateway.claim(
+        card_id="PI-ALLOWED", expected_revision=allowed["revision"],
+        expected_definition_hash=allowed["definition_hash"], credential=host_a,
+    )
+    pi_owner = "pi:host-c:reassigned"
+    reassigned = gateway.reassign(
+        card_id="PI-ALLOWED", expected_revision=original["revision"],
+        credential=coordinator, new_owner=pi_owner, reason="move to pi seat",
+    )
+    assert reassigned["owner"] == pi_owner
+    assert next(
+        card for card in gateway.list_cards() if card["card_id"] == "PI-ALLOWED"
+    )["owner"] == pi_owner
+
+    restricted_definition = definition()
+    restricted_definition["allowedOwnerNamespaces"] = ["codex"]
+    restricted_definition["definitionHash"] = compute_definition_hash(restricted_definition)
+    restricted = gateway.qualify_card(
+        card_id="PI-DENIED", title="pi denied", paths=("pi-denied",),
+        definition=restricted_definition, credential=coordinator,
+        authority_grant=AUTHORITY_GRANT, repository_id=REPOSITORY_ID,
+    )
+    restricted_claim = gateway.claim(
+        card_id="PI-DENIED", expected_revision=restricted["revision"],
+        expected_definition_hash=restricted["definition_hash"], credential=host_a,
+    )
+
+    with pytest.raises(GatewayError) as denied:
+        gateway.reassign(
+            card_id="PI-DENIED", expected_revision=restricted_claim["revision"],
+            credential=coordinator, new_owner="pi:host-c:denied",
+            reason="attempt disallowed pi move",
+        )
+
+    assert denied.value.code == "owner_namespace_denied"
+    assert denied.value.message == "new owner namespace is not allowed"
+    denied_card = next(
+        card for card in gateway.list_cards() if card["card_id"] == "PI-DENIED"
+    )
+    assert denied_card["owner"] == "codex:host-a:seat"
+    assert denied_card["revision"] == restricted_claim["revision"]
+
+
 def test_checkpoint_requires_bound_exact_structured_lineage(setup):
     gateway, _, coordinator, host_a, _ = setup
     ready = qualify(gateway, coordinator)
@@ -405,6 +531,98 @@ def test_revalidate_rotates_fence_and_returns_refreshed_frozen_bundle(setup):
         gateway.heartbeat(card_id="META-2", fencing_token=claim["fencing_token"], credential=host_a)
     assert stale.value.code == "stale_fence"
     assert gateway.heartbeat(card_id="META-2", fencing_token=2, credential=host_a)["fencing_token"] == 2
+
+
+def test_revalidate_allows_active_pi_owner_when_replacement_includes_pi(setup):
+    gateway, _, coordinator, _, _ = setup
+    pi_actor = "pi:host-c:revalidate"
+    pi_credential = gateway.issue_host_credential(
+        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
+    )["credential"]
+    initial = definition()
+    initial["allowedOwnerNamespaces"] = ["pi"]
+    initial["definitionHash"] = compute_definition_hash(initial)
+    ready = gateway.qualify_card(
+        card_id="PI-REVALIDATE-ALLOWED", title="pi revalidate allowed",
+        paths=("pi-revalidate-allowed",), definition=initial,
+        credential=coordinator, authority_grant=AUTHORITY_GRANT,
+        repository_id=REPOSITORY_ID,
+    )
+    claim = gateway.claim(
+        card_id="PI-REVALIDATE-ALLOWED", expected_revision=ready["revision"],
+        expected_definition_hash=ready["definition_hash"],
+        credential=pi_credential,
+    )
+
+    revised = definition("git:pi-revised")
+    revised["currentHead"] = "def"
+    revised["allowedOwnerNamespaces"] = ["pi"]
+    revised["definitionHash"] = compute_definition_hash(revised)
+    refreshed = gateway.revalidate(
+        card_id="PI-REVALIDATE-ALLOWED", expected_revision=claim["revision"],
+        credential=coordinator, definition=revised,
+    )
+
+    assert refreshed["revision"] == claim["revision"] + 1
+    assert refreshed["fencing_token"] == claim["fencing_token"] + 1
+    assert refreshed["task_bundle"]["owner"] == pi_actor
+    assert refreshed["task_bundle"]["definition_hash"] == revised["definitionHash"]
+
+
+def test_revalidate_rejects_pi_owner_when_replacement_excludes_pi_without_mutation(setup):
+    gateway, _, coordinator, _, _ = setup
+    pi_actor = "pi:host-c:revalidate-denied"
+    pi_credential = gateway.issue_host_credential(
+        actor=pi_actor, scopes=ALL_WORKER, ttl_seconds=10_000
+    )["credential"]
+    initial = definition()
+    initial["allowedOwnerNamespaces"] = ["pi"]
+    initial["definitionHash"] = compute_definition_hash(initial)
+    ready = gateway.qualify_card(
+        card_id="PI-REVALIDATE-DENIED", title="pi revalidate denied",
+        paths=("pi-revalidate-denied",), definition=initial,
+        credential=coordinator, authority_grant=AUTHORITY_GRANT,
+        repository_id=REPOSITORY_ID,
+    )
+    claim = gateway.claim(
+        card_id="PI-REVALIDATE-DENIED", expected_revision=ready["revision"],
+        expected_definition_hash=ready["definition_hash"],
+        credential=pi_credential,
+    )
+
+    with gateway.store.read() as db:
+        before = db.execute(
+            "SELECT definition_json,owner,revision,fencing_generation "
+            "FROM cards WHERE card_id=?",
+            ("PI-REVALIDATE-DENIED",),
+        ).fetchone()
+        before_definition = json.loads(before["definition_json"])
+        before_owner = before["owner"]
+        before_revision = before["revision"]
+        before_fence = before["fencing_generation"]
+
+    revised = definition("git:pi-excluded")
+    revised["currentHead"] = "def"
+    revised["allowedOwnerNamespaces"] = ["codex"]
+    revised["definitionHash"] = compute_definition_hash(revised)
+    with pytest.raises(GatewayError) as denied:
+        gateway.revalidate(
+            card_id="PI-REVALIDATE-DENIED", expected_revision=claim["revision"],
+            credential=coordinator, definition=revised,
+        )
+
+    assert denied.value.code == "owner_namespace_denied"
+    assert denied.value.message == "active owner is not allowed by revalidated definition"
+    with gateway.store.read() as db:
+        after = db.execute(
+            "SELECT definition_json,owner,revision,fencing_generation "
+            "FROM cards WHERE card_id=?",
+            ("PI-REVALIDATE-DENIED",),
+        ).fetchone()
+        assert json.loads(after["definition_json"]) == before_definition
+        assert after["owner"] == before_owner
+        assert after["revision"] == before_revision
+        assert after["fencing_generation"] == before_fence
 
 
 def test_backend_epoch_requires_named_backend_snapshot_and_audits_transition(setup):
