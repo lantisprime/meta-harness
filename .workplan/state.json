@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 116,
+  "revision": 118,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3463,6 +3463,44 @@
         "revisionTo": 115,
         "at": "2026-07-24T00:37:16.084Z"
       }
+    },
+    {
+      "id": "TASK-20260724-019",
+      "title": "Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "priority": 3,
+      "trace": "Three deferred P3s from the TASK-20260724-018 panel. GLM P3-1: card.integrationReceipt is a standalone snapshot; appendReceipt creates un-chained records (workplan.mjs:1292-1313) and validateState does not bind a verifying card to a fresh receipt, so a hand-swapped receipt is caught only by reviewFreeze correlation. Codex P3: the post-drift block test neither resumes the card nor exercises retainPaths=false, leaving the recovery path unpinned. GLM P3-C: scope the new comment invariant against direct state.json tampering.",
+      "evidence": [
+        ".review-store/wpfix-glm-gate-review-84734f8.txt",
+        ".review-store/wpfix-codex-review-249a826.txt",
+        ".review-store/wpfix-glm-gate-review-249a826.txt"
+      ],
+      "next": [
+        "coordinator qualifies to Ready"
+      ]
+    },
+    {
+      "id": "TASK-20260724-020",
+      "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "priority": 3,
+      "trace": "META-17 gate-6 finding F1 (P2, pre-existing). _ast_preflight calls ast.parse at an unguarded call site (runtime.py:275); ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, escaping every guard unjournalled. Only reachable via a tampered hash-matched file since json.dumps escapes NUL in legitimate compiler output. The path-resolution subclass of this escape class was closed in 5d2fb52; this source-NUL subclass was not, so the class is NOT exhaustively closed.",
+      "evidence": [
+        ".review-store/meta17-glm-gate-review-5d2fb52.txt"
+      ],
+      "next": [
+        "coordinator qualifies to Ready"
+      ]
     }
   ]
 }
