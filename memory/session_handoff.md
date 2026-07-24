@@ -1,3 +1,90 @@
+# Session Handoff — meta-harness (2026-07-24, session 55: META-28 accepted and done at board 137; META-31 follow-up filed at 138; closeout PR pending)
+
+## State in one line
+
+META-28 / `TASK-20260724-019` (receipt ledger hash-chaining + integrationReceipt
+binding) is **`done`** at board revision **137**: PR #70 merged as `f972484`
+(reviewed head `eed775d` is its second parent), acceptance receipt
+`.workplan/t019-acceptance.json` (`sha256:f1b9665e…1c66`), both paths released.
+Follow-up **META-31 / `TASK-20260724-022`** (transition-completeness) filed at
+**138**. The only outstanding action is merging the closeout records PR from
+`card/t019-qualify`.
+
+## What shipped
+
+New ledger records carry `prevEntryHash`/`entryHash`; `ready` routes its genesis
+record through `appendReceipt` (now the sole ledger writer); integrate's
+review→verifying record carries `evidence.integrationReceiptHash`;
+`validateIntegrationReceipt` binds the snapshot to the LAST verifying record,
+mandatory once the ledger is chained, plus a positional tail rule while
+`verifying`; `validateReceiptChain` (uniform prev-record anchoring — genesis
+null, legacy-prefix anchor, middle-strip detection; present-but-null entryHash
+is malformed) runs fail-closed from accept, ALL blocks, and resume — never
+`validateState`, so legacy boards stay loadable; `validateBlockedReceipt`
+admits exactly the two new fields presence-optionally. Declared, test-pinned
+residual: wholesale chain-key removal / rewrite-with-recompute. node 143/143
+(baseline 128); pytest 1774/4/2 byte-identical to baseline.
+
+## The process record — four lenses, four DISJOINT P1 catch-sets
+
+1. **Kimi K3 plan review (pre-freeze, herdr pi seat, user-directed)**: REVISE —
+   caught 2 P1s in the DESIGN: `validateBlockedReceipt`'s exact-field-set check
+   would have bricked every newly blocked card; a tail-strip silently disabled
+   the original "when present" binding. Both folded into the frozen definition.
+2. **Orchestrator diff inspection (post-build, pre-panel)**: 2 P1s the builder's
+   own green suite hid: the chain validator rejected legacy-prefix ledgers (would
+   have stranded THIS card's own acceptance — the migration shape); binding
+   anchored to the FIRST verifying record (breaking re-integration, enabling
+   fossil replay). Routed back, fixed, 3 new tests.
+3. **GLM-5.2 gate**: APPROVE at `b141afd` (1 P2: entryHash-null demotion framing)
+   and APPROVE at `eed775d` (no new issues).
+4. **codex**: REQUEST CHANGES at `b141afd` — its P1-B (entryHash:null wholesale
+   demotion) converged with GLM's P2 from the opposite direction and was FIXED
+   (null now malformed); P1-A (mixed-era 4b stranding) REJECTED as the frozen
+   documented caveat — codex ACCEPTED on confirm; P2 (append-side tail-strip
+   re-anchoring) DEFERRED → META-31. APPROVE at `eed775d`.
+5. **Behavioral verify (MiniMax-M3, disposable roots)**: 7/7 at `b141afd` +
+   4/4 delta at `eed775d` — real CLI, byte-identity md5s, exact messages; S9
+   observed the declared residual live.
+
+## Seats and cost
+
+Private herdr sessions `drv-t019-plan-37883` and `drv-t019-build-37883`, both
+torn down. Kimi K3 plan review ~$0.12; MiniMax-M3 builder ~$1.26 over three
+rounds; GLM-5.2 two gates ~$0.68; codex two one-shots (~247k tokens);
+MiniMax-M3 verifier two rounds. All artifacts + sha256s committed under
+`.review-store/t019-*`.
+
+## Process notes
+
+- pi's `--permission-mode` flag is EXTENSION-provided: with `--no-extensions`
+  the flag is unknown and pi exits instantly, killing the herdr pane. Enforce
+  read-only reviewers via `--tools read,grep,find,ls` instead. (Also recorded
+  in the auto-memory roster.)
+- pi's folder-trust dialog ate the first builder brief send; always confirm the
+  startup screen is past the dialog before `agent send`, and re-send if the
+  text isn't in scrollback.
+- The board transitions for t019 all ran under the OLD CLI (primary checkout
+  branched pre-change), so t019's own ledger is fully legacy — deliberately
+  avoiding the mixed-era shape its own code fails closed on. First chained
+  records appear on the next card qualified after the closeout PR merges.
+- t019's worktree venv needed `uv sync --extra dev` AND
+  `uv pip install -e ./selflearn` (bare `uv sync` leaves selflearn an empty
+  namespace package; root tests import `PackStore` from it).
+
+## Next steps
+
+1. **Merge the closeout PR** from `card/t019-qualify` (board 131 → 138 records,
+   review artifacts, definition, acceptance receipt, this handoff).
+2. Coordinator may qualify `TASK-20260724-022` / META-31
+   (transition-completeness) — now the only backlog card.
+3. Worktree `/private/tmp/meta-harness-t019` (detached at `f972484`, card done)
+   is deletable; also still-standing older worktrees `meta-17`, `meta-8`,
+   `meta18-coordinator`, `wp-fix` from prior sessions await a sweep decision.
+4. 8 unmerged `agent/*` branches still await a human decision (session-50 list).
+
+---
+
 # Session Handoff — meta-harness (2026-07-24, session 54: META-30 accepted and done at board 131; ALL PRs merged, session fully closed)
 
 ## State in one line

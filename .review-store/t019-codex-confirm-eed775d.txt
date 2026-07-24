@@ -1,0 +1,25 @@
+  freeform; a flag passed on the revise OVERRIDES that one field (replace, not merge).
+
+Common mistakes: inventing a new episode with `em-store` instead of revising, which
+leaves both versions active and searchable.
+
+### em-search
+
+
+codex
+| ITEM | RESOLVED/ACCEPTED/DISPUTED | ONE-LINE EVIDENCE |
+|---|---|---|
+| P1-B | RESOLVED | `workplan.mjs:1389-1403` rejects present-null `entryHash`, `:2314-2320` counts key presence for binding, and `workplan.test.mjs:8804-8875` pins rejection plus byte preservation. |
+| P1-A | ACCEPTED | The frozen definition explicitly documents this fail-closed migration caveat; the live board has zero verifying/blocked cards, while the legacy-prefix path passes at `workplan.test.mjs:8378`. |
+| P2 | ACCEPTED | Append-side transition completeness exceeds the frozen ledger-intact hash/binding boundary and is reasonably deferred to a dedicated follow-up. |
+
+VERDICT: APPROVE
+tokens used
+84,641
+| ITEM | RESOLVED/ACCEPTED/DISPUTED | ONE-LINE EVIDENCE |
+|---|---|---|
+| P1-B | RESOLVED | `workplan.mjs:1389-1403` rejects present-null `entryHash`, `:2314-2320` counts key presence for binding, and `workplan.test.mjs:8804-8875` pins rejection plus byte preservation. |
+| P1-A | ACCEPTED | The frozen definition explicitly documents this fail-closed migration caveat; the live board has zero verifying/blocked cards, while the legacy-prefix path passes at `workplan.test.mjs:8378`. |
+| P2 | ACCEPTED | Append-side transition completeness exceeds the frozen ledger-intact hash/binding boundary and is reasonably deferred to a dedicated follow-up. |
+
+VERDICT: APPROVE

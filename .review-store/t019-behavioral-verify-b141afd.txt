@@ -1,0 +1,998 @@
+
+ Let me look at
+ PATH_RESERVING_STATUSES.
+
+
+ read
+ /private/tmp/meta-harness
+ -t019/scripts/workplan.mj
+ s:553-592
+
+
+ So with
+ retainPaths=false, a
+ blocked card's paths are
+ NOT reserving. Good. Now
+ I need to:
+ 1. Add a SECOND card with
+    overlapping paths
+    (e.g. src/s1).
+ 2. Move it to ready (so
+    it reserves paths).
+ 3. Then resume the first
+    card — should fail
+    because the blocked
+    card's paths overlap
+    with the new ready
+    card's paths.
+
+ Let me first add the
+ second card.
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s6 && node
+ workplan.mjs add
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 9
+ --id
+ TASK-20260724-019-s6b
+ --outcome "Path overlap
+ tester" --paths
+ "src/s1,tests/s2"; echo
+ "exit=$?"
+
+ {"revision":10,"added":tr
+ ue}
+ exit=0
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s6 &&
+ /private/tmp/t019-verify-
+ root/make-definition.sh
+ ./definition-s6b.json
+ "$(pwd)" "main" "$(git
+ rev-parse HEAD)" "$(git
+ rev-parse HEAD)" && node
+ workplan.mjs ready
+ TASK-20260724-019-s6b
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 10
+ --owner
+ "coordinator:$(hostname):
+ coord-1"
+ --definition-json
+ "$PWD/definition-s6b.json
+ "; echo "exit=$?"
+
+ ... (4 earlier lines, ...
+ 8d45449a39955a1db8b825d4f
+ f05404d7f425e010244eb
+ {"revision":11,"ready":tr
+ ue}
+ exit=0
+
+ Took 0.2s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s6 && node -e "
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ console.log(s.cards.map(c
+ => ({id:c.id,
+ status:c.status,
+ paths:c.paths,
+ retainPaths:c.retainPaths
+ })));
+ "
+
+ ... (14 earlier lines,...
+ 'tests/s2' ],
+     retainPaths:
+ undefined
+   }
+ ]
+
+ Took 0.1s
+
+
+ Now I need to update the
+ first card's
+ definition.worktreePath
+ to match (since the
+ resume requires
+ caller-worktree =
+ worktreePath). Wait, the
+ worktreePath is already
+ updated to s6. Let me
+ check.
+
+ Yes, the
+ card.definition.worktreeP
+ ath is
+ /private/tmp/t019-verify-
+ root/s6. Now let me try
+ to resume the first card.
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s6 && node
+ workplan.mjs resume
+ TASK-20260724-019-s1
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 11
+ --owner
+ "claude:$(hostname):sessi
+ on-1"; echo "exit=$?"
+
+ workplan: path src/s1
+ overlaps with path src/s1
+ on card
+ TASK-20260724-019-s6b
+ exit=1
+
+ Took 0.1s
+
+
+ S6 path-overlap
+ fail-closed — resume of
+ TASK-20260724-019-s1
+ failed with path src/s1
+ overlaps with path src/s1
+ on card
+ TASK-20260724-019-s6b,
+ exit=1.
+
+ Now the counterfactual —
+ a fresh copy where no
+ second card claims the
+ path, the resume should
+ succeed.
+
+
+ $ rm -rf
+ /private/tmp/t019-verify-
+ root/s6b && cp -R
+ /private/tmp/t019-verify-
+ root/s1
+ /private/tmp/t019-verify-
+ root/s6b && cd
+ /private/tmp/t019-verify-
+ root/s6b && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const newWT =
+ process.cwd();
+ c.definition.worktreePath
+ = newWT;
+ c.claimSnapshot.worktreeP
+ ath = newWT;
+ const { createHash } =
+ require('crypto');
+ function
+ deepSortKeys(value) {
+   if
+ (Array.isArray(value))
+ return
+ value.map(deepSortKeys);
+   if (value !== null &&
+ typeof value ===
+ 'object') {
+     const sorted =
+ Object.create(null);
+     for (const key of
+ Object.keys(value).sort()
+ ) sorted[key] =
+ deepSortKeys(value[key]);
+     return sorted;
+   }
+   return value;
+ }
+ const dcopy = {
+ ...c.definition };
+ delete
+ dcopy.definitionHash;
+ c.definition.definitionHa
+ sh = 'sha256:' +
+ createHash('sha256').upda
+ te(JSON.stringify(deepSor
+ tKeys(dcopy))).digest('he
+ x');
+ c.claimSnapshot.definitio
+ nHash =
+ c.definition.definitionHa
+ sh;
+ c.integrationReceipt.defi
+ nitionHash =
+ c.definition.definitionHa
+ sh;
+ fs.writeFileSync('.workpl
+ an/state.json',
+ JSON.stringify(s,null,2)
+ + '\n');
+ "
+
+ (no output)
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s6b && node
+ workplan.mjs block
+ TASK-20260724-019-s1
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 8
+ --owner
+ "claude:$(hostname):sessi
+ on-1" --reason
+ "verify-s6-cf"
+ --retain-paths false;
+ echo "block exit=$?" &&
+ node workplan.mjs resume
+ TASK-20260724-019-s1
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 9
+ --owner
+ "claude:$(hostname):sessi
+ on-1"; echo "resume
+ exit=$?" && node -e "
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ const c = s.cards[0];
+ console.log('status=',
+ c.status);
+ "
+
+ ... (2 earlier lines, ...
+ block exit=0
+ {"revision":10,"resumed":
+ true}
+ resume exit=0
+ status= in_progress
+
+ Took 0.2s
+
+
+ S6 PASS — With a second
+ card in ready over the
+ same path, resume fails
+ closed with path src/s1
+ overlaps with path src/s1
+ on card
+ TASK-20260724-019-s6b
+ (exit=1). Counterfactual
+ (no second card claim):
+ block exit=0, resume
+ exit=0, card in_progress.
+
+ ─────────────────────────
+
+ S7 — Legacy tolerance
+ (one 7-field receipt, no
+ chain fields)
+
+
+ $
+ /private/tmp/t019-verify-
+ root/setup-scenario.sh
+ /private/tmp/t019-verify-
+ root/s7
+ TASK-20260724-019-s7
+ "Legacy"
+ "src/s7,tests/s7" && cd
+ /private/tmp/t019-verify-
+ root/s7 &&
+ /private/tmp/t019-verify-
+ root/make-definition.sh
+ ./definition.json
+ "$(pwd)" "main" "$(git
+ rev-parse HEAD)" "$(git
+ rev-parse HEAD)"
+
+ ... (19 earlier lines,...
+ wrote ./definition.json
+ hash
+ sha256:6ae65f5c435f6ffe3d
+ 34e0def68ded7e206c6c667ad
+ 0027626aebe6abf0125d0
+
+ Took 0.2s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node
+ workplan.mjs ready
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 1
+ --owner
+ "coordinator:$(hostname):
+ coord-1"
+ --definition-json
+ "$PWD/definition.json";
+ echo "ready exit=$?"
+
+ {"revision":2,"ready":tru
+ e}
+ ready exit=0
+
+ Took 0.1s
+
+
+ Now I need to strip the
+ new chained receipt so
+ that the ledger has only
+ legacy 7-field records.
+ Then I need to think
+ about claim, start,
+ submit, integrate,
+ accept.
+
+ The legacy receipt would
+ be the ready record.
+ After ready, the card has
+ the chained
+ backlog->ready record. I
+ need to remove the
+ entryHash and
+ prevEntryHash from this
+ record. Then proceed to
+ claim, start, submit,
+ integrate, accept — these
+ should all succeed. The
+ new records (post-claim,
+ post-start, etc.) should
+ be chained, while the
+ legacy record stays
+ untouched byte-for-byte.
+
+ Let me strip the chain
+ fields.
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const r = c.receipts[0];
+ const before =
+ JSON.stringify(r);
+ delete r.entryHash;
+ delete r.prevEntryHash;
+ const after =
+ JSON.stringify(r);
+ console.log('legacy
+ receipt before:',
+ before);
+ console.log('legacy
+ receipt after
+ stripping:', after);
+ fs.writeFileSync('.workpl
+ an/state.json',
+ JSON.stringify(s,null,2)
+ + '\n');
+ "
+
+ ... (15 earlier lines,...
+ eady","actor":"coordinato
+ r:charltons-mbp.home.lan:
+ coord-1","revisionFrom":1
+ ,"revisionTo":2,"at":"202
+ 6-07-24T11:28:55.392Z"}
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && LEGACY=$(node
+ -e "
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ console.log(JSON.stringif
+ y(s.cards[0].receipts[0])
+ );
+ ") && echo "captured
+ legacy bytes: $LEGACY" &&
+ echo "$LEGACY" >
+ /tmp/legacy-s7.before.jso
+ n
+
+ ... (2 earlier lines, ...
+ eady","actor":"coordinato
+ r:charltons-mbp.home.lan:
+ coord-1","revisionFrom":1
+ ,"revisionTo":2,"at":"202
+ 6-07-24T11:28:55.392Z"}
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node
+ workplan.mjs claim
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 2
+ --owner
+ "claude:$(hostname):sessi
+ on-1"; echo "claim
+ exit=$?"
+
+ {"revision":3,"claimed":t
+ rue}
+ claim exit=0
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node
+ workplan.mjs start
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 3
+ --owner
+ "claude:$(hostname):sessi
+ on-1"; echo "start
+ exit=$?"
+
+ {"revision":4,"started":t
+ rue}
+ start exit=0
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && git checkout
+ -b review && git commit
+ --allow-empty -m "review
+ commit" &&
+ REVIEW_HEAD=$(git
+ rev-parse HEAD) && echo
+ "REVIEW_HEAD=$REVIEW_HEAD
+ " && node workplan.mjs
+ submit
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 4
+ --owner
+ "claude:$(hostname):sessi
+ on-1" --expected-head
+ "$REVIEW_HEAD"; echo
+ "submit exit=$?"
+
+ ... (5 earlier lines, ...
+ 04be7e6b8c73001d3ba187e48
+ 9f
+ {"revision":5,"submitted"
+ :true}
+ submit exit=0
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && git checkout
+ main && git merge --no-ff
+ -m "integrate" review &&
+ INTEGRATION_COMMIT=$(git
+ rev-parse HEAD) && echo
+ "INTEGRATION_COMMIT=$INTE
+ GRATION_COMMIT" && node
+ workplan.mjs integrate
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 5
+ --actor
+ "coordinator:$(hostname):
+ coord-1"
+ --integration-commit
+ "$INTEGRATION_COMMIT";
+ echo "integrate exit=$?"
+
+ ... (6 earlier lines, ...
+ b6038404b58d958b2296431f0
+ e8878eeb7
+ {"revision":6,"integrated
+ ":true}
+ integrate exit=0
+
+ Took 0.1s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node -e "
+ const fs = require('fs');
+ const s =
+ JSON.parse(fs.readFileSyn
+ c('.workplan/state.json',
+ 'utf8'));
+ const c = s.cards[0];
+ const acc = {
+   schemaVersion: 1,
+   verdict: 'pass',
+   evaluator:
+ 'coordinator:'+require('o
+ s').hostname()+':eval-1',
+   definitionHash:
+ c.definition.definitionHa
+ sh,
+   integrationCommit:
+ c.integrationReceipt.inte
+ grationCommit,
+   commands:
+ [...c.definition.acceptan
+ ceCommands],
+   evidenceRefs:
+ ['evidence-1']
+ };
+ const { createHash } =
+ require('crypto');
+ function
+ deepSortKeys(value) {
+   if
+ (Array.isArray(value))
+ return
+ value.map(deepSortKeys);
+   if (value !== null &&
+ typeof value ===
+ 'object') {
+     const sorted =
+ Object.create(null);
+     for (const key of
+ Object.keys(value).sort()
+ ) sorted[key] =
+ deepSortKeys(value[key]);
+     return sorted;
+   }
+   return value;
+ }
+ const copy = {...acc};
+ delete copy.receiptHash;
+ acc.receiptHash =
+ 'sha256:' +
+ createHash('sha256').upda
+ te(JSON.stringify(deepSor
+ tKeys(copy))).digest('hex
+ ');
+ fs.writeFileSync('accepta
+ nce.json',
+ JSON.stringify(acc, null,
+ 2) + '\n');
+ " && node workplan.mjs
+ accept
+ TASK-20260724-019-s7
+ --control-root "$PWD"
+ --caller-worktree "$PWD"
+ --expected-revision 6
+ --actor
+ "coordinator:$(hostname):
+ eval-1" --acceptance-json
+ "$PWD/acceptance.json";
+ echo "accept exit=$?"
+
+ {"revision":7,"accepted":
+ true}
+ accept exit=0
+
+ Took 0.2s
+
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node -e "
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ const c = s.cards[0];
+ console.log('status=',
+ c.status);
+ console.log('receipts.len
+ gth=',
+ c.receipts.length);
+ for (const r of
+ c.receipts) {
+   console.log('  ',
+ r.from, '->', r.to,
+ 'entryHash?',
+ !!r.entryHash,
+ 'prevEntryHash?',
+ r.prevEntryHash!==undefin
+ ed);
+ }
+ console.log('legacy
+ receipt (first)
+ byte-equal to
+ /tmp/legacy-s7.before.jso
+ n?');
+ const fs = require('fs');
+ const before =
+ fs.readFileSync('/tmp/leg
+ acy-s7.before.json','utf8
+ ').trim();
+ const after =
+ JSON.stringify(c.receipts
+ [0]);
+ console.log('  before:',
+ before);
+ console.log('  after :',
+ after);
+ console.log('  match :',
+ before === after);
+ "
+
+ ... (34 earlier lines,...
+ r:charltons-mbp.home.lan:
+ coord-1","revisionFrom":1
+ ,"revisionTo":2,"at":"202
+ 6-07-24T11:28:55.392Z"}
+   match : true
+
+ Took 0.1s
+
+
+ Let me also verify the
+ chain linkage: the
+ ready->claimed record's
+ prevEntryHash should
+ equal the
+ computeRecordEntryHash of
+ the legacy record (which
+ uses the canonical form
+ of the legacy record).
+
+
+ $ cd
+ /private/tmp/t019-verify-
+ root/s7 && node -e "
+ const { createHash } =
+ require('crypto');
+ const s =
+ JSON.parse(require('fs').
+ readFileSync('.workplan/s
+ tate.json','utf8'));
+ const r =
+ s.cards[0].receipts;
+ function
+ deepSortKeys(value) {
+   if
+ (Array.isArray(value))
+ return
+ value.map(deepSortKeys);
+   if (value !== null &&
+ typeof value ===
+ 'object') {
+     const sorted =
+ Object.create(null);
+     for (const key of
+ Object.keys(value).sort()
+ ) sorted[key] =
+ deepSortKeys(value[key]);
+     return sorted;
+   }
+   return value;
+ }
+ function
+ computeRecordEntryHash(re
+ c) {
+   const copy = { ...rec
+ };
+   delete copy.entryHash;
+   return 'sha256:' +
+ createHash('sha256').upda
+ te(JSON.stringify(deepSor
+ tKeys(copy))).digest('hex
+ ');
+ }
+ // The legacy record
+ (index 0) has no
+ entryHash, but chained
+ records starting at index
+ 1 anchor their
+ prevEntryHash on it.
+ // The valid chain rule:
+ prevRecord === null ?
+ null :
+ computeRecordEntryHash(pr
+ evRecord)
+ const legacyHash =
+ computeRecordEntryHash(r[
+ 0]);
+ console.log('legacy
+ canonical hash:',
+ legacyHash);
+ console.log('ready->claim
+ ed.prevEntryHash:',
+ r[1].prevEntryHash);
+ console.log('match:',
+ legacyHash ===
+ r[1].prevEntryHash);
+ // Verify subsequent
+ chain
+ let ok = true;
+ for (let i=1; i<r.length;
+ i++) {
+   const expectedPrev =
+ computeRecordEntryHash(r[
+ i-1]);
+   if (r[i].prevEntryHash
+ !== expectedPrev) {
+ console.log('BREAK at',
+ i); ok = false; }
+   const expectedEntry =
+ computeRecordEntryHash(r[
+ i]);
+   if (r[i].entryHash !==
+ expectedEntry) {
+ console.log('ENTRY
+ MISMATCH at', i); ok =
+ false; }
+ }
+ console.log('chain ok:',
+ ok);
+ "
+
+ ... (6 earlier lines, ...
+ sha256:b02c17abc8da920754
+ 5be9eb576e7733312fd594538
+ 8925cf445f51694f8b649
+ match: true
+ chain ok: true
+
+ Took 0.1s
+
+
+ S7 PASS — every
+ transition
+ (ready→claim→start→submit
+ →integrate→accept)
+ succeeded; the legacy
+ 7-field receipt remained
+ byte-for-byte identical
+ ({"from":"backlog","to":"
+ ready","actor":"coordinat
+ or:charltons-mbp.home.lan
+ :coord-1","revisionFrom":
+ 1,"revisionTo":2,"at":"20
+ 26-07-24T11:28:55.392Z"})
+ ; the new records (claim,
+ start, submit, integrate,
+ accept) are chained — the
+ first new record's
+ prevEntryHash equals the
+ canonical hash of the
+ legacy record, and the
+ chain is contiguous
+ through to done.
+
+ ─────────────────────────
+
+ Summary
+
+ ┌───────┬─────┬─────────┐
+ │ Scena │ Res │ Evidenc │
+ │ rio   │ ult │ e       │
+ ├───────┼─────┼─────────┤
+ │ S1    │ PAS │ Genesis │
+ │ Chain │ S   │ prevEnt │
+ │ ed    │     │ ryHash  │
+ │ lifec │     │ null +  │
+ │ ycle  │     │ entryHa │
+ │       │     │ sh;     │
+ │       │     │ chain   │
+ │       │     │ contigu │
+ │       │     │ ous;    │
+ │       │     │ review→ │
+ │       │     │ verifyi │
+ │       │     │ ng      │
+ │       │     │ carries │
+ │       │     │ evidenc │
+ │       │     │ e.integ │
+ │       │     │ rationR │
+ │       │     │ eceiptH │
+ │       │     │ ash.    │
+ ├───────┼─────┼─────────┤
+ │ S2    │ PAS │ Accept  │
+ │ Swap  │ S   │ fails   │
+ │ rejec │     │ with    │
+ │ tion  │     │ integra │
+ │ at    │     │ tionRec │
+ │ accep │     │ eipt    │
+ │ t     │     │ binding │
+ │       │     │ hash    │
+ │       │     │ mismatc │
+ │       │     │ h,      │
+ │       │     │ exit=1; │
+ │       │     │ files   │
+ │       │     │ byte-id │
+ │       │     │ entical │
+ │       │     │ (md5    │
+ │       │     │ 13784db │
+ │       │     │ 1… /    │
+ │       │     │ aa7be19 │
+ │       │     │ 5…).    │
+ ├───────┼─────┼─────────┤
+ │ S3    │ PAS │ Block   │
+ │ Swap  │ S   │ fails   │
+ │ rejec │     │ with    │
+ │ tion  │     │ integra │
+ │ at    │     │ tionRec │
+ │ block │     │ eipt    │
+ │       │     │ binding │
+ │       │     │ hash    │
+ │       │     │ mismatc │
+ │       │     │ h,      │
+ │       │     │ exit=1; │
+ │       │     │ files   │
+ │       │     │ byte-id │
+ │       │     │ entical │
+ │       │     │ (md5    │
+ │       │     │ efbad27 │
+ │       │     │ f… /    │
+ │       │     │ aa7be19 │
+ │       │     │ 5…).    │
+ ├───────┼─────┼─────────┤
+ │ S4    │ PAS │ Accept  │
+ │ Tail- │ S   │ fails   │
+ │ strip │     │ with    │
+ │ rejec │     │ integra │
+ │ tion  │     │ tionRec │
+ │       │     │ eipt    │
+ │       │     │ binding │
+ │       │     │ record  │
+ │       │     │ missing │
+ │       │     │ in      │
+ │       │     │ ledger, │
+ │       │     │ exit=1; │
+ │       │     │ files   │
+ │       │     │ byte-id │
+ │       │     │ entical │
+ │       │     │ (md5    │
+ │       │     │ a205939 │
+ │       │     │ 03… /   │
+ │       │     │ aa7be19 │
+ │       │     │ 5…).    │
+ ├───────┼─────┼─────────┤
+ │ S5    │ PAS │ Block   │
+ │ Block │ S   │ returns │
+ │ /resu │     │ {"revis │
+ │ me    │     │ ion":7, │
+ │ round │     │ "blocke │
+ │ trip  │     │ d":true │
+ │       │     │ },      │
+ │       │     │ blocked │
+ │       │     │ receipt │
+ │       │     │ has 9   │
+ │       │     │ fields  │
+ │       │     │ includi │
+ │       │     │ ng      │
+ │       │     │ entryHa │
+ │       │     │ sh+prev │
+ │       │     │ EntryHa │
+ │       │     │ sh;     │
+ │       │     │ resume  │
+ │       │     │ returns │
+ │       │     │ {"revis │
+ │       │     │ ion":8, │
+ │       │     │ "resume │
+ │       │     │ d":true │
+ │       │     │ }; card │
+ │       │     │ ends    │
+ │       │     │ in_prog │
+ │       │     │ ress.   │
+ ├───────┼─────┼─────────┤
+ │ S6    │ PAS │ Second  │
+ │ retai │ S   │ ready   │
+ │ nPath │     │ card →  │
+ │ s=fal │     │ resume  │
+ │ se    │     │ fails   │
+ │ fail- │     │ with    │
+ │ close │     │ path    │
+ │ d     │     │ src/s1  │
+ │       │     │ overlap │
+ │       │     │ s with  │
+ │       │     │ path    │
+ │       │     │ src/s1  │
+ │       │     │ on card │
+ │       │     │         │
+ │       │     │ TASK-20 │
+ │       │     │ 260724- │
+ │       │     │ 019-s6b │
+ │       │     │         │
+ │       │     │ (exit=1 │
+ │       │     │ ).      │
+ │       │     │ Counter │
+ │       │     │ factual │
+ │       │     │ without │
+ │       │     │ second  │
+ │       │     │ card:   │
+ │       │     │ block+r │
+ │       │     │ esume   │
+ │       │     │ succeed │
+ │       │     │ , card  │
+ │       │     │ in_prog │
+ │       │     │ ress.   │
+ ├───────┼─────┼─────────┤
+ │ S7    │ PAS │ All six │
+ │ Legac │ S   │ transit │
+ │ y     │     │ ions    │
+ │ toler │     │ succeed │
+ │ ance  │     │ ;       │
+ │       │     │ legacy  │
+ │       │     │ 7-field │
+ │       │     │ receipt │
+ │       │     │ byte-fo │
+ │       │     │ r-byte  │
+ │       │     │ identic │
+ │       │     │ al; new │
+ │       │     │ records │
+ │       │     │ chained │
+ │       │     │ off the │
+ │       │     │ legacy  │
+ │       │     │ canonic │
+ │       │     │ al      │
+ │       │     │ hash.   │
+ └───────┴─────┴─────────┘
+
+ RESULT: 7/7 PASS
+
+───────────────────────────
+
+───────────────────────────
+/private/tmp/t019-verify...
+↑285k ↓16k R3.1M CH96.0%...

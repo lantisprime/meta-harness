@@ -1,0 +1,998 @@
+ it, since blockCard+resumeCard post-change would
+ fail... actually would the planned tests catch it?
+ Test (a): integrate, drift, block, resume — the
+ blocked receipt would carry hash fields →
+ validateBlockedReceipt fails → resume test fails.
+ So the implementer's own tests would catch it
+ immediately — but the plan as written omits the
+ fix, so the build would be red until they figure it
+ out. Still P1: plan as written cannot pass its own
+ acceptance tests.)
+
+ Also consider: does the tamper/strip/swap test (c)
+ require rejecting "a stripped chained suffix"?
+ Under prefix rule, stripping the ENTIRE chained
+ suffix back to legacy prefix passes — so "a
+ stripped chained suffix is rejected" is only true
+ for PARTIAL strips (removing some but leaving later
+ chained records → prevEntryHash mismatch...
+ actually stripping a middle record breaks the
+ successor's prevEntryHash ✓; stripping the tail
+ back to a chained prefix: remaining records valid,
+ nothing detects absence — the ledger just ends
+ earlier. Is tail-stripping detectable? For a
+ verifying card, removing the review→verifying
+ record removes the binding → check skipped. Test
+ (c) claims "a stripped chained suffix ... is
+ rejected fail-closed" — as analyzed, full-suffix
+ strip to legacy prefix is NOT rejected. If the test
+ strips to a chained prefix (e.g., remove last
+ record where earlier chained records remain), the
+ validator sees a valid chain → NOT rejected either!
+ Hmm: chain validation verifies integrity of present
+ records, not completeness. Stripping the suffix
+ leaves a valid shorter chain → passes. UNLESS
+ combined with transition-specific expectations
+ (e.g., resume requires tail.to === "blocked"). So
+ test (c)'s "stripped chained suffix is rejected" is
+ only enforceable via transition-specific tail
+ checks, not the chain validator. For accept: a
+ verifying card whose review→verifying record is
+ stripped → binding check skipped → NOT rejected
+ (unless reviewFreeze correlation catches the
+ swap... if only stripping, no swap — accept
+ proceeds with the intact integrationReceipt
+ snapshot! So stripping the binding record
+ neutralizes the new protection silently). This is a
+ real design gap: the binding check's "when present"
+ clause means stripping the binding record disables
+ it. For NEW cards (post-change integrate), the
+ ledger SHOULD contain a chained review→verifying
+ record; its absence is itself anomalous and
+ detectable: if card.status === "verifying" and the
+ ledger has chained records but no to:"verifying"
+ record with integrationReceiptHash → fail closed.
+ The plan's "when the latest record carries that
+ field" phrasing suggests skip-when-absent — a
+ strip-and-bypass hole for cards integrated after
+ the change. Concrete: integrate a card post-change
+ (binding record written), tamperer deletes that one
+ ledger record (suffix strip of length 1), swaps
+ integrationReceipt → validateIntegrationReceipt
+ finds earlier records... the latest to:"verifying"
+ record is gone → check skipped → swap passes
+ revision bound → accepted. The chain validator sees
+ a valid chain (prefix) → passes. So the plan MUST
+ require: for cards whose integrate happened after
+ this change (detectable how? e.g., if ANY chained
+ record exists, or if card is verifying and
+ reviewFreeze exists... tricky for legacy) the
+ binding record MUST be present. Distinguishing
+ legacy-verifying from new-verifying: a new
+ verifying card's ledger would contain chained
+ records; a legacy verifying card's ledger is fully
+ unchained. Rule: if the ledger contains any chained
+ record and card is verifying, a chained
+ to:"verifying" record with integrationReceiptHash
+ must exist, else fail. The plan doesn't specify
+ this. This is a solid P1/P2 — I'd say P1-adjacent;
+ it undermines the card's core claim ("swapped
+ integrationReceipt is rejected") via a one-record
+ deletion, which is the same class of tamper
+ (hand-edit state.json) the acceptance demo uses.
+ I'll rate P1? The brief defines P0/P1 = plan as
+ written would build the wrong thing. The plan as
+ written builds a binding that a single-record
+ deletion bypasses, while its nextCheckpoint claims
+ "a swapped or replayed integrationReceipt ... is
+ rejected fail-closed at accept, block, and resume".
+ The claim fails under suffix strip — and test (c)
+ explicitly claims "a stripped chained suffix ... is
+ rejected fail-closed", which the specified
+ validator CANNOT deliver for tail strips. So the
+ plan's own test spec is undeliverable as written →
+ P1. Hmm, but the implementer could interpret
+ "stripped chained suffix" as middle-strip. The
+ budget says "a stripped chained suffix" — suffix
+ explicitly. A stripped suffix (tail) leaves a valid
+ chain → not rejected. So test (c) as specified
+ fails. P1.
+
+ Wait, let me double check: could the chain
+ validator reject tail strips via the revision
+ sequence? Records carry revisionFrom/revisionTo;
+ the board revision is monotonic; a verifying card's
+ integrationReceipt.revisionTo = R. The ledger tail
+ for a verifying card should be review→verifying
+ with revisionTo == integrationReceipt.revisionTo.
+ Cross-checks COULD detect it, but the plan doesn't
+ specify such checks. As written: not detected. ✓ P1
+ stands: binding-check presence requirement
+ unspecified; tail-strip neutralizes the binding;
+ test (c) undeliverable as specified.
+
+ Similarly "swapped card.integrationReceipt whose
+ revisionTo passes the > bound is rejected" — only
+ if binding record present. Covered by same finding.
+
+ Let me also double check the claim "blocked-receipt
+ checks :2340-2407" in stopCondition vs the needed
+ fix — adding two optional fields to expectedFields.
+ Also note evidence strict check: blocked receipt
+ evidence must be exactly {reason, retainPaths}
+ (:2391-2398) — the new hash fields are top-level,
+ not evidence, so fine.
+
+ Also finding: resume calls
+ validateIntegrationReceipt(card,
+ latestReceipt.revisionFrom) (:2571) — the binding
+ check inside validateIntegrationReceipt would then
+ also run on resume ✓ consistent with nextCheckpoint
+ ("rejected at accept, block, and resume").
+
+ One more completeness item: claim/claimNext —
+ claimNext (:1407) also appends receipts presumably
+ via appendReceipt. Fine.
+
+ Also: the plan says chain validator called from
+ "the transition validators that already read the
+ ledger (accept, block, resume)". Does accept read
+ the ledger? accept calls validateIntegrationReceipt
+ which currently does NOT read card.receipts (it
+ reads card.integrationReceipt). The binding check
+ adds ledger reading. OK, loose phrasing.
+
+ What about ready (:2702)
+ validatePathExclusivity(state) — no chain
+ validation needed; ready appends genesis record. If
+ ready is rerouted through appendReceipt (my finding
+ 2 option), chaining applies naturally.
+
+ Now also double-check there's no other exact-field
+ receipt validator I missed: grep "has incorrect
+ fields" — validateAcceptance,
+ validateIntegrationReceipt, validateBlockedReceipt,
+ validateClaimSnapshot maybe. validateClaimSnapshot
+ validates card.claimSnapshot — does appendReceipt
+ change claimSnapshot? No. But wait — claim stores
+ claimSnapshot and a receipt; does resume/block
+ validate claimSnapshot exact fields?
+ validateTransitionCardBasics (:1611) — check what
+ it does. Let me quickly read :1611-1640 to be safe
+ about field strictness on claimSnapshot (new fields
+ aren't added there, so irrelevant). Skip.
+
+ Actually one more: test "ready appends transition
+ receipt with expected fields" (:1730) — asserts
+ exact receipt shape for ready. If the implementer
+ routes ready through appendReceipt and adds hash
+ fields, this existing test would need updating
+ (allowed — test file is reserved). But if they
+ DON'T touch ready, the test stays green. Worth a P3
+ note: existing tests asserting exact receipt field
+ sets (e.g., :1730, :5950-6176 block tests asserting
+ lastReceipt.evidence etc., "claim stores immutable
+ snapshot and transition receipt" :2339) will need
+ updating for the new top-level fields — the plan's
+ test section doesn't mention updating existing
+ assertions. Do existing tests assert exact key sets
+ of receipts? :1730 "expected fields" — likely
+ asserts deepEqual of the receipt object → would
+ fail when... no wait, ready bypasses appendReceipt
+ so its record stays unchanged → test stays green.
+ Block tests assert lastReceipt.evidence.retainPaths
+ (specific fields, not exact set) → stay green even
+ with new top-level fields. Claim test :2339 — check
+ if it deepEquals the receipt. Possibly. If it does
+ exact-match the receipt object, adding entryHash
+ breaks it. Let me check quickly.
+
+ Two more targeted checks: whether existing tests
+ assert exact receipt shapes (which new hash fields
+ would break), and validateTransitionCardBasics.
+
+
+ read
+ ~/Developer/projects/meta-harness/scripts/workplan.
+ test.mjs:2339-2393
+
+
+
+ read
+ ~/Developer/projects/meta-harness/scripts/workplan.
+ mjs:1611-1642
+
+
+ The claim test asserts field-by-field (assert.equal
+ on specific fields), not exact deepEqual of the
+ whole receipt — likely tolerant of added top-level
+ fields. The "ready appends transition receipt with
+ expected fields" test (:1730) — ready bypasses
+ appendReceipt so unchanged. I won't chase further;
+ I'll note as P3 that existing receipt-shape
+ assertions should be audited, but the ones I
+ sampled are field-specific, not exact-set.
+
+ I have enough. Also one small thing to verify for
+ finding 1: is validateBlockedReceipt called
+ anywhere besides resume :2565? grep it quickly... I
+ recall only :2340 def and :2565 call. Let me
+ confirm with a grep to be rigorous, plus confirm
+ validateClaimSnapshot doesn't enforce receipt
+ fields (irrelevant). Quick grep.
+
+
+ grep /validateBlockedReceipt|appendReceipt\(/ in
+ ~/Developer/projects/meta-harness/scripts/workplan.
+ mjs
+
+ workplan.mjs:1292: function appendReceipt(
+ workplan.mjs:1359:     appendReceipt(
+ workplan.mjs:1456:       appendReceipt(
+ workplan.mjs:1788:     appendReceipt(
+ workplan.mjs:1875:     appendReceipt(
+ workplan.mjs:1989:     appendReceipt(
+ workplan.mjs:2186:   // validateBlockedReceipt
+ already applies.
+ workplan.mjs:2294:     appendReceipt(
+ workplan.mjs:2340: function
+ validateBlockedReceipt(receipt, card,
+ expectedRevision) {
+ workplan.mjs:2476:     appendReceipt(
+ workplan.mjs:2565:
+ validateBlockedReceipt(latestReceipt, card,
+ expectedRevision);
+ workplan.mjs:2585:     appendReceipt(
+
+
+ Confirmed: appendReceipt called from claim (:1359),
+ claimNext (:1456), start (:1788), submit (:1875),
+ integrate (:1989), accept (:2294), block (:2476),
+ resume (:2585). validateBlockedReceipt called only
+ at resume :2565. ready bypasses appendReceipt
+ (:2705-2713).
+
+ Note: the grep for appendReceipt line numbers of
+ the callsites shifts my earlier line counts
+ slightly? No — I read actual content at those
+ lines; appendReceipt call in accept at :2294 (I
+ estimated 2294 from counting; ✓ consistent). Block
+ appendReceipt :2476 ✓ consistent with my count
+ (2476-2483ish). Resume appendReceipt :2585 ✓.
+
+ All evidence gathered. Compose the review.
+
+ Findings summary:
+
+ P1-1: validateBlockedReceipt exact field-count
+ check (:2350-2357) + resume call (:2561-2565) — any
+ card blocked after the change gets a blocked ledger
+ record with prevEntryHash/entryHash (9 keys vs 7
+ expected) → resume fails "blocked receipt has
+ incorrect fields" → every newly blocked card is
+ un-resumable. Budget omits threading new fields
+ through validateBlockedReceipt; stopCondition's "no
+ weakening of blocked-receipt checks :2340-2407"
+ conflicts. Fix: plan must add work item — admit the
+ two optional hash fields in validateBlockedReceipt
+ (presence-optional so legacy 7-field receipts still
+ pass).
+
+ P1-2: Tail-strip neutralizes the binding; test (c)
+ "stripped chained suffix is rejected" undeliverable
+ as specified. Chain validator verifies integrity of
+ present records, not completeness; prefix rule
+ passes fully-legacy ledgers. Tamperer deletes the
+ review→verifying binding record (one-record suffix
+ strip) → validateIntegrationReceipt finds no record
+ carrying integrationReceiptHash → check skipped per
+ "when present" → swapped integrationReceipt passes
+ the > bound → accept succeeds. Also every card's
+ ledger begins with an unhashed genesis record (see
+ P2-1), so "strip back to legacy prefix" always
+ exists. Fix: fail closed when card is verifying and
+ ANY chained record exists but no chained
+ to:"verifying" record with the binding field is
+ present; redefine test (c) strip case accordingly
+ (middle-strip detectable via prevEntryHash;
+ tail-strip detectable only via mandatory-presence
+ rule).
+
+ P2-1: ready bypasses appendReceipt (:2705-2713).
+ Plan premise "written only by appendReceipt" false.
+ Genesis record never chained; "prevEntryHash null
+ for first record" spec never fires; plan must
+ either route ready through appendReceipt or specify
+ validator tolerance of an unhashed genesis record
+ explicitly (it does via prefix rule, but the budget
+ text is factually wrong and silent on genesis
+ handling).
+
+ P2-2: Threat-model boundary incoherence:
+ evaluatorAuthority requires demonstrating a
+ hand-tampered state.json swap is rejected, while
+ work item (4) scopes the invariant to "absent
+ direct state.json tampering", and the chain is
+ keyless (recomputable). Plan must state the precise
+ boundary: detects ledger-intact tamper
+ (single-field swap, middle-strip, field edits
+ without recompute); does not detect wholesale
+ ledger rewrite/recompute or (absent P1-2 fix) tail
+ strips. Comment parenthetical should say "absent
+ tampering with the receipts ledger", not "absent
+ direct state.json tampering".
+
+ P2-3: Chain-validator placement in block: cited
+ site :2468 sits inside if (card.status ===
+ "verifying") (:2467-2469) — placing it there
+ validates only verifying-blocks; blocks from
+ claimed/in_progress/review skip it (detection
+ deferred to resume). Also
+ claim/start/submit/integrate append without
+ validating first — defensible (non-recompute tamper
+ stays detectable at accept/block/resume because the
+ tampered record's entryHash won't recompute), but
+ the plan must state this rationale explicitly.
+
+ P3-1: stopCondition line range wrong:
+ validateAcceptance is :2048-2111, not :2076-2122
+ (cited range covers INTEGRATION_RECEIPT_FIELDS
+ :2113-2122 and validateIntegrationReceipt's head).
+ reviewFreeze correlation is :2151-2159, cited
+ :2151-2158.
+
+ P3-2: brief/board fact: live board has 17 cards (16
+ done + 1 backlog, TASK-20260724-019 at
+ state.json:3468-3470), revision 131 ✓; bootstrap
+ card TASK-20260714-001 has no receipts array
+ (state.json:7-18) — chain validator must treat
+ missing receipts as empty legacy ledger (plan's
+ "fully legacy passes" covers it; appendReceipt
+ :1301 handles undefined). No operational break
+ expected: sync (:932-947) and renderWorkplan don't
+ read receipts; no Python reader of card.receipts
+ (gateway maintains its own SQLite chain,
+ gateway.py:279-312).
+
+ P3-3: Acceptance commands: command 3 (full pytest)
+ subsumes command 2 (gateway file) — redundant but
+ harmless; worktree and .venv exist (ls
+ /private/tmp/meta-harness-t019). No acceptance
+ command covers the mandated disposable-root
+ behavioral demo (it's in evaluatorAuthority prose;
+ transcript-based, consistent with t021 precedent) —
+ advisory only.
+
+ P3-4: budget intro enumerates "three deferred P3s"
+ but lists GLM P3-1/P3-A, codex P3, GLM P3-C while
+ item (a) also cites GLM P3-B — four sources;
+ wording nit, coverage confirmed complete (P3-2 from
+ 84734f8 was already applied in the 249a826 fix
+ round, correctly excluded).
+
+ Also resolved probes (narrative): canonicalization
+ sound (deepSortKeys :1075-1087 handles arrays,
+ null-proto; JSON round-trip stable; entryHash
+ includes prevEntryHash so links bind); no
+ laundering for non-recomputing tamperers (tampered
+ record's entryHash won't recompute even after later
+ appends re-anchor prevEntryHash); retainPaths
+ semantics in plan item (b) verified correct (block
+ doesn't clear paths :2471-2474; isPathReserving
+ :568-572; exclusivity fail at :2579 → :1236-1238
+ message; resume re-reserves on success :2596); line
+ claims otherwise accurate (appendReceipt :1292-1314
+ ✓, snapshot :1979-1988 ✓, ledger append :1989-2001
+ ✓, computeAcceptanceReceiptHash :2040-2046 ✓,
+ validateIntegrationReceipt :2124-2193 ✓, comment
+ :2174-2182 ✓, bound :2187-2189 ✓, accept :2248 ✓,
+ block :2468 ✓, resume :2565-2571 ✓, :2579 ✓,
+ validateState :605-651 ✓, test
+ builders/reachVerifying/blockCard/resumeCard/drift-
+ test claims ✓).
+
+ Verdict: REVISE (two P1s).
+
+ Write it up with the mandatory table and VERDICT
+ line.
+
+ All evidence gathered. Every line reference below
+ was read personally in the files cited.
+
+ ───────────────────────────────────────────────────
+
+ Adversarial Plan Review — TASK-20260724-019 /
+ META-28 (pre-qualification)
+
+ What I verified as accurate (so the findings below
+ carry their weight)
+
+ - appendReceipt is exactly :1292-1314;
+   card.integrationReceipt snapshot :1979-1988;
+   integrate's ledger append :1989-2001;
+   computeAcceptanceReceiptHash :2040-2046;
+   validateIntegrationReceipt :2124-2193; revision
+   bound :2187-2189; invariant comment paragraph
+   :2174-2182; accept's validateIntegrationReceipt
+   call :2248; block's :2468; resume's
+   ledger-reading block :2561-2571 and
+   validateClaimPathExclusivity :2579; validateState
+    :605-651; isPathReserving :568-572. Test-side
+   claims (builders :33-81, reachVerifying :349,
+   blockCard :383, resumeCard :413, drift test
+   "block from verifying succeeds when an unrelated
+   card advanced the board" :5592-5637) all check
+   out.
+ - Canonicalization (probe 2): sound. deepSortKeys
+   (:1075-1087) recurses arrays and builds
+   null-prototype sorted objects; stored receipts
+   are plain JSON values (strings, integer
+   revisions, ISO at, nested evidence), so
+   sha256-of-canonicalized-record is stable across
+   load/save cycles. entryHash excluding only itself
+   means prevEntryHash is inside the hashed payload
+   — links bind.
+ - Laundering via re-anchoring (probe 3): closed for
+   non-recomputing tamperers. Even if a later
+   legitimate append anchors prevEntryHash over a
+   tampered predecessor, the tampered record's own
+   stored entryHash no longer matches recomputation,
+   so the break stays detectable. The scheme is
+   keyless, so a tamperer who recomputes the suffix
+   wins trivially — that must be scoped, see F4.
+ - retainPaths semantics (probe 6): the plan is
+   right. block never clears card.paths
+   (:2471-2474); isPathReserving excludes
+   blocked+retainPaths===false (:568-572), so a peer
+   can reserve the path; resume then fails at :2579
+   with "path X overlaps with path Y on card Z"
+   (:1236-1238) when taken and re-reserves on
+   success (:2596). The taken-direction resume test
+   is genuinely missing today (:6183 pins release,
+   :6557 pins free-resume only).
+ - Live board (probe 4): revision 131, all receipts
+   un-chained, no blocked/verifying cards in flight.
+   sync (:932-947) runs only
+   validateState+renderWorkplan; the projection
+   never reads receipts; no Python code reads
+   card.receipts (the gateway keeps its own SQLite
+   chain, gateway.py:279-312). Legacy tolerance
+   design is viable — with two caveats below.
+ - Source P3 coverage (probe 7): GLM-84734f8 P3-1 →
+   work items (1)+(2); codex P3 + GLM P3-B → test
+   (a); retainPaths=false → test (b); GLM P3-C →
+   work item (4). GLM-84734f8 P3-2 was already
+   applied in the 249a826 fix round, correctly
+   excluded.
+
+ Findings
+
+ ┌──────┬──────────────┬─────────────┬─────────────┐
+ │ SEVE │ LOCATION     │ FINDING     │ CONCRETE    │
+ │ RITY │              │             │ FAILURE     │
+ │      │              │             │ CASE        │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P1   │ .agents/t019 │ Chained     │ Post-change │
+ │      │ -definition. │ blocked     │ : block a   │
+ │      │ json budget  │ receipts    │ card from   │
+ │      │ items        │ make every  │ verifying   │
+ │      │ (1)+(3) vs   │ newly       │ (blocked    │
+ │      │ scripts/work │ blocked     │ ledger      │
+ │      │ plan.mjs:235 │ card        │ record now  │
+ │      │ 0-2357       │ un-resumabl │ has 9 keys) │
+ │      │ (exact       │ e, and the  │ → resume    │
+ │      │ field-count  │ budget      │ reaches     │
+ │      │ check in     │ never       │ :2565 →     │
+ │      │ validateBloc │ mentions    │ fail("block │
+ │      │ kedReceipt), │ it.         │ ed receipt  │
+ │      │ called at    │ validateBlo │ has         │
+ │      │ :2561-2565   │ ckedReceipt │ incorrect   │
+ │      │              │  enforces   │ fields") →  │
+ │      │              │ keys.length │ the card is │
+ │      │              │ !==         │ permanently │
+ │      │              │ expectedFie │ stuck in    │
+ │      │              │ lds.length  │ blocked,    │
+ │      │              │ over        │ holding or  │
+ │      │              │ exactly 7   │ having      │
+ │      │              │ fields      │ released    │
+ │      │              │ (from,to,ac │ its paths,  │
+ │      │              │ tor,revisio │ un-resumabl │
+ │      │              │ nFrom,revis │ e and       │
+ │      │              │ ionTo,at,ev │ un-acceptab │
+ │      │              │ idence).    │ le. The     │
+ │      │              │ Work item   │ plan's own  │
+ │      │              │ (1) adds    │ tests (a)   │
+ │      │              │ prevEntryHa │ and (b)     │
+ │      │              │ sh/entryHas │ (block-then │
+ │      │              │ h to every  │ -resume)    │
+ │      │              │ record      │ would go    │
+ │      │              │ appendRecei │ red         │
+ │      │              │ pt writes — │ immediately │
+ │      │              │ including   │ . Fix: add  │
+ │      │              │ block's     │ an explicit │
+ │      │              │ (:2476).    │ work item   │
+ │      │              │ The         │ threading   │
+ │      │              │ budget's    │ the two     │
+ │      │              │ four work   │ optional    │
+ │      │              │ items never │ hash fields │
+ │      │              │ touch       │ through     │
+ │      │              │ validateBlo │ validateBlo │
+ │      │              │ ckedReceipt │ ckedReceipt │
+ │      │              │ , and the   │             │
+ │      │              │ stopConditi │ (presence-o │
+ │      │              │ on even     │ ptional, so │
+ │      │              │ freezes     │ legacy      │
+ │      │              │ "blocked-re │ 7-field     │
+ │      │              │ ceipt       │ blocked     │
+ │      │              │ checks      │ receipts    │
+ │      │              │ :2340-2407" │ still       │
+ │      │              │ .           │ pass), and  │
+ │      │              │             │ note in the │
+ │      │              │             │ stopConditi │
+ │      │              │             │ on that     │
+ │      │              │             │ admitting   │
+ │      │              │             │ optional    │
+ │      │              │             │ fields is   │
+ │      │              │             │ not a       │
+ │      │              │             │ weakening.  │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P1   │ budget work  │ A           │ Hand-edit   │
+ │      │ item (2)     │ one-record  │ state.json  │
+ │      │ "when the    │ tail strip  │ on a        │
+ │      │ latest       │ silently    │ post-change │
+ │      │ to:"verifyin │ disables    │ verifying   │
+ │      │ g" ledger    │ the         │ card:       │
+ │      │ record       │ binding;    │ delete the  │
+ │      │ carries that │ the chain   │ single      │
+ │      │ field" +     │ validator   │ review→veri │
+ │      │ test (c) "a  │ as          │ fying       │
+ │      │ stripped     │ specified   │ ledger      │
+ │      │ chained      │ cannot      │ record,     │
+ │      │ suffix … is  │ reject      │ swap        │
+ │      │ rejected     │ suffix      │ card.integr │
+ │      │ fail-closed" │ strips, so  │ ationReceip │
+ │      │ vs           │ test (c) is │ t for a     │
+ │      │ scripts/work │             │ replayed    │
+ │      │ plan.mjs:256 │ undeliverab │ one whose   │
+ │      │ 1-2565,      │ le as       │ revisionTo  │
+ │      │ :2124-2193   │ written.    │ passes the  │
+ │      │              │ The         │ > bound     │
+ │      │              │ validator   │ (:2187).    │
+ │      │              │ checks      │ Chain       │
+ │      │              │ integrity   │ validator:  │
+ │      │              │ of present  │ passes      │
+ │      │              │ records,    │ (valid      │
+ │      │              │ not         │ prefix).    │
+ │      │              │ completenes │ Binding     │
+ │      │              │ s: deleting │ check:      │
+ │      │              │ the         │ skipped (no │
+ │      │              │ review→veri │ field       │
+ │      │              │ fying       │ present).   │
+ │      │              │ binding     │ reviewFreez │
+ │      │              │ record      │ e           │
+ │      │              │ leaves a    │ correlation │
+ │      │              │ valid       │ : passes if │
+ │      │              │ shorter     │ the replay  │
+ │      │              │ chain (and  │ is from the │
+ │      │              │ a           │ same freeze │
+ │      │              │ fully-legac │ cycle.      │
+ │      │              │ y-looking   │ accept at   │
+ │      │              │ ledger      │ :2248       │
+ │      │              │ passes by   │ accepts the │
+ │      │              │ the prefix  │ swapped     │
+ │      │              │ rule). With │ receipt —   │
+ │      │              │ the binding │ the exact   │
+ │      │              │ record      │ attack this │
+ │      │              │ gone,       │ card claims │
+ │      │              │ validateInt │ to detect   │
+ │      │              │ egrationRec │ (nextCheckp │
+ │      │              │ eipt finds  │ oint:       │
+ │      │              │ no record   │ "rejected   │
+ │      │              │ carrying    │ fail-closed │
+ │      │              │ integration │ at accept,  │
+ │      │              │ ReceiptHash │ block, and  │
+ │      │              │  and skips  │ resume").   │
+ │      │              │ the check   │ Fix: fail   │
+ │      │              │ per the     │ closed when │
+ │      │              │ "when       │ the card is │
+ │      │              │ present"    │ verifying   │
+ │      │              │ clause.     │ and its     │
+ │      │              │             │ ledger      │
+ │      │              │             │ contains    │
+ │      │              │             │ any chained │
+ │      │              │             │ record but  │
+ │      │              │             │ no chained  │
+ │      │              │             │ to:"verifyi │
+ │      │              │             │ ng" record  │
+ │      │              │             │ with the    │
+ │      │              │             │ binding     │
+ │      │              │             │ field;      │
+ │      │              │             │ respecify   │
+ │      │              │             │ test (c)'s  │
+ │      │              │             │ strip case  │
+ │      │              │             │ (middle-str │
+ │      │              │             │ ip →        │
+ │      │              │             │ prevEntryHa │
+ │      │              │             │ sh          │
+ │      │              │             │ mismatch;   │
+ │      │              │             │ tail-strip  │
+ │      │              │             │ →           │
+ │      │              │             │ mandatory-p │
+ │      │              │             │ resence     │
+ │      │              │             │ rule).      │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P2   │ budget       │ ready       │ Implementer │
+ │      │ premise      │ bypasses    │ chains only │
+ │      │ "written     │ appendRecei │ appendRecei │
+ │      │ only by      │ pt and      │ pt (as the  │
+ │      │ appendReceip │ inlines its │ budget      │
+ │      │ t" vs        │ own         │ literally   │
+ │      │ scripts/work │ card.receip │ says):      │
+ │      │ plan.mjs:270 │ ts.push —   │ every       │
+ │      │ 5-2713       │ the plan's  │ future      │
+ │      │              │ foundationa │ ledger is   │
+ │      │              │ l premise   │ genesis-unh │
+ │      │              │ is          │ ashed +     │
+ │      │              │ factually   │ chained     │
+ │      │              │ false.      │ suffix.     │
+ │      │              │ appendRecei │ This        │
+ │      │              │ pt callers  │ happens to  │
+ │      │              │ are claim   │ pass the    │
+ │      │              │ :1359,      │ prefix      │
+ │      │              │ claim-next  │ rule, so    │
+ │      │              │ :1456,      │ nothing     │
+ │      │              │ start       │ breaks —    │
+ │      │              │ :1788,      │ but the     │
+ │      │              │ submit      │ frozen card │
+ │      │              │ :1875,      │ misdescribe │
+ │      │              │ integrate   │ s the code  │
+ │      │              │ :1989,      │ it          │
+ │      │              │ accept      │ modifies,   │
+ │      │              │ :2294,      │ and nobody  │
+ │      │              │ block       │ decides     │
+ │      │              │ :2476,      │ deliberatel │
+ │      │              │ resume      │ y whether   │
+ │      │              │ :2585 — but │ genesis     │
+ │      │              │ the         │ records     │
+ │      │              │ backlog→rea │ should be   │
+ │      │              │ dy genesis  │ chained     │
+ │      │              │ record is   │ (route      │
+ │      │              │ pushed      │ ready       │
+ │      │              │ inline at   │ through     │
+ │      │              │ :2705-2713. │ appendRecei │
+ │      │              │ Consequence │ pt,         │
+ │      │              │ : every     │ one-line    │
+ │      │              │ card's      │ change at   │
+ │      │              │ genesis     │ :2705-2713) │
+ │      │              │ record      │ or          │
+ │      │              │ stays       │ documented  │
+ │      │              │ unhashed    │ as          │
+ │      │              │ forever,    │ permanently │
+ │      │              │ and the     │ unhashed.   │
+ │      │              │ spec'd      │ Undecided   │
+ │      │              │ "prevEntryH │ design      │
+ │      │              │ ash … or    │ questions   │
+ │      │              │ null for a  │ land in     │
+ │      │              │ card's      │ review,     │
+ │      │              │ first       │ where they  │
+ │      │              │ record"     │ don't       │
+ │      │              │ case never  │ belong.     │
+ │      │              │ occurs in   │             │
+ │      │              │ practice.   │             │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P2   │ budget item  │ The         │ A reviewer  │
+ │      │ (4) +        │ threat-mode │ or          │
+ │      │ evaluatorAut │ l boundary  │ implementin │
+ │      │ hority       │ is          │ g seat can  │
+ │      │ "hand-tamper │ incoherent  │ read the    │
+ │      │ ed           │ as written. │ card either │
+ │      │ state.json … │  Work item  │ way: (i)    │
+ │      │ is rejected" │ (4) scopes  │ "state.json │
+ │      │ vs           │ the         │ tamper is   │
+ │      │ .review-stor │ invariant   │ out of      │
+ │      │ e/wpfix-glm- │ to "absent  │ scope" →    │
+ │      │ gate-review- │ direct      │ the         │
+ │      │ 249a826.txt: │ state.json  │ acceptance  │
+ │      │ 50,60 (P3-A  │ tampering," │ demo is     │
+ │      │ co-tamper    │ yet the     │ meaningless │
+ │      │ residual)    │ evaluatorAu │ ; or (ii)   │
+ │      │              │ thority     │ "swap       │
+ │      │              │ mandates    │ detection   │
+ │      │              │ demonstrati │ is the      │
+ │      │              │ ng that a   │ deliverable │
+ │      │              │ hand-tamper │ " → then    │
+ │      │              │ ed          │ suffix-stri │
+ │      │              │ state.json  │ p (F2) and  │
+ │      │              │ swap is     │ full-ledger │
+ │      │              │ rejected,   │ -recompute  │
+ │      │              │ and the     │ are         │
+ │      │              │ chain is    │ unexplained │
+ │      │              │ keyless     │ holes in    │
+ │      │              │ (sha256     │ the         │
+ │      │              │ over public │ deliverable │
+ │      │              │ canonicaliz │ . Fix:      │
+ │      │              │ ation,      │ state the   │
+ │      │              │ :2040-2046  │ boundary    │
+ │      │              │ pattern) —  │ precisely — │
+ │      │              │ any         │ detects     │
+ │      │              │ state.json  │ ledger-inta │
+ │      │              │ writer can  │ ct          │
+ │      │              │ recompute   │ tampering   │
+ │      │              │ it. The     │ (single-fie │
+ │      │              │ plan never  │ ld          │
+ │      │              │ states      │ swap/replay │
+ │      │              │ which       │ ,           │
+ │      │              │ tampers are │ middle-stri │
+ │      │              │ in scope.   │ p,          │
+ │      │              │             │ non-recompu │
+ │      │              │             │ te edits);  │
+ │      │              │             │ does not    │
+ │      │              │             │ defend      │
+ │      │              │             │ wholesale   │
+ │      │              │             │ ledger      │
+ │      │              │             │ rewrite,    │
+ │      │              │             │ recompute,  │
+ │      │              │             │ or          │
+ │      │              │             │ co-tamper   │
+ │      │              │             │ of          │
+ │      │              │             │ reviewFreez │
+ │      │              │             │ e+receipt   │
+ │      │              │             │ (the t018   │
+ │      │              │             │ P3-A        │
+ │      │              │             │ residual) — │
+ │      │              │             │ and word    │
+ │      │              │             │ the         │
+ │      │              │             │ :2174-2182  │
+ │      │              │             │ parenthetic │
+ │      │              │             │ al "absent  │
+ │      │              │             │ tampering   │
+ │      │              │             │ with the    │
+ │      │              │             │ receipts    │
+ │      │              │             │ ledger,"    │
+ │      │              │             │ not "absent │
+ │      │              │             │ direct      │
+ │      │              │             │ state.json  │
+ │      │              │             │ tampering." │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P2   │ budget item  │ The cited   │ A card with │
+ │      │ (3) "block   │ block       │ a broken    │
+ │      │ :2468" vs    │ call-site   │ chain       │
+ │      │ scripts/work │ sits inside │ (non-recomp │
+ │      │ plan.mjs:246 │ if          │ ute tamper) │
+ │      │ 7-2469       │ (card.statu │ sails       │
+ │      │              │ s ===       │ through     │
+ │      │              │ "verifying" │ claim→start │
+ │      │              │ ). Placing  │ →submit and │
+ │      │              │ the chain   │ only fails  │
+ │      │              │ validator   │ at          │
+ │      │              │ exactly at  │ accept/bloc │
+ │      │              │ :2468       │ k-from-veri │
+ │      │              │ validates   │ fying/resum │
+ │      │              │ the chain   │ e —         │
+ │      │              │ only for    │ detection   │
+ │      │              │ verifying-b │ still       │
+ │      │              │ locks;      │ precedes    │
+ │      │              │ blocks from │ done, so    │
+ │      │              │ claimed/in_ │ this is     │
+ │      │              │ progress/re │ defensible, │
+ │      │              │ view (the   │ but the     │
+ │      │              │ majority)   │ plan is     │
+ │      │              │ would skip  │ silent on   │
+ │      │              │ it,         │ placement   │
+ │      │              │ deferring   │ (inside the │
+ │      │              │ detection   │ verifying   │
+ │      │              │ to resume.  │ branch vs.  │
+ │      │              │ Similarly,  │ before it)  │
+ │      │              │ claim/start │ and on the  │
+ │      │              │ /submit/int │ rationale   │
+ │      │              │ egrate      │ for         │
+ │      │              │ (:1359,     │ excluding   │
+ │      │              │ :1788,      │ the four    │
+ │      │              │ :1875,      │ other       │
+ │      │              │ :1989)      │ append      │
+ │      │              │ append      │ sites. Fix: │
+ │      │              │ without any │ specify     │
+ │      │              │ prior chain │ placement   │
+ │      │              │ validation. │ in block    │
+ │      │              │             │ (recommend  │
+ │      │              │             │ alongside   │
+ │      │              │             │ validateTra │
+ │      │              │             │ nsitionCard │
+ │      │              │             │ Basics at   │
+ │      │              │             │ :2460,      │
+ │      │              │             │ covering    │
+ │      │              │             │ all blocks) │
+ │      │              │             │ and one     │
+ │      │              │             │ sentence    │
+ │      │              │             │ justifying  │
+ │      │              │             │ why         │
+ │      │              │             │ append-side │
+ │      │              │             │ commands    │
+ │      │              │             │ need no     │
+ │      │              │             │ pre-validat │
+ │      │              │             │ ion         │
+ │      │              │             │ (tampered   │
+ │      │              │             │ records     │
+ │      │              │             │ fail        │
+ │      │              │             │ recomputati │
+ │      │              │             │ on          │
+ │      │              │             │ regardless  │
+ │      │              │             │ of later    │
+ │      │              │             │ re-anchorin │
+ │      │              │             │ g).         │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P3   │ stopConditio │ Wrong line  │ A pedantic  │
+ │      │ n            │ range in a  │ dispute     │
+ │      │ "validateAcc │ freeze      │ about       │
+ │      │ eptance      │ guard.      │ whether the │
+ │      │ :2076-2122"  │ validateAcc │ freeze      │
+ │      │ vs           │ eptance     │ guard       │
+ │      │ scripts/work │ spans       │ forbids     │
+ │      │ plan.mjs:204 │ :2048-2111; │ touching    │
+ │      │ 8-2111       │ the cited   │ :2113-2122  │
+ │      │              │ :2076-2122  │ (it         │
+ │      │              │ actually    │ shouldn't — │
+ │      │              │ covers      │ that        │
+ │      │              │ INTEGRATION │ constant is │
+ │      │              │ _RECEIPT_FI │ untouched   │
+ │      │              │ ELDS        │ by the      │
+ │      │              │ (:2113-2122 │ plan).      │
+ │      │              │ ) and the   │ Function    │
+ │      │              │ head of     │ names make  │
+ │      │              │ validateInt │ intent      │
+ │      │              │ egrationRec │ recoverable │
+ │      │              │ eipt — the  │ ; fix the   │
+ │      │              │ same wrong  │ locators    │
+ │      │              │ range       │ before      │
+ │      │              │ propagated  │ freezing.   │
+ │      │              │ from        │             │
+ │      │              │ .review-sto │             │
+ │      │              │ re/wpfix-gl │             │
+ │      │              │ m-gate-revi │             │
+ │      │              │ ew-249a826. │             │
+ │      │              │ txt:45.     │             │
+ │      │              │ Also        │             │
+ │      │              │ "reviewFree │             │
+ │      │              │ ze          │             │
+ │      │              │ correlation │             │
+ │      │              │ :2151-2158" │             │
+ │      │              │ actually    │             │
+ │      │              │ spans       │             │
+ │      │              │ :2151-2159. │             │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P3   │ review brief │ The live    │ No          │
+ │      │ "16 cards,   │ board has   │ operational │
+ │      │ all done     │ 17 cards:   │ impact —    │
+ │      │ except two   │ 16 done +   │ the plan's  │
+ │      │ backlog" vs  │ exactly one │ "fully      │
+ │      │ .workplan/st │ backlog     │ legacy      │
+ │      │ ate.json:346 │ (TASK-20260 │ ledger      │
+ │      │ 8-3470 and   │ 724-019     │ passes" and │
+ │      │ enumeration  │ itself,     │ appendRecei │
+ │      │              │ :3468-3470) │ pt's        │
+ │      │              │ . Also the  │ (card.recei │
+ │      │              │ bootstrap   │ pts || [])  │
+ │      │              │ card        │ (:1301)     │
+ │      │              │ TASK-202607 │ both        │
+ │      │              │ 14-001 has  │ tolerate    │
+ │      │              │ no receipts │ missing/emp │
+ │      │              │  array at   │ ty receipts │
+ │      │              │ all         │ — but the   │
+ │      │              │ (:7-18).    │ chain       │
+ │      │              │             │ validator   │
+ │      │              │             │ must        │
+ │      │              │             │ explicitly  │
+ │      │              │             │ treat a     │
+ │      │              │             │ missing     │
+ │      │              │             │ receipts    │
+ │      │              │             │ array as an │
+ │      │              │             │ empty       │
+ │      │              │             │ legacy      │
+ │      │              │             │ ledger, and │
+ │      │              │             │ the board   │
+ │      │              │             │ description │
+ │      │              │             │ should be   │
+ │      │              │             │ corrected   │
+ │      │              │             │ in whatever │
+ │      │              │             │ document    │
+ │      │              │             │ quoted it.  │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P3   │ .agents/t019 │ Command 3   │ Wasted CI   │
+ │      │ -definition. │ (full       │ minutes     │
+ │      │ json         │ pytest)     │ only;       │
+ │      │ acceptanceCo │ subsumes    │ advisory.   │
+ │      │ mmands       │ command 2   │             │
+ │      │              │ (the        │             │
+ │      │              │ gateway     │             │
+ │      │              │ file) —     │             │
+ │      │              │ redundant.  │             │
+ │      │              │ The         │             │
+ │      │              │ mandated    │             │
+ │      │              │ disposable- │             │
+ │      │              │ root        │             │
+ │      │              │ behavioral  │             │
+ │      │              │ demo        │             │
+ │      │              │ (evaluatorA │             │
+ │      │              │ uthority)   │             │
+ │      │              │ has no      │             │
+ │      │              │ acceptance  │             │
+ │      │              │ command;    │             │
+ │      │              │ it's        │             │
+ │      │              │ transcript- │             │
+ │      │              │ based,      │             │
+ │      │              │ consistent  │             │
+ │      │              │ with the    │             │
+ │      │              │ t021        │             │
+ │      │              │ precedent   │             │
+ │      │              │ (.review-st │             │
+ │      │              │ ore/t021-be │             │
+ │      │              │ havioral-ve │             │
+ │      │              │ rify-a64a17 │             │
+ │      │              │ 6.txt).     │             │
+ │      │              │ Worktree    │             │
+ │      │              │ /private/tm │             │
+ │      │              │ p/meta-harn │             │
+ │      │              │ ess-t019    │             │
+ │      │              │ and its     │             │
+ │      │              │ .venv exist │             │
+ │      │              │ (verified   │             │
+ │      │              │ by          │             │
+ │      │              │ directory   │             │
+ │      │              │ listing),   │             │
+ │      │              │ so all four │             │
+ │      │              │ commands    │             │
+ │      │              │ are         │             │
+ │      │              │ runnable as │             │
+ │      │              │ written.    │             │
+ ├──────┼──────────────┼─────────────┼─────────────┤
+ │ P3   │ budget intro │ The intro   │ Confusion   │
+ │      │ "the three   │ enumerates  │ for the     │
+ │      │ deferred P3s │ three       │ coordinator │
+ │      │ … GLM        │ sources but │ reconciling │
+ │      │ P3-1/P3-A,   │ item (a)    │ disposition │
+ │      │ codex P3,    │ cites a     │ s against   │
+ │      │ GLM P3-C" vs │ fourth (GLM │ the t018    │
+ │      │ budget test  │ P3-B,       │ panel; fix  │
+ │      │ item (a)     │ .review-sto │ the         │
+ │      │ "GLM P3-B /  │ re/wpfix-gl │ enumeration │
+ │      │ codex P3"    │ m-gate-revi │ .           │
+ │      │              │ ew-249a826. │             │
+ │      │              │ txt:62).    │             │
+ │      │              │ Coverage is │             │
+ │      │              │ complete —  │             │
+ │      │              │ this is a   │             │
+ │      │              │ bookkeeping │             │
+ │      │              │ nit in the  │             │
+ │      │              │ traceabilit │             │
+ │      │              │ y sentence, │             │
+ │      │              │ not a scope │             │
+ │      │              │ gap.        │             │
+ └──────┴──────────────┴─────────────┴─────────────┘
+
+ Notes on probes that resolved clean
+
+ - Line accuracy (probe 1): apart from the P3
+   locator errors above, every file:line claim in
+   the budget is exact — unusually disciplined.
+ - Legacy board operability (probe 4): with the
+   chain validator kept out of validateState,
+   sync/projection/all transitions on the current
+   board are unaffected; done cards' legacy ledgers
+   are never re-validated on any live path (only
+   accept/block/resume read ledgers, and no live
+   card is in those states).
+ - Design core: hash-chaining + snapshot binding +
+   prefix-rule legacy tolerance + fail-closed
+   placement before mutation is a sound, minimal
+   architecture for the stated goal. The two P1s are
+   both about underspecified edges (field-set
+   strictness, binding-record presence), not about
+   the core approach.
+
+ VERDICT: REVISE
+
+─────────────────────────────────────────────────────
+
+─────────────────────────────────────────────────────
+~/Developer/projects/meta-harness (main)
+↑62k ↓28k R495k CH99.3% $0.757 6.2%/1.0M (auto)  k3 •

@@ -1,0 +1,40 @@
+  8443	  assert.equal(acceptResult.code, 0, acceptResult.stderr);
+  8444	
+  8445	  const finalState = JSON.parse(
+  8446	    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  8447	  );
+  8448	  const finalCard = finalState.cards[0];
+  8449	  assert.equal(finalCard.status, "done");
+  8450	  // The new done record is the last chained entry; its prevEntryHash must
+  8451	  // anchor to the verifying record that precedes it.
+  8452	  const acceptReceipt = finalCard.receipts.at(-1);
+  8453	  assert.equal(acceptReceipt.to, "done");
+  8454	  assert.equal(
+  8455	    acceptReceipt.prevEntryHash,
+  8456	    receiptChainHash(finalCard.receipts[finalCard.receipts.length - 2]),
+  8457	  );
+  8458	
+  8459	  await assert.rejects(stat(join(root, ".workplan", "lock")), {
+  8460	    code: "ENOENT",
+  8461	  });
+  8462	});
+  8463	
+  8464	test("multi-cycle reachVerifying -> block -> resume -> submit -> integrate accepts against the LAST verifying record", async (context) => {
+  8465	  const { root, parent } = await repository(
+
+2026-07-24T11:25:13.438377Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `supports_reasoning_summaries` at line 88 column 5
+codex
+| SEVERITY (P0/P1/P2/P3) | FILE:LINE | ONE-LINE FINDING | CONCRETE FAILURE CASE |
+|---|---|---|---|
+| P1 | scripts/workplan.mjs:2291; scripts/workplan.mjs:2315; scripts/workplan.mjs:2724 | Any later chained receipt retroactively requires a binding hash on a legacy verifying anchor, stranding a valid mixed ledger. | Upgrade a legacy `verifying` card, run `block` to append its first chained receipt, then `resume`; the legacy verifying receipt lacks `integrationReceiptHash`, so the card remains permanently blocked. |
+| P1 | scripts/workplan.mjs:1371; scripts/workplan.mjs:2296 | `entryHash:null` is treated as legacy by both validators, permitting chain and snapshot-binding downgrade without hash recomputation. | Set every receipt’s `entryHash` to null, replace `integrationReceipt.integrationCommit` with `reviewHead`, and provide matching acceptance JSON; binding is skipped, the chain passes as legacy, and ancestry accepts the review head itself. |
+| P2 | scripts/workplan.mjs:1340; scripts/workplan.mjs:1867 | Append-side transitions do not validate the existing ledger or status-to-tail continuity, so a stripped tail is permanently re-anchored. | Remove `ready→claimed` from a claimed card and run `start`; the new `claimed→in_progress` receipt anchors to `backlog→ready`, and all later chain validation passes despite the missing transition. |
+VERDICT: REQUEST CHANGES
+tokens used
+162,145
+| SEVERITY (P0/P1/P2/P3) | FILE:LINE | ONE-LINE FINDING | CONCRETE FAILURE CASE |
+|---|---|---|---|
+| P1 | scripts/workplan.mjs:2291; scripts/workplan.mjs:2315; scripts/workplan.mjs:2724 | Any later chained receipt retroactively requires a binding hash on a legacy verifying anchor, stranding a valid mixed ledger. | Upgrade a legacy `verifying` card, run `block` to append its first chained receipt, then `resume`; the legacy verifying receipt lacks `integrationReceiptHash`, so the card remains permanently blocked. |
+| P1 | scripts/workplan.mjs:1371; scripts/workplan.mjs:2296 | `entryHash:null` is treated as legacy by both validators, permitting chain and snapshot-binding downgrade without hash recomputation. | Set every receipt’s `entryHash` to null, replace `integrationReceipt.integrationCommit` with `reviewHead`, and provide matching acceptance JSON; binding is skipped, the chain passes as legacy, and ancestry accepts the review head itself. |
+| P2 | scripts/workplan.mjs:1340; scripts/workplan.mjs:1867 | Append-side transitions do not validate the existing ledger or status-to-tail continuity, so a stripped tail is permanently re-anchored. | Remove `ready→claimed` from a claimed card and run `start`; the new `claimed→in_progress` receipt anchors to `backlog→ready`, and all later chain validation passes despite the missing transition. |
+VERDICT: REQUEST CHANGES
