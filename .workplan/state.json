@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 119,
+  "revision": 120,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3546,6 +3546,24 @@
           "revisionTo": 119,
           "at": "2026-07-24T05:29:53.961Z"
         }
+      ]
+    },
+    {
+      "id": "TASK-20260724-021",
+      "title": "Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs",
+        "development/remote_workplan/gateway.py",
+        "tests/development/test_remote_workplan_gateway.py",
+        "AGENTS.md"
+      ],
+      "priority": 4,
+      "trace": "User decision 2026-07-24: generic pi namespace (not per-provider). The control root hard-codes claimable owner namespaces to codex|claude: the claim owner regex (workplan.mjs:192), the allowedOwnerNamespaces whitelist (workplan.mjs:1177,1183), and the remote gateway set {codex,claude,dev-orchestrator} (development/remote_workplan/gateway.py:235). A pi seat can execute the claim CLI but can only present a false codex/claude identity, which the append-only ledger honesty rules forbid. Add pi to all three enforcement points plus regression tests, and add a pi lane label to AGENTS.md:38. Provider identity stays visible via the session segment of pi:<host>:<session> naming convention. Cards already Ready keep their frozen namespaces (t020 remains claude-only).",
+      "next": [
+        "coordinator qualifies to Ready"
       ]
     }
   ]
