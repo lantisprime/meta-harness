@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 137,
+  "revision": 138,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -4156,6 +4156,18 @@
         "revisionTo": 131,
         "at": "2026-07-24T08:03:02.108Z"
       }
+    },
+    {
+      "id": "TASK-20260724-022",
+      "title": "Enforce ledger transition-completeness so an append-side tail-strip cannot be re-anchored: before appending, each transition validates that the ledger tail's 'to' status matches the card's current status (legacy-tolerant), closing the codex P2 residual from TASK-20260724-019 where deleting a trailing receipt and running the next legitimate transition permanently re-anchors the chain over the gap.",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "priority": 3,
+      "trace": "Deferred codex P2 from the TASK-20260724-019 panel (.review-store/t019-codex-review-b141afd.txt): remove ready->claimed from a claimed card, run start; the new record anchors to backlog->ready and all later chain validation passes despite the missing transition. Interacts with hand-written legacy fixtures and the gateway; needs its own design pass (status-vs-tail continuity, legacy scoping)."
     }
   ]
 }

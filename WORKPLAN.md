@@ -2,10 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 137
+Revision: 138
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
+| TASK-20260724-022 | Enforce ledger transition-completeness so an append-side tail-strip cannot be re-anchored: before appending, each transition validates that the ledger tail's 'to' status matches the card's current status (legacy-tolerant), closing the codex P2 residual from TASK-20260724-019 where deleting a trailing receipt and running the next legitimate transition permanently re-anchors the chain over the gap. | backlog | workplan:add | `scripts/workplan.mjs`; `scripts/workplan.test.mjs` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
 | TASK-20260714-003 | Red-team the frozen context contracts with disjoint invalid-input, authority, determinism, and memory-skill fixtures | done | claude:charltons-mbp.home.lan:meta5-20260715 |  |
