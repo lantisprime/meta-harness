@@ -1,3 +1,48 @@
+# Session Handoff — meta-harness (2026-07-24, session 53: META-29 accepted and done at board 125; closeout PR #66 open)
+
+## State in one line
+
+META-29 / `TASK-20260724-020` is **`done`** at board revision **125**, all
+reserved paths released; closeout **PR #66** is open with CI green — merging
+it is the only outstanding action for this card.
+
+## What happened
+
+- Ran the four frozen acceptance commands at integration commit `c550bb45` in
+  the card worktree venv: **32 passed; 339 passed/1 skipped; 1768 passed/
+  4 skipped/2 xfailed; diff --check clean** — exactly the expected figures.
+- Wrote `.workplan/t020-acceptance.json` (receiptHash `sha256:22c4176c…c43`).
+  Per the user's "use multiagent" instruction, an independent Sonnet auditor
+  seat verified the receipt **10/10** (recomputed definitionHash + receiptHash
+  canonicalization, artifact shasums, live rerun of commands [0]/[3], accept
+  preconditions) before accept ran. Note: the definition's *raw-file* sha256
+  is `f261923b…`; the canonical hash (`canonicalizeDefinition`) is the frozen
+  `eebf9edf…` — don't confuse the two.
+- `workplan accept` 124 → **125**, committed immediately (`b3fdaa0`), then
+  archived the three review artifacts (`369a6c6`).
+- **Linear META-29**: GitHub merge automation had already moved it to Done at
+  06:14 UTC (skipping Verifying, before acceptance — same pattern as META-18).
+  Left it Done and posted the closing evidence comment (gate 2 + behavioral +
+  acceptance + deferred P3s) rather than flip states.
+- **PR #66** (card/t020-qualify → main): board 118 → 125 records, review
+  artifacts, definition, handoff. Control-root records only. CI run
+  30072449036 **pass**. Not merged — operator's decision.
+
+## Next steps
+
+1. **Merge PR #66** (nothing depends on it; ledger already correct locally).
+2. Coordinator qualifies a backlog card: `TASK-20260724-019` (receipt
+   hash-chaining P3s) or `TASK-20260724-021` / META-30 (generic pi owner
+   namespace) — they share workplan.mjs paths, only one can be Ready.
+3. Deferred P3s worth a future card (also in META-29's closing comment):
+   dedicated escape kind for dunder/`__builtins__` refusals;
+   RecursionError/MemoryError from ast.parse still unjournalled.
+4. 8 unmerged agent/* branches still await a human decision (session-50 list).
+5. Optional cleanup: worktree `/private/tmp/meta-harness-t020` (detached at
+   `c550bb4`, card done) is deletable.
+
+---
+
 # Session Handoff — meta-harness (2026-07-24, session 52: META-29 merged and integrated at board 124; acceptance NOT run — that is the next action)
 
 ## State in one line
