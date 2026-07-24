@@ -2,11 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 132
+Revision: 134
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
-| TASK-20260724-019 | Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap | ready |  | `scripts/workplan.mjs`; `scripts/workplan.test.mjs` |
+| TASK-20260724-019 | Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap | in_progress | claude:charltons-mbp.home.lan:t019-build-20260724 | `scripts/workplan.mjs`; `scripts/workplan.test.mjs` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
 | TASK-20260714-003 | Red-team the frozen context contracts with disjoint invalid-input, authority, determinism, and memory-skill fixtures | done | claude:charltons-mbp.home.lan:meta5-20260715 |  |
