@@ -1,0 +1,90 @@
+I now have complete evidence to render a verdict. Here is my independent review.
+
+---
+
+# Second-Opinion Review — Pi / GLM-5.2 (frozen diff)
+
+**Base:** `b75a092` · **Head:** `84734f8` · **Surface:** `scripts/workplan.mjs` (+ `scripts/workplan.test.mjs`)
+**Scope:** atomic Kanban control root; `validateIntegrationReceipt` predicate `!==` → `>`.
+
+## Verdict: **APPROVE**
+
+The central safety argument **HOLDS**. The fix is the correct minimal repair, it also repairs a second latent strand on the `block`/`resume` paths, and it weakens none of the arbitration/fencing/path/actor/append-only guarantees (it in fact repairs path-reservation correctness, which was itself broken by the bug). Findings below are all P3 (non-blocking).
+
+---
+
+## Assessment of the central safety argument (it holds)
+
+The author's claim reduces to: *while a card is in `verifying`, `card.integrationReceipt` is necessarily the fresh receipt written by the `integrate` that put it there, so no stale/foreign receipt can be present; therefore the only residual forgery signal is a receipt claiming a revision the board has not reached, which `>` still rejects.*
+
+I verified each link of that chain by exhaustive grep, not by trusting the comment.
+
+**1. Only `integrate` enters `verifying` and it always writes a fresh receipt together with that transition.**
+- `card.status = "verifying"` is assigned at exactly ONE site: `scripts/workplan.mjs:2002`, inside `integrate`, immediately after `card.integrationReceipt = {...}` at `scripts/workplan.mjs:1979-1987`, where `revisionFrom: expectedRevision, revisionTo: expectedRevision + 1` and `expectedRevision` was just validated to equal the live board revision (`scripts/workplan.mjs:1933`). So at entry to `verifying`, `revisionTo` equals the board revision *immediately after* that integrate.
+- An exhaustive grep of the whole file (`"verifying"`) shows no other writer — no object-literal `"status": "verifying"` in any production bootstrap/recovery/sync path, and no command re-enters `verifying` except `integrate`. `card.integrationReceipt` is assigned at exactly `scripts/workplan.mjs:1979`; it is never `delete`d anywhere.
+
+**2. The exits from `verifying` are exactly `accept` and `block`, both gated on the status, and neither touches the receipt while the card stays in `verifying`.**
+- `accept` requires `card.status !== "verifying"` → fail (`scripts/workplan.mjs:2232-2233`); it mutates the receipt only by writing a *new* `acceptanceReceipt` after full validation (`scripts/workplan.mjs:2262-...`).
+- `block` requires `BLOCKABLE_STATUSES` to include the status (`scripts/workplan.mjs:2328`) and, for `verifying`, calls `validateIntegrationReceipt(card, expectedRevision)` (`scripts/workplan.mjs:2457-2458`) *before* mutating — it sets `blockedFrom` and preserves `integrationReceipt`/`reviewFreeze` unchanged. So while a card sits in `verifying`, nothing rewrites its `integrationReceipt`; the field is exactly what `integrate` wrote.
+
+Because revisions are monotonic (`state.revision += 1` only, e.g. `scripts/workplan.mjs:2004`), the receipt's `revisionTo` (= post-integrate board rev) is `<=` the current board revision forever after. Under `===` any drift stranded the card; under `>` a legitimate receipt never trips the guard while a receipt claiming a not-yet-reached revision still fails closed (`scripts/workplan.mjs:2178-2179`). The argument is sound.
+
+**3. The `block`/`resume` round trip does not open a stale-receipt hole (Q2/Q3).**
+- Pre-fix, the equality check *also* stranded a verifying card on the `block` and `resume` paths whenever the board drifted between integrate and block (or between block and resume). The new third test pins this: `scripts/workplan.test.mjs:5145-5175` ("block from verifying succeeds when an unrelated card advanced the board"). So the diff is internally consistent across all three call sites (`accept` `:2238`, `block` `:2457`, `resume` `:2561`).
+- `resume` from a verifying-blocked card sets `card.status = "in_progress"` (`scripts/workplan.mjs:2585`) and deletes `blockedFrom`/`blockReason`/`retainPaths` (`scripts/workplan.mjs:2586-2588`) but **does not** delete the (now-stale) `integrationReceipt` or `reviewFreeze`. This is safe **only because** the only way back into `verifying` is `integrate`, which (a) requires `status === "review"` (`scripts/workplan.mjs:1937`) and (b) unconditionally overwrites `integrationReceipt` (`scripts/workplan.mjs:1979`) from the `reviewFreeze` that `submit` just rewrote (`scripts/workplan.mjs:1868`, the sole writer of `reviewFreeze`). Hence a card can never be in `verifying` carrying a receipt written in an earlier review cycle — there is no "stale receipt in verifying" window.
+- Q3 (replay a prior-cycle acceptance/receipt after `block→resume→submit→integrate`): the final `integrate` overwrites the field with the fresh commit, and `accept` cross-checks `acceptance.integrationCommit === card.integrationReceipt.integrationCommit` (`scripts/workplan.mjs:2083`) plus git existence and ancestry (`scripts/workplan.mjs:2240-2258`). A replayed old acceptance references the prior commit and is rejected; a replayed old *receipt* can only be present via direct `state.json` tampering (outside the predicate's trust boundary — see P3-1).
+- `resume`'s choice of bound — `validateIntegrationReceipt(card, latestReceipt.revisionFrom)` (`scripts/workplan.mjs:2561`) where `latestReceipt` is the verified blocked receipt (`scripts/workplan.mjs:2550-2554`) — is *stricter* than the live board revision (block-time rev ≤ live rev) and preserves a meaningful ordering invariant (integrate-rev ≤ block-rev). The relaxation does not weaken this; it merely stops failing the legitimate `Rint ≤ Rblock` case.
+
+**4. Nothing else depends on `revisionTo === current revision` (Q4).**
+- `renderWorkplan`/projection read only `id/title/status/owner/paths` (`scripts/workplan.mjs:635-662`); they never read `integrationReceipt`.
+- The append-only `card.receipts` ledger is **not** hash-chained — `appendReceipt` (`scripts/workplan.mjs:1292-1313`) pushes plain records with no `prevHash`/anchor — so `card.integrationReceipt` is a standalone snapshot field, and the only structural checks on it are inside `validateIntegrationReceipt` itself (`scripts/workplan.mjs:2124-2181`). No sync/projection/chain validation consumed the equality.
+- `validateState` (`scripts/workplan.mjs:605-642`) does not cross-check a `verifying` card against the presence or freshness of `integrationReceipt`; it never did. That is unchanged by this diff.
+
+**5. The `validateBlockedReceipt` analogy is genuine, not misleading.** `validateBlockedReceipt` already used `receipt.revisionTo > expectedRevision` (`scripts/workplan.mjs:2374-2376`) on a ledger entry created by `block` with `revisionTo = board_rev_after_block`. The semantics are identical: "the receipt must not claim a revision the board has not reached." Pre-fix, `validateIntegrationReceipt` was the lone `===` outlier and was strictly wrong (it stranded exactly the cards it was supposed to be protecting). The diff brings the two predicates into consistency.
+
+**6. No control-root guarantee is weakened; path-reservation correctness is *improved*.** Single-winner claim arbitration (`applyClaimLock` etc., separate code), path exclusivity (`validatePathExclusivity` in `validateState`), fencing (`reviewFreeze` + receipt correlation), and actor separation (`receipt.actor !== card.owner` `scripts/workplan.mjs:2143`; `acceptance.evaluator === actor` and `!== owner` `scripts/workplan.mjs:2073-2079`) are all untouched by the diff. Crucially, pre-fix a drifted verifying card could neither `accept` *nor* `block` (block runs the same check at `:2458`) — so it held its reserved paths forever. `add` as an "unrelated transition" is faithful: it touches no other card's status/receipt and only does `state.revision += 1` (`scripts/workplan.mjs:1023`).
+
+---
+
+## Findings
+
+### P3-1 — Residual exposure is a pre-existing, out-of-trust-bound limitation, not a regression (defense-in-depth note)
+- **Evidence:** `appendReceipt` creates un-chained records (`scripts/workplan.mjs:1292-1313`); `card.integrationReceipt` is a standalone field written only at `:1979` and never `delete`d; `validateState` does not bind a `verifying` card to a present/fresh receipt (`scripts/workplan.mjs:605-642`); the lone structural staleness backstop is the `reviewFreeze` correlation (`scripts/workplan.mjs:2152-2158`).
+- **Scenario:** An attacker with write access to `.workplan/state.json` swaps `card.integrationReceipt` for an older receipt whose `revisionTo` is in the past. Under `===` this was rejected *only when board revisions happened to differ* (incidental, unreliable); under `>` it is accepted by the revision check and survives only if it also matches the current `reviewFreeze` (same `branch`/`head`/`definitionHash`) AND a matching older `acceptance.json` is supplied AND `gitCommitExists`/`gitIsAncestor` still hold for the old integration commit. The most plausible realization is a no-op re-review cycle (same worktree HEAD re-submitted via `submit` at `:1868`, so `reviewFreeze.head` is unchanged) producing an *old* integration commit that is still an ancestor of the unchanged head.
+- **Why P3, not P0/P1:** Realizing this requires direct `state.json` mutation — outside the trust boundary the predicate was ever meant to enforce — and the charter's defense against that is meant to be the append-only ledger + controlled state-file access, not a revision equality. The diff neither creates this exposure nor materially widens it in any operationally reachable path (normal operation can never leave a stale receipt in `verifying`, per links 1–4 above). Recommend as future hardening: hash-chain `integrationReceipt` into `card.receipts` and/or require worktree-HEAD advancement on `submit`, so a swapped receipt or no-op re-review is detectable independent of the revision bound.
+- **Disposition suggestion:** DEFER (charter-scoped hardening, separate card).
+
+### P3-2 — The negative test is adequate but narrowly scoped to the new guard
+- **Evidence:** The ahead-of-board test tampers only `revisionFrom/revisionTo` to `40/41` and asserts the `ahead of expectedRevision` message and byte preservation (`scripts/workplan.test.mjs:5038-5129`). It correctly pins the *retained* upper-bound guard. It does **not** pin the complementary property the relaxation implicitly leans on — that a *past-revision* receipt with a **foreign** `reviewHead` is still rejected by the unchanged correlation checks (`scripts/workplan.mjs:2152-2158`) after the relaxation.
+- **Scenario/gap:** A future maintainer might "simplify" away a correlation check believing the revision bound covers staleness; a regression test asserting `accept`/`resume` reject a past-`revisionTo` receipt whose `reviewHead` does not match the current `reviewFreeze` would document the intended division of labor (revision-bound = anti-forgery-ahead; correlation = anti-stale/foreign). Existing tests cover branch/head/definitionHash mismatches generally, so coverage is not absent — just not co-located with this behavioral change.
+- **Disposition suggestion:** ACCEPT-WITH-MOD (optional, low-cost follow-up test; not a blocker).
+
+### P3-3 — Comment wording conflates the snapshot field with the ledger's latest entry
+- **Evidence:** `scripts/workplan.mjs:2174` — *"while the card is verifying its latest receipt is necessarily this integration receipt."* `card.integrationReceipt` (the snapshot field) and `card.receipts.at(-1)` (the append-only ledger's last entry, which at `verifying` is the `review→verifying` transition record appended at `scripts/workplan.mjs:1992`) are different objects. In `verifying` they are not equal; the ledger entry carries `from/to/actor/revisionFrom/revisionTo` only, whereas `integrationReceipt` additionally carries `reviewBranch/reviewHead/integrationCommit/definitionHash`.
+- **Scenario:** A future reader could infer the field is the ledger's tail and reason (wrongly) that append-only-ness protects it, or could "optimize" by making `integrate` write the field from the ledger tail and break the correlation invariants. Reword to: *"while a card is `verifying`, its `integrationReceipt` field is necessarily the one written by the `integrate` that set that status (the only writer), so its `revisionTo` cannot exceed the board's monotonic current revision."*
+- **Disposition suggestion:** ACCEPT (comment-only clarification).
+
+---
+
+## Test-evidence plausibility
+
+I was unable to execute `node --test` here (destructive commands were blocked in this session), so I verified by static inspection instead:
+
+- The three new tests are **end-to-end**: each spawns the real `cli` via `run()` (`scripts/workplan.test.mjs:86-101`) and drives full state transitions through `add`/`ready`/`claim`/`start`/`submit`/`integrate`/`accept`/`block` (`reachVerifying` at `:345-376`, `blockCard` at `:379-...`, `writeAcceptance` at `:428-...`). They do **not** mock `validateIntegrationReceipt`, so they exercise the real predicate through the real CLI and lock/atomic-write path.
+- Revisions in the "succeeds after drift" tests are consistent with the per-step increments (`ready`→1, `claim`→2, `start`→3, `submit`→4, `integrate`→5⇒6, `add`⇒7, `accept`⇒8), matching the assertions `revision 7` / `revision 8` (`scripts/workplan.test.mjs:4997,5017`) and `integrationReceipt.revisionTo === 6` (`scripts/workplan.test.mjs:5011`).
+- The two "succeeds" tests would deterministically **fail** under the prior `!==` predicate (receipt `revisionTo=6` vs `expectedRevision=7`, and block at `expectedRevision=7`), explaining the 117→120 delta and corroborating the author's claim that they flipped pass/fail across the predicate change.
+- The negative test asserts fail-closed semantics — unchanged `WORKPLAN.md` bytes, unchanged `state.json` bytes, and `ENOENT` on the `lock` file (`scripts/workplan.test.mjs:5153-5162`) — which corresponds to all validation preceding any mutation in `accept` (`validateIntegrationReceipt` at `:2238` runs before `card.status = "done"` at `:2264`). Plausible as stated.
+
+The reported `120 passed / 0 failed` and `pytest 1837 passed, 2 xfailed` are consistent with "+3 tests, no behavior change outside the relaxation." I could not re-run them, but nothing in the diff or surrounding code contradicts the claim.
+
+---
+
+## Summary
+
+- **Central safety argument:** HOLDS (verified by exhaustive writer grep, not by comment).
+- **Defect fixed correctly:** yes; the same fix also repairs the symmetric strand on `block`/`resume`.
+- **Single-winner claim / path reservation / fencing / actor separation / append-only:** not weakened — path-reservation correctness is strengthened (stranded verifying cards can finally release their paths).
+- **Blocking findings (P0/P1):** none.
+- **Non-blocking findings:** P3-1 (deferred hardening, not a regression), P3-2 (optional complementary negative test), P3-3 (comment wording).
+
+**Verdict: APPROVE.** No P0/P1 blocks integration. Recommend addressing P3-3 (comment) now and P3-2 (test) as a cheap follow-up; P3-1 belongs to a separate charter-scoped hardening card.

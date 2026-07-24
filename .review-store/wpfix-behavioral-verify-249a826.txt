@@ -1,0 +1,69 @@
+Independent behavioural verification -- TASK-20260724-018
+Seat: Claude Sonnet 5 subagent, isolated scratch control roots under
+      /private/tmp/behav-verify-wpfix/{prefix,fixed}
+Subject: validateIntegrationReceipt revision predicate
+Frozen head: 249a8263ccd9508eb9b7fa73962be510d90d00dc
+Base: b75a0926512a889c2b09dd0be9b7165c48439177
+
+METHOD
+Real `git init` control roots bootstrapped from scratch at revision 0 and driven
+end to end through add -> ready -> claim -> start -> submit -> integrate using the
+real CLI. The repository's own test suite was deliberately NOT used as evidence.
+Two script variants compared: the fixed workplan.mjs, and a copy with the single
+predicate reverted to `!==`. Diff between the variants confirmed to be exactly
+that one predicate.
+
+RESULTS -- 6 of 6 PASS
+
+Q1 PRE-FIX  accept stranded card A after unrelated `add` bumped the board
+            PASS -- fails as claimed
+            workplan: integrationReceipt revision does not match expectedRevision
+            exit code: 1
+
+Q2 PRE-FIX  block the same stranded card A
+            PASS -- also fails; reserved path never released
+            workplan: integrationReceipt revision does not match expectedRevision
+            exit code: 1
+            state: { "status": "verifying", "paths": ["src/a"], "revision": 7 }
+
+Q3 FIXED    accept stranded card A
+            PASS -- {"revision":8,"accepted":true}, exit 0
+            state: { "status": "done", "paths": [], "releasedPaths": ["src/a"] }
+
+Q4 FIXED    block stranded card A
+            PASS -- {"revision":8,"blocked":true}, exit 0
+            state: { "status": "blocked", "blockedFrom": "verifying",
+                     "paths": ["src/a"], "retainPaths": true }
+
+Q5 FIXED    SAFETY: forged FUTURE revisionTo (11) vs board revision 7
+            PASS -- still rejected
+            workplan: integrationReceipt revision is ahead of expectedRevision
+
+Q6 FIXED    SAFETY: past revisionTo with FOREIGN reviewHead
+            PASS -- still rejected
+            workplan: integrationReceipt reviewHead mismatch
+
+CONCLUSION
+The fix does what it claims: cards stranded in `verifying` by an unrelated board
+transition can again be accepted and blocked, and the retained ahead-of-board and
+reviewHead-correlation guards still fail closed.
+
+SEVERITY NOTE RAISED BY THIS RUN
+Q2 establishes the defect is worse than "the card cannot be accepted". Because
+`block` applies the same check, a stranded card can neither be accepted nor
+blocked, so its reserved paths are held permanently. In a control root whose
+purpose is single-winner path arbitration this is an unbounded resource leak that
+would block every future card touching those paths.
+
+SEAT SELF-REPORTED METHODOLOGY CAVEAT (preserved verbatim, not edited out)
+The first attempt at Q4 used a `cp -R` copy of the control root at a different
+path, which spuriously failed an unrelated `worktreePath must match
+callerWorktree` check -- an artifact of the copy, not of the fix. The seat caught
+this, discarded that run, and re-ran Q4 in place on the original root with a
+state.json restore, producing the PASS recorded above.
+
+ENVIRONMENT NOTE
+The seat observed hostname `charltons-mbp.home.lan`. The orchestrator had
+measured `Charltons-MacBook-Pro.local` earlier in the same session. The hostname
+flapped mid-session -- the exact condition WORKPLAN_HOST_ALIASES (PR #56) exists
+to absorb, observed live.

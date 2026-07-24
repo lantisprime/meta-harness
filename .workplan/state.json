@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 105,
+  "revision": 118,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -2808,16 +2808,9 @@
     {
       "id": "TASK-20260723-017",
       "title": "compile learned selflearn workflow entries to cross-validated executors",
-      "status": "verifying",
+      "status": "done",
       "owner": "claude:charltons-mbp.home.lan:meta17-recovery-20260723",
-      "paths": [
-        "selflearn/src/selflearn/compilation",
-        "selflearn/src/selflearn/doctor.py",
-        "selflearn/src/selflearn/__init__.py",
-        "selflearn/tests/test_compilation.py",
-        "selflearn/tests/test_compilation_gate.py",
-        "selflearn/tests/test_compilation_runtime.py"
-      ],
+      "paths": [],
       "priority": 1,
       "trace": "Linear META-17; charter stages 4-5 (governed learning to reusable procedural knowledge); workflow entry remains the verified spec, executor is a derived artifact; evaluator non-self-approval, bounded authority, reversible lineage, honest termination; H/E/W frozen. CARD RECONSTRUCTED 2026-07-23 after control-root data loss (see evidence episode); definition hash verified byte-identical to the frozen dispatch value.",
       "evidence": [
@@ -3066,6 +3059,45 @@
             "reviewHead": "5d2fb52117a53618a0a8fb172efdff4b064a6370",
             "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d"
           }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+          "revisionFrom": 115,
+          "revisionTo": 116,
+          "at": "2026-07-24T00:37:24.922Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+            "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+            "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+            "commands": [
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+              "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+              "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+            ],
+            "evidenceRefs": [
+              "git:integration:26d735d2773e13ddce367245be0d7e91c691f64d",
+              "git:review-head:5d2fb52117a53618a0a8fb172efdff4b064a6370",
+              "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+              "github:pull/55:merged",
+              "github-actions:run/30017143446:pass",
+              "pytest:compilation-trio:114-passed",
+              "pytest:selflearn:338-passed:1-skipped",
+              "pytest:root:1771-passed:1-skipped:2-xfailed",
+              "node-test:workplan:117-passed:0-failed",
+              "git-diff-check:clean",
+              "review:.review-store/meta17-glm-gate-review-5d2fb52.txt:sha256:30c8e8391b02d2385043eb4e5a65eef2b0fa2a8e09f6c8449958198ca877a0b1:glm-5.2-approve-with-mod-no-p0-no-p1",
+              "frozen-diff:sha256:b76da4c6305caa3cba2317001f1ac33921a1e24cf054901507848ec4d4f00694",
+              "interpreter-note:frozen-venv-/private/tmp/meta-harness-meta-17/.venv-authoritative-differs-from-dev-venv",
+              "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+            ],
+            "receiptHash": "sha256:a329afdca79144d35af45d2077f35fab54efa39b374444b0c51561098d6e1da6"
+          }
         }
       ],
       "claimSnapshot": {
@@ -3119,7 +3151,356 @@
         "revisionFrom": 102,
         "revisionTo": 103,
         "at": "2026-07-23T14:46:28.499Z"
+      },
+      "releasedPaths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/src/selflearn/doctor.py",
+        "selflearn/src/selflearn/__init__.py",
+        "selflearn/tests/test_compilation.py",
+        "selflearn/tests/test_compilation_gate.py",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+        "definitionHash": "sha256:badace0386ae213e1f49a512f3eea8d6b6d83f6918d1de48ac9ef704654d4957",
+        "integrationCommit": "26d735d2773e13ddce367245be0d7e91c691f64d",
+        "commands": [
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests/test_compilation.py selflearn/tests/test_compilation_gate.py selflearn/tests/test_compilation_runtime.py",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider selflearn/tests",
+          "PYTHONDONTWRITEBYTECODE=1 /private/tmp/meta-harness-meta-17/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "cd /private/tmp/meta-harness-meta-17 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-17 diff --check e487dba361ccb382eb9ab4bc29754367289ab39d"
+        ],
+        "evidenceRefs": [
+          "git:integration:26d735d2773e13ddce367245be0d7e91c691f64d",
+          "git:review-head:5d2fb52117a53618a0a8fb172efdff4b064a6370",
+          "git:acceptance-run-at:8a9fd33:tree-bcff00b5d37cb31e2eb07be06299c1350b3d8cc0-identical-to-main-f06827a0e883dda853e513bb8f2e43cfdb3e4bf8",
+          "github:pull/55:merged",
+          "github-actions:run/30017143446:pass",
+          "pytest:compilation-trio:114-passed",
+          "pytest:selflearn:338-passed:1-skipped",
+          "pytest:root:1771-passed:1-skipped:2-xfailed",
+          "node-test:workplan:117-passed:0-failed",
+          "git-diff-check:clean",
+          "review:.review-store/meta17-glm-gate-review-5d2fb52.txt:sha256:30c8e8391b02d2385043eb4e5a65eef2b0fa2a8e09f6c8449958198ca877a0b1:glm-5.2-approve-with-mod-no-p0-no-p1",
+          "frozen-diff:sha256:b76da4c6305caa3cba2317001f1ac33921a1e24cf054901507848ec4d4f00694",
+          "interpreter-note:frozen-venv-/private/tmp/meta-harness-meta-17/.venv-authoritative-differs-from-dev-venv",
+          "diff-check-unblocked-by:github:pull/61:merged:f06827a:strip-trailing-ws-in-9-archived-review-artifacts-no-product-code-changed"
+        ],
+        "receiptHash": "sha256:a329afdca79144d35af45d2077f35fab54efa39b374444b0c51561098d6e1da6",
+        "actor": "coordinator:charltons-mbp.home.lan:meta17-acceptance-20260724",
+        "releasedPaths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/src/selflearn/doctor.py",
+          "selflearn/src/selflearn/__init__.py",
+          "selflearn/tests/test_compilation.py",
+          "selflearn/tests/test_compilation_gate.py",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "revisionFrom": 115,
+        "revisionTo": 116,
+        "at": "2026-07-24T00:37:24.922Z"
       }
+    },
+    {
+      "id": "TASK-20260724-018",
+      "title": "Repair validateIntegrationReceipt so a card integrated before another card's board transition can still be accepted, while still rejecting an integrationReceipt ahead of the board",
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
+      "paths": [],
+      "priority": 1,
+      "trace": "Discovered during META-17/META-8 acceptance 2026-07-24: global-revision equality strands any card whose accept does not immediately follow its own integrate; TASK-20260723-017 is currently unacceptable by any legal transition",
+      "evidence": [
+        "workplan.mjs:2168-2171",
+        "workplan.mjs:2449-2451",
+        "workplan.mjs:2553"
+      ],
+      "next": [
+        "ready",
+        "claim",
+        "start"
+      ],
+      "definition": {
+        "sourceRevision": "git:b75a0926512a889c2b09dd0be9b7165c48439177;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-acceptance-wedge-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-wp-fix",
+        "branch": "fix/workplan-integration-receipt-revision",
+        "baseCommit": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "currentHead": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Single-predicate repair to the atomic Kanban control root. validateIntegrationReceipt currently requires receipt.revisionTo === expectedRevision. Because expectedRevision is the GLOBAL board revision, any transition on any OTHER card between a card's integrate and its accept permanently strands that card in verifying: revisions are monotonic, so the required revision can never recur, and block (the only other exit from verifying) applies the identical check. This is not hypothetical -- TASK-20260723-017 (META-17) integrated 102->103, TASK-20260714-006 (META-8) integrated 103->104, and META-17 is now unacceptable by any legal transition. The equality test provides no card-level staleness protection that the status machine does not already guarantee: while card.status === 'verifying' the latest receipt is necessarily the integration receipt, since the only exits from verifying are accept (->done) and block (->blocked) and both are gated on that status. The genuine threat the check must retain is an integrationReceipt claiming a revision AHEAD of the board, which indicates forgery or corruption. Change the predicate from strict inequality to receipt.revisionTo > expectedRevision. Scope is scripts/workplan.mjs plus regression tests in scripts/workplan.test.mjs. No product source, no selflearn, no discovery package, no prompt/evaluator/deployment wiring.",
+        "stopCondition": "Stop and fail closed on: any edit outside scripts/workplan.mjs and scripts/workplan.test.mjs; any change that weakens single-winner claim arbitration, fencing, path reservation, lock classification, or actor/owner separation; any relaxation permitting an integrationReceipt whose revisionTo exceeds the board revision; any change to the append-only receipt chain, receipt hashing, or revision monotonicity; any hand-edit of .workplan/state.json; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The implementing seat may not self-approve. Pi/NeuralWatt GLM-5.2 reviews the frozen base..head diff read-only and returns P0-P3 findings with file:line evidence, preserved verbatim under .review-store/ per AGENTS.md. A distinct coordinator actor runs integrate and accept, and per the defect this card fixes, accept must follow integrate with no intervening board transition until the fix itself is accepted. This card grants no promotion, deployment, evaluator-write, or credential authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "nextCheckpoint": "A card integrated before another card's board transition can still be accepted; an integrationReceipt whose revisionTo exceeds the board revision is still rejected; block-from-verifying and resume-from-blocked-verifying both tolerate an intervening transition on an unrelated card; and every pre-existing workplan test still passes.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ],
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 106,
+          "revisionTo": 107,
+          "at": "2026-07-23T23:44:59.577Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 107,
+          "revisionTo": 108,
+          "at": "2026-07-23T23:44:59.651Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 108,
+          "revisionTo": 109,
+          "at": "2026-07-23T23:44:59.724Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 109,
+          "revisionTo": 110,
+          "at": "2026-07-23T23:53:33.837Z",
+          "evidence": {
+            "branch": "fix/workplan-integration-receipt-revision",
+            "head": "84734f8d1f30d34e954f7603176b4bc8df74e261"
+          }
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 110,
+          "revisionTo": 111,
+          "at": "2026-07-24T00:36:41.497Z",
+          "evidence": {
+            "reason": "Re-freeze required: reviewFreeze named 84734f8 but the GLM P3-2/P3-3 fix round 249a826 also merged; re-submitting at the actually-reviewed final head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 111,
+          "revisionTo": 112,
+          "at": "2026-07-24T00:36:41.569Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "Re-freeze required: reviewFreeze named 84734f8 but the GLM P3-2/P3-3 fix round 249a826 also merged; re-submitting at the actually-reviewed final head",
+            "retainPaths": true
+          }
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:wpfix-20260724",
+          "revisionFrom": 112,
+          "revisionTo": 113,
+          "at": "2026-07-24T00:36:41.655Z",
+          "evidence": {
+            "branch": "fix/workplan-integration-receipt-revision",
+            "head": "249a8263ccd9508eb9b7fa73962be510d90d00dc"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+          "revisionFrom": 113,
+          "revisionTo": 114,
+          "at": "2026-07-24T00:36:49.639Z",
+          "evidence": {
+            "reviewBranch": "fix/workplan-integration-receipt-revision",
+            "reviewHead": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+            "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+          "revisionFrom": 114,
+          "revisionTo": 115,
+          "at": "2026-07-24T00:37:16.084Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+            "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+            "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+            "commands": [
+              "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+              "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+              "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+            ],
+            "evidenceRefs": [
+              "git:integration:2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+              "git:review-head:249a8263ccd9508eb9b7fa73962be510d90d00dc",
+              "github:pull/63:merged",
+              "node-test:workplan:121-passed:0-failed",
+              "pytest:root:1837-passed:2-xfailed",
+              "git-diff-check:clean",
+              "review:.review-store/wpfix-glm-gate-review-84734f8.txt:sha256:75262c2c3394cc10d9157e5c1f7ade4cf9b1b97f59e8475390d90b57b90a6b21:glm-5.2-approve-no-p0-p1",
+              "review:.review-store/wpfix-glm-gate-review-249a826.txt:sha256:4f0e0adcea55b03f18f6f84eb516c60b95ddabc479e0f485aeec7d1edb2f5882:glm-5.2-approve-no-p0-p1-p2",
+              "review:.review-store/wpfix-codex-review-249a826.txt:sha256:ca89b1b678e3f04d254dc33c1937f825e33c450e0b8df903f60807c8a9cf86f9:codex-approve-1-p3",
+              "behavioral-verify:.review-store/wpfix-behavioral-verify-249a826.txt:sha256:0bef7bb490105103a3146fae2ac2f95658c59dfbb96b38b79a03a35557ee646c:6-of-6-pass-real-cli",
+              "deferred-p3:glm-p3-1-ledger-hash-chain,codex-p3-resume-coverage,glm-p3-c-comment-scope"
+            ],
+            "receiptHash": "sha256:7342ae0f176640984d22dfc8acebf504b3579e55d95908e2ef20c1287b18e93b"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:wpfix-20260724",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "sourceRevision": "git:b75a0926512a889c2b09dd0be9b7165c48439177;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-acceptance-wedge-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-wp-fix",
+        "branch": "fix/workplan-integration-receipt-revision",
+        "baseCommit": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "currentHead": "b75a0926512a889c2b09dd0be9b7165c48439177",
+        "paths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Single-predicate repair to the atomic Kanban control root. validateIntegrationReceipt currently requires receipt.revisionTo === expectedRevision. Because expectedRevision is the GLOBAL board revision, any transition on any OTHER card between a card's integrate and its accept permanently strands that card in verifying: revisions are monotonic, so the required revision can never recur, and block (the only other exit from verifying) applies the identical check. This is not hypothetical -- TASK-20260723-017 (META-17) integrated 102->103, TASK-20260714-006 (META-8) integrated 103->104, and META-17 is now unacceptable by any legal transition. The equality test provides no card-level staleness protection that the status machine does not already guarantee: while card.status === 'verifying' the latest receipt is necessarily the integration receipt, since the only exits from verifying are accept (->done) and block (->blocked) and both are gated on that status. The genuine threat the check must retain is an integrationReceipt claiming a revision AHEAD of the board, which indicates forgery or corruption. Change the predicate from strict inequality to receipt.revisionTo > expectedRevision. Scope is scripts/workplan.mjs plus regression tests in scripts/workplan.test.mjs. No product source, no selflearn, no discovery package, no prompt/evaluator/deployment wiring.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "nextCheckpoint": "A card integrated before another card's board transition can still be accepted; an integrationReceipt whose revisionTo exceeds the board revision is still rejected; block-from-verifying and resume-from-blocked-verifying both tolerate an intervening transition on an unrelated card; and every pre-existing workplan test still passes.",
+        "revisionFrom": 107,
+        "revisionTo": 108,
+        "at": "2026-07-23T23:44:59.650Z"
+      },
+      "reviewFreeze": {
+        "branch": "fix/workplan-integration-receipt-revision",
+        "head": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+        "revisionFrom": 112,
+        "revisionTo": 113,
+        "at": "2026-07-24T00:36:41.655Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "reviewBranch": "fix/workplan-integration-receipt-revision",
+        "reviewHead": "249a8263ccd9508eb9b7fa73962be510d90d00dc",
+        "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "revisionFrom": 113,
+        "revisionTo": 114,
+        "at": "2026-07-24T00:36:49.639Z"
+      },
+      "releasedPaths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "definitionHash": "sha256:ea66ed3f2a4b564b325cebdf38cacdac76c76b380dd92b11a17be10dd670fcc5",
+        "integrationCommit": "2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+        "commands": [
+          "cd /private/tmp/meta-harness-wp-fix && node --test scripts/workplan.test.mjs",
+          "cd /private/tmp/meta-harness-wp-fix && PYTHONDONTWRITEBYTECODE=1 /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q -p no:cacheprovider tests",
+          "git -C /private/tmp/meta-harness-wp-fix diff --check b75a0926512a889c2b09dd0be9b7165c48439177"
+        ],
+        "evidenceRefs": [
+          "git:integration:2422f301bd5fd2b811fe30b8a1ac9be04f9aff07",
+          "git:review-head:249a8263ccd9508eb9b7fa73962be510d90d00dc",
+          "github:pull/63:merged",
+          "node-test:workplan:121-passed:0-failed",
+          "pytest:root:1837-passed:2-xfailed",
+          "git-diff-check:clean",
+          "review:.review-store/wpfix-glm-gate-review-84734f8.txt:sha256:75262c2c3394cc10d9157e5c1f7ade4cf9b1b97f59e8475390d90b57b90a6b21:glm-5.2-approve-no-p0-p1",
+          "review:.review-store/wpfix-glm-gate-review-249a826.txt:sha256:4f0e0adcea55b03f18f6f84eb516c60b95ddabc479e0f485aeec7d1edb2f5882:glm-5.2-approve-no-p0-p1-p2",
+          "review:.review-store/wpfix-codex-review-249a826.txt:sha256:ca89b1b678e3f04d254dc33c1937f825e33c450e0b8df903f60807c8a9cf86f9:codex-approve-1-p3",
+          "behavioral-verify:.review-store/wpfix-behavioral-verify-249a826.txt:sha256:0bef7bb490105103a3146fae2ac2f95658c59dfbb96b38b79a03a35557ee646c:6-of-6-pass-real-cli",
+          "deferred-p3:glm-p3-1-ledger-hash-chain,codex-p3-resume-coverage,glm-p3-c-comment-scope"
+        ],
+        "receiptHash": "sha256:7342ae0f176640984d22dfc8acebf504b3579e55d95908e2ef20c1287b18e93b",
+        "actor": "coordinator:charltons-mbp.home.lan:wpfix-closeout-20260724",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "revisionFrom": 114,
+        "revisionTo": 115,
+        "at": "2026-07-24T00:37:16.084Z"
+      }
+    },
+    {
+      "id": "TASK-20260724-019",
+      "title": "Bind card.integrationReceipt to the append-only ledger so a swapped or replayed receipt is detectable independent of the revision bound, and close the resume/retainPaths coverage gap",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "priority": 3,
+      "trace": "Three deferred P3s from the TASK-20260724-018 panel. GLM P3-1: card.integrationReceipt is a standalone snapshot; appendReceipt creates un-chained records (workplan.mjs:1292-1313) and validateState does not bind a verifying card to a fresh receipt, so a hand-swapped receipt is caught only by reviewFreeze correlation. Codex P3: the post-drift block test neither resumes the card nor exercises retainPaths=false, leaving the recovery path unpinned. GLM P3-C: scope the new comment invariant against direct state.json tampering.",
+      "evidence": [
+        ".review-store/wpfix-glm-gate-review-84734f8.txt",
+        ".review-store/wpfix-codex-review-249a826.txt",
+        ".review-store/wpfix-glm-gate-review-249a826.txt"
+      ],
+      "next": [
+        "coordinator qualifies to Ready"
+      ]
+    },
+    {
+      "id": "TASK-20260724-020",
+      "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "priority": 3,
+      "trace": "META-17 gate-6 finding F1 (P2, pre-existing). _ast_preflight calls ast.parse at an unguarded call site (runtime.py:275); ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, escaping every guard unjournalled. Only reachable via a tampered hash-matched file since json.dumps escapes NUL in legitimate compiler output. The path-resolution subclass of this escape class was closed in 5d2fb52; this source-NUL subclass was not, so the class is NOT exhaustively closed.",
+      "evidence": [
+        ".review-store/meta17-glm-gate-review-5d2fb52.txt"
+      ],
+      "next": [
+        "coordinator qualifies to Ready"
+      ]
     }
   ]
 }

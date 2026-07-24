@@ -1,0 +1,69 @@
+I have everything I need. I confirmed the test count statically (121 `test(` declarations, matching the author's claim — the 4 new tests at lines 4976, 5051, 5121, 5206 bring 117→121), verified the "sole writer" claim (only assignments at `workplan.mjs:1979` and `:2002`, both inside `integrate`), and confirmed `validateState` (`:605-658`) does not validate `integrationReceipt`, so the relaxation is sufficient. Note: the sandbox blocked test execution and all bash/git, so I could not re-run `node --test`; I corroborated the evidence by static analysis and hand-tracing the code paths.
+
+---
+
+# INDEPENDENT RE-REVIEW — Pi / GLM-5.2 (read-only)
+
+**Base:** `b75a092` · **Head:** `249a826` · **Prior gate:** APPROVE (b75a092..84734f8), 0×P0, 0×P1, 3×P3. This re-review covers the full diff and scrutinizes the fix round (`249a826`: P3-2 foreign-`reviewHead` test + P3-3 comment reword) specifically.
+
+## VERDICT: **APPROVE**
+
+No P0, P1, or P2. Three P3 observations (all non-blocking; one is the explicitly-deferred P3-1 carried forward). The fix round is correct and introduces **no** behavioural change and **no** new issue.
+
+---
+
+## Point 1 — Is the new P3-2 test correct, and does it reach the `reviewHead` correlation check (not the revision bound)?
+
+**Correct.** `scripts/workplan.test.mjs:5121-5203` ("accept rejects a past-revision integrationReceipt with a foreign reviewHead"):
+
+- **Board genuinely drifts past the receipt:** the `add` of `TASK-20260711-002` runs with `--expected-revision 6` and bumps the global revision 6→7 (`workplan.test.mjs:5145-5154`). The test then explicitly asserts the drift invariant `tamperedCard.integrationReceipt.revisionTo < tamperedState.revision` (6 < 7) at `workplan.test.mjs:5155-5157`. So at `accept` (`--expected-revision 7`, `:5186`), the relaxed bound `receipt.revisionTo > expectedRevision` = `6 > 7` = `false` → the bound does **not** reject.
+- **It reaches the `reviewHead` correlation check, not anything else:** in `validateIntegrationReceipt` the checks execute in order — field-shape (`:2136`), actor (`:2142-2144`), `integrationCommit` format (`:2146-2150`), `reviewBranch === reviewFreeze.branch` (`:2151-2153`), then `reviewHead === reviewFreeze.head` (`:2154-2156`). The tamper only rewrites `reviewHead` to a foreign 40-hex value (`:5158-5160`); `reviewFreeze` itself is untouched, so `reviewBranch` matches and the failure lands exactly at `:2155` → message `"integrationReceipt reviewHead mismatch"` (`:2156`), which the test asserts at `:5194`. This is upstream of the revision bound at `:2187`, so the test cannot be failing on the bound.
+- **Fail-closed verified:** WORKPLAN.md / state.json byte-identical and lock removed after the failure (`:5196-5203`).
+- The test also complements the ahead-of-board test (`:5051`) precisely as its leading comment (`:5115-5119`) claims — together they pin the division of labour (bound rejects "ahead", correlation rejects "stale/foreign").
+
+## Point 2 — Is the reworded comment accurate? Any overclaim?
+
+**Accurate; no overclaim.**
+
+- **"`integrate` is the sole writer of both":** confirmed. `card.integrationReceipt =` appears only at `workplan.mjs:1979` and `card.status = "verifying"` only at `:2002`, both inside `integrate` (`:1911`), executed together. No other command writes either: `add` seeds `status: "backlog"` (`:998`); `resume` sets `status = "in_progress"` (`:2596`, **not** `verifying`); `block` sets `"blocked"`; `ready`/`start`/`submit` set their own statuses. So `status === "verifying"` ⟹ the `integrationReceipt` was written by the same `integrate`.
+- **"`card.receipts.at(-1)` … a different object carrying fewer fields":** confirmed. While `verifying`, the ledger tail is the `review→verifying` record appended at `:1989-2001` via `appendReceipt`, whose object has 7 fields (`from,to,actor,revisionFrom,revisionTo,at,evidence`, `:1298-1310`). `integrationReceipt` has 8 fields (`INTEGRATION_RECEIPT_FIELDS`, `:2119-2128`). 7 < 8; distinct objects. The original comment's conflation is correctly removed.
+- **"Defence … comes from the `reviewFreeze` correlation checks above, not from this bound":** confirmed — `:2151-2158` (`reviewBranch`/`reviewHead`/`definitionHash`) sit above the bound at `:2187`.
+- **"the same semantics `validateBlockedReceipt` already applies":** confirmed — `validateBlockedReceipt` uses the identical `receipt.revisionTo > expectedRevision` predicate at `:2375`.
+- **"Its `revisionTo` therefore cannot exceed the board's monotonic current revision":** true on every operational path — `integrate` sets `revisionTo = expectedRevision + 1` = the board revision at integrate time (`:1979-1988`); the board revision is monotonic and `accept`/`block` enforce `state.revision === expectedRevision` before validating (`:2239-2241`, `:2433-2435`).
+
+## Point 3 — Did the fix round introduce any behavioural change?
+
+**No.** Consistent with the gate framing that `84734f8` (already approved) introduced the `!==`→`>` relaxation, `249a826` is comment + test only:
+
+- The only `workplan.mjs` change in the round is the reworded comment block (`:2169-2186`); the predicate at `:2187-2189` (`receipt.revisionTo > expectedRevision` / message `"integrationReceipt revision is ahead of expectedRevision"`) and the preceding `revisionTo === revisionFrom + 1` parity check (`:2165-2168`) and trailing `at` check (`:2190-2192`) are internally consistent with the approved relaxation and unchanged in character. The error message aligns with the `>` semantics ("ahead of").
+- The sole `workplan.test.mjs` addition is the read-only foreign-`reviewHead` test (`:5121-5203`); it adds no production path, no env var, no shared state (own `mkdtemp` + `context.after` cleanup). It cannot alter runtime behaviour.
+
+## Point 4 — Fresh-eyes P0/P1 on the relaxation via any operationally reachable path (no direct `state.json` mutation)
+
+**No operationally reachable path accepts a replayed, forged, or stale `integrationReceipt`.**
+
+- **Replay is a non-surface:** `accept` reads the receipt from `card.integrationReceipt` in `state.json` (`:2126-2132`), not from caller input. The actor-supplied `acceptance.json` is validated separately — `validateAcceptance` (`:2076-2122`) enforces `acceptance.integrationCommit === card.integrationReceipt.integrationCommit` (`:2082-2085`), `definitionHash` equality, `evaluator === actor`, `evaluator !== card.owner`, and a `receiptHash` MAC (`:2117-2120`). Nothing the caller submits can substitute for the receipt.
+- **Forged-ahead receipt:** rejected by the retained bound `receipt.revisionTo > expectedRevision` (`:2187`). Operationally a receipt's `revisionTo` is set only by `integrate` to the actual board revision (`:1986-1988`), which is monotonic, so a receipt claiming an unreached revision cannot be produced without direct `state.json` tampering (the deferred P3-1).
+- **Stale / foreign receipt:** rejected by the `reviewFreeze` correlation checks `:2151-2158` (`reviewBranch`, `reviewHead`, `definitionHash`) plus the git checks in `accept` (`:2251-2273`: `reviewFreeze.head` exists, `integrationCommit` exists, `reviewFreeze.head` is an ancestor of `integrationCommit`). A receipt from a different/prior review freeze necessarily mismatches `reviewFreeze.head`; and a re-review re-freezes `reviewFreeze` and `integrate` overwrites `integrationReceipt` (`:1979`), so a stale receipt cannot persist into a `verifying` accept.
+- **All three call sites are consistent:** `accept` (`:2248`, global `expectedRevision`), `block` from verifying (`:2468`, global `expectedRevision`), and `resume` from verifying-blocked (`:2571`, `latestReceipt.revisionFrom`). `resume` transitions to `in_progress` (`:2596`), **not** `done`, so it cannot directly accept a stale receipt; and its `reviewFreeze` correlation still binds. No window opens.
+
+Residual exposure is exclusively direct `state.json` mutation (e.g., co-tampering `integrationReceipt.reviewHead` **and** `reviewFreeze.head` to match, which `validation` cannot detect) — that is the explicitly-deferred P3-1 and is outside the "operationally reachable" scope of this check.
+
+---
+
+## Findings
+
+**P0 — none.**
+**P1 — none.**
+**P2 — none.**
+
+**P3-A (carry-forward of deferred P3-1, acknowledged, not introduced here):** The residual direct-`state.json`-tamper surface remains. The new foreign-`reviewHead` test (`workplan.test.mjs:5121`) documents the correlation defence for a single-field tamper, but a mutator that co-edits `card.reviewFreeze.head` to match a foreign `integrationReceipt.reviewHead` defeats the `:2154-2156` check, since both are read from the same mutable state. Tracked separately as hardening; non-blocking.
+
+**P3-B (observation, test-coverage gap — pre-existing w.r.t. 249a826):** The relaxation at `:2187` also *beneficially* unblocks `resume` from a verifying-blocked card after board drift: `resume` passes `latestReceipt.revisionFrom` as `expectedRevision` (`:2571`), and with the old `!==` predicate a drifted receipt (`revisionTo=6` vs block `revisionFrom=7`) would have failed `6 !== 7`. This is uniformly fixed by the `>` predicate, but no test exercises `resume`-after-drift (the drift tests cover `accept` at `:4976` and `block` at `:5206` only). Consider adding a `resume`-after-drift case for completeness. Non-blocking.
+
+**P3-C (stylistic):** The "necessarily the one written by the `integrate` that set that status" sentence (`:2174-2178`) is accurate for operational paths but does not explicitly scope out direct `state.json` tampering. Given P3-1 is deferred, a parenthetical such as "(absent direct `state.json` tampering; see P3-1)" would make the invariant's scope airtight and prevent a future reader from re-tightening the bound under a false premise. Non-blocking.
+
+## Test evidence
+I could not re-execute `node --test scripts/workplan.test.mjs` — the sandbox denied all bash/git execution. I statically corroborated the 121/0 claim: exactly **121** `test(` declarations in `scripts/workplan.test.mjs` (117 baseline + the 4 added tests at `:4976`, `:5051`, `:5121`, `:5206`), and hand-traced each new test's reachability through the production code paths above. The author's reported result is consistent with this static analysis.
+
+**Disposition of the fix round:** P3-2 (ACCEPT) and P3-3 (ACCEPT) are correctly applied; P3-1 remains DEFER as stated. The fix round is **correct**, introduces **no behavioural change**, and introduces **no new issue**.
