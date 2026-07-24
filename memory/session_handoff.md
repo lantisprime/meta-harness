@@ -1,11 +1,15 @@
-# Session Handoff — meta-harness (2026-07-24, session 54: META-30 accepted and done at board 131; closeout PR pending)
+# Session Handoff — meta-harness (2026-07-24, session 54: META-30 accepted and done at board 131; ALL PRs merged, session fully closed)
 
 ## State in one line
 
 META-30 / `TASK-20260724-021` (generic `pi` owner namespace) is **`done`** at
-board revision **131**; PR #66 (META-29 closeout) and PR #67 (this card's code)
-are both merged; the only outstanding action is merging this session's closeout
-PR with the board records.
+board revision **131** and fully landed: PR #66 (META-29 closeout), PR #67
+(this card's code, merged as `f081fb2`), and PR #68 (this card's closeout,
+merged as `61a91f0`) are ALL merged; CI green on every one. Nothing is
+outstanding for this card. pi-driven seats can now claim/start/submit under
+`pi:<host>:<session>` on any card whose frozen allowedOwnerNamespaces
+includes "pi" — qualify future pi-lane cards accordingly (plus `pi` lane
+label per AGENTS.md).
 
 ## What happened (full quality-process orchestration, per pinned seat rule v2)
 
@@ -44,16 +48,16 @@ PR with the board records.
 
 ## Next steps
 
-1. **Merge this session's closeout PR** (card/t021-qualify → main; board
-   118-era→131 records, review artifacts, definition, receipt, this handoff).
-2. Coordinator qualifies next: `TASK-20260724-019` (receipt hash-chaining)
+1. Coordinator qualifies next: `TASK-20260724-019` (receipt hash-chaining)
    is now the only backlog card sharing workplan.mjs paths — free to qualify.
-3. Deferred P3s recorded in the acceptance receipt: gateway/CLI
+   When qualifying a card intended for a pi seat, include "pi" in the
+   definition's allowedOwnerNamespaces and label the Linear card's pi lane.
+2. Deferred P3s recorded in the acceptance receipt: gateway/CLI
    `dev-orchestrator` supported-set asymmetry (pre-existing); dead unreachable
    session-empty branch workplan.mjs:201-203; optional no-mutation-assertion
    hardening vs check-after-write reordering.
-4. 8 unmerged agent/* branches still await a human decision (session-50 list).
-5. Worktrees `/private/tmp/meta-harness-t020` (done) and
+3. 8 unmerged agent/* branches still await a human decision (session-50 list).
+4. Worktrees `/private/tmp/meta-harness-t020` (done) and
    `/private/tmp/meta-harness-t021` (done, detached at f081fb2) plus
    `/private/tmp/t021-verify-root` are all deletable.
 
