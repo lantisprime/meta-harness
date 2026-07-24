@@ -24,8 +24,7 @@ than allowing implementation drift.
 
 ## Development Kanban (Linear team "Meta-Harness", `META`)
 
-Coding-agent seats (Codex, Claude Code) coordinate development work through the
-Linear team `Meta-Harness` in workspace `cha-personal`. Conventions:
+Coding-agent seats (Codex, Claude Code, and pi-driven seats) coordinate development work through the Linear team `Meta-Harness` in workspace `cha-personal`. Conventions:
 
 - Pull only cards in **Ready**. Backlog cards are not claimable; only the
   coordinator qualifies a card and moves it to Ready.
@@ -35,7 +34,7 @@ Linear team `Meta-Harness` in workspace `cha-personal`. Conventions:
   Use **Blocked** when stuck and say why; the coordinator triages.
 - Comment evidence on the card at each transition: branch, commits, test
   output, review verdicts — artifacts, not assertions.
-- Respect lane labels (`codex`, `claude-code`, `coordinator`): pick up only
+- Respect lane labels (`codex`, `claude-code`, `coordinator`, `pi`): pick up only
   cards labeled for your seat unless the coordinator reassigns.
 - Linear is the **visible development board only**, not the atomic claim
   authority. Single-winner claims, fencing, and path reservations belong to the
@@ -43,6 +42,8 @@ Linear team `Meta-Harness` in workspace `cha-personal`. Conventions:
   development-plane coordination; product runtime components (`Router`,
   `TaskExecutor`, `WorkflowEngine`) never touch development cards or receive
   Linear credentials.
+
+The `pi` OWNER namespace (claimable lane for pi-CLI-driven open-weights seats, owner string `pi:<host>:<session>`) is distinct from the "Pi/NeuralWatt GLM-5.2" reviewer role described below.
 
 ## Independent Second-Opinion Review
 

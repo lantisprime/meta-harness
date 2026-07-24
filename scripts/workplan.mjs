@@ -189,9 +189,9 @@ function parseReadyFlags(flags, positionals) {
 }
 
 function parseClaimOwner(owner) {
-  const match = owner.match(/^(codex|claude):([^:]+):([^:]+)$/);
+  const match = owner.match(/^(codex|claude|pi):([^:]+):([^:]+)$/);
   if (!match) {
-    fail("owner must be codex:<host>:<session> or claude:<host>:<session>");
+    fail("owner must be codex:<host>:<session>, claude:<host>:<session>, or pi:<host>:<session>");
   }
   const [, namespace, host, session] = match;
   if (!isThisHost(host)) {
@@ -1174,13 +1174,13 @@ function validateDefinition(definition, callerWorktree) {
     !Array.isArray(definition.allowedOwnerNamespaces) ||
     definition.allowedOwnerNamespaces.length === 0 ||
     !definition.allowedOwnerNamespaces.every(
-      (ns) => typeof ns === "string" && ["codex", "claude"].includes(ns),
+      (ns) => typeof ns === "string" && ["codex", "claude", "pi"].includes(ns),
     ) ||
     new Set(definition.allowedOwnerNamespaces).size !==
       definition.allowedOwnerNamespaces.length
   ) {
     fail(
-      'allowedOwnerNamespaces must be a nonempty unique subset of ["codex","claude"]',
+      'allowedOwnerNamespaces must be a nonempty unique subset of ["codex","claude","pi"]',
     );
   }
 }
