@@ -1,3 +1,146 @@
+# Session Handoff — meta-harness (2026-07-24, session 51: META-8 accepted; control-root wedge found and repaired; META-17 acceptance pending merge)
+
+## State in one line
+
+META-8 is **done**. META-17 is still `verifying` — not through any fault of its
+own, but because a defect in the control root made it unacceptable. That defect
+is fixed, panel-approved, and sitting in **PR #63**. Merge it, then accept
+META-17.
+
+## Do this first
+
+1. **Merge PR #63** (`TASK-20260724-018`, `validateIntegrationReceipt` repair).
+2. **`integrate` then `accept` it back-to-back with no intervening board
+   transition.** That ordering is not ceremony — batching two integrates is the
+   exact bug being fixed, and doing it again would strand this card too.
+3. **Accept META-17** (`TASK-20260723-017`). Its receipt
+   `.workplan/meta17-acceptance.json` is already written, committed, and valid.
+4. **File the two blocked follow-up cards** once paths release (see below).
+5. Commit the control root immediately after every transition.
+
+## The wedge — the part worth reading
+
+`validateIntegrationReceipt` required `receipt.revisionTo === expectedRevision`.
+`expectedRevision` is the **global** board revision, so a transition on any
+*other* card between a card's `integrate` and its `accept` stranded that card
+permanently: revisions are monotonic, so the required value can never recur.
+
+It is worse than a stuck transition. `block` is the only other exit from
+`verifying` and applies the **same** check, so a stranded card can be neither
+accepted nor blocked and **its reserved paths are never released**. In a control
+root whose whole purpose is single-winner path arbitration, that is an unbounded
+resource leak. META-17 has been holding six reserved paths under exactly this
+condition since 2026-07-23.
+
+Session 50 caused it by integrating both cards back-to-back (META-17 102→103,
+META-8 103→104) — its own standing lesson, *"commit control-root transitions
+immediately; do not batch them"*, applied one level up to lifecycle transitions
+rather than commits.
+
+**Fix:** `receipt.revisionTo > expectedRevision`. The equality protected nothing
+at card level that the status machine already guarantees — `integrate` is the
+sole writer of both `card.integrationReceipt` and `card.status = "verifying"`
+(`workplan.mjs:1979`, `:2002`), so a verifying card always carries the receipt
+that put it there. What must still fail closed is a receipt claiming a revision
+the board has not reached. This also removes an internal inconsistency:
+`validateBlockedReceipt` already used `> expectedRevision`; the integration
+receipt was the lone outlier in its own file.
+
+## The review panel — four lenses, unanimous APPROVE
+
+| Seat | Verdict | Findings |
+|---|---|---|
+| GLM-5.2 gate 1 (`84734f8`) | APPROVE | 0 P0/P1, 3× P3 |
+| GLM-5.2 gate 2 (`249a826`) | APPROVE | 0 P0/P1/P2, 3× P3 |
+| Codex (`249a826`) | APPROVE | 1× P3 |
+| Behavioural verifier (Sonnet) | **6/6 PASS** | real CLI |
+
+Artifacts: `.review-store/wpfix-{glm-gate-review-84734f8,glm-gate-review-249a826,codex-review-249a826,behavioral-verify-249a826}.txt`.
+
+Three things this panel caught that a single lens would not have:
+
+- **The behavioural seat executed real commands.** Every META-17 gate this week
+  ran with `git`/`bash` denied by pi's prompt shield, so no reviewer ran
+  anything and every figure was the coordinator's own measurement. This seat
+  built control roots from scratch, reverted the predicate to reproduce the
+  wedge, and confirmed both retained guards still fail closed. It is also what
+  established the severity — that `block` fails too and paths leak permanently.
+- **Codex found a gap both GLM passes missed**: the post-drift `block` test
+  neither resumes the card nor exercises `retainPaths=false`, so the recovery
+  path is unpinned. Cross-provider divergence is real; run both.
+- **GLM gate 1 caught a genuine error in my comment** (P3-3): I had written
+  "its latest receipt is necessarily this integration receipt", conflating
+  `card.integrationReceipt` (a standalone snapshot) with `card.receipts.at(-1)`
+  (the ledger tail — a different object with fewer fields). Fixed in `249a826`
+  and re-gated rather than shipped as an unreviewed post-approval tidy, which is
+  precisely what went wrong with META-17's `4a8069b`.
+
+## Also shipped
+
+- **PR #61** — stripped trailing whitespace from nine archived review artifacts.
+  Frozen command `[4] git diff --check <base>` was failing for **both** cards
+  with 131 trailing-whitespace lines, every one from `c45a2aa` (artifact
+  archival), none from either card's own change. Scoped to each card's reserved
+  paths and to each frozen review diff, it was clean. All nine files verified
+  byte-identical modulo whitespace; no finding or verdict text altered. Root
+  cause: command `[4]` uses a *relative* diff base, correct on a feature branch,
+  far too wide at an integration merge commit.
+- **PR #62** — META-8 acceptance, control root 104 → 105.
+
+## Repo state
+
+- `main` at `b75a092` + PR #63 pending. Control root **revision 110** on branch
+  `card/wpfix-lifecycle`, committed after every transition.
+- Worktrees: `meta-17` and `meta-8` detached at `8a9fd33`; `wp-fix` on
+  `fix/workplan-integration-receipt-revision`; `mh-gate-wpfix` (disposable gate
+  worktree, deletable); `meta18-coordinator` at `884a034`.
+- Scratch from the behavioural seat under `/private/tmp/behav-verify-wpfix/` —
+  safe to delete.
+
+## Blocked follow-ups — file these once paths release
+
+Path exclusivity currently refuses both `add` calls, which is the control root
+working correctly.
+
+- **After `TASK-20260724-018` releases `scripts/workplan.mjs`:** hash-chain
+  `integrationReceipt` into the append-only ledger (GLM P3-1); add resume /
+  `retainPaths=false` coverage after drift (codex P3); scope the new comment's
+  invariant against direct `state.json` tampering (GLM P3-C).
+- **After META-17 releases `selflearn/src/selflearn/compilation`:** F1 — 
+  `_ast_preflight` calls `ast.parse` at an unguarded site (`runtime.py:275`);
+  `ast.parse` raises `ValueError`, not `SyntaxError`, on NUL-bearing source,
+  escaping every guard unjournalled.
+
+## Honest caveats
+
+- **Role separation was violated on `TASK-20260724-018`.** Playbook v15 §0 locks
+  the orchestrator out of writing product source during a tiered run. I wrote
+  the fix myself, then dispatched seats only for review and verification. The
+  review is genuinely independent; the build was not. Recorded, not hidden.
+- **Linear ran ahead of the ledger on both cards.** META-8 and META-17 were both
+  marked Done on 2026-07-23 while their workplan cards sat at `verifying` with
+  no acceptance receipt. META-8 is now genuinely done; META-17's discrepancy is
+  documented in a comment on the card and will be resolved by acceptance. If
+  acceptance fails, move META-17 back to Verifying rather than leave it claiming
+  completion.
+- **The hostname flapped mid-session**, `Charltons-MacBook-Pro.local` →
+  `charltons-mbp.home.lan` — the exact condition `WORKPLAN_HOST_ALIASES` (PR
+  #56) exists to absorb, observed live. Keep setting the alias env var; the flap
+  goes both ways.
+- **I killed GLM gate 2 at 25 minutes on a misread**, having sampled `%CPU` on
+  the wrapper `zsh` rather than the `pi` child. It may have been mid-review.
+  Judge seat liveness by **cumulative CPU `TIME` on the real child** plus RSS,
+  and always launch CLI seats with `< /dev/null` — both seats had silently
+  blocked on stdin, and silence is indistinguishable from deep review.
+
+## Standing lesson (carried forward, now with a second instance)
+
+Never batch control-root transitions. Session 50 learned it for commits; this
+session learned it for lifecycle transitions, where the cost was a permanent
+path leak rather than lost work. `integrate` then `accept` back-to-back.
+
+---
+
 # Session Handoff — meta-harness (2026-07-23, session 50 final: recovery complete, META-17 + META-8 merged and integrated, acceptance NOT done)
 
 ## State in one line
