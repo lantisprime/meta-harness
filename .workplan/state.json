@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 118,
+  "revision": 125,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -3487,17 +3487,240 @@
     {
       "id": "TASK-20260724-020",
       "title": "Guard the unjournalled ValueError escape from ast.parse on NUL-bearing source in the selflearn compilation runtime",
-      "status": "backlog",
-      "owner": "workplan:add",
-      "paths": [
-        "selflearn/src/selflearn/compilation",
-        "selflearn/tests/test_compilation_runtime.py"
-      ],
+      "status": "done",
+      "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
+      "paths": [],
       "priority": 3,
       "trace": "META-17 gate-6 finding F1 (P2, pre-existing). _ast_preflight calls ast.parse at an unguarded call site (runtime.py:275); ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, escaping every guard unjournalled. Only reachable via a tampered hash-matched file since json.dumps escapes NUL in legitimate compiler output. The path-resolution subclass of this escape class was closed in 5d2fb52; this source-NUL subclass was not, so the class is NOT exhaustively closed.",
       "evidence": [
         ".review-store/meta17-glm-gate-review-5d2fb52.txt"
       ],
+      "next": [
+        "coordinator qualifies to Ready"
+      ],
+      "definition": {
+        "sourceRevision": "git:c338ec094830dd6f4186935cf6130a4585fb1a68;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-gate6-F1-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-t020",
+        "branch": "dev/t020-ast-preflight-valueerror-guard",
+        "baseCommit": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "currentHead": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Close the unjournalled-ValueError escape class at the selflearn compilation runtime's AST preflight (META-17 gate-6 finding F1, P2, pre-existing). _ast_preflight (selflearn/src/selflearn/compilation/runtime.py:36) calls ast.parse at line 45 catching only SyntaxError; ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, so at the call site (runtime.py:277) that ValueError escapes run() raw and unjournalled, violating both the journalled-refusal evidence contract and the RuntimeCompError normalization contract. The path-resolution subclass of this escape class was closed in 5d2fb52 (control-character preflight plus (OSError, ValueError) on the read guards, journalled under executor.malformed-path); this source-NUL subclass at the AST preflight was explicitly left open. Only reachable via a tampered hash-matched executor file, since json.dumps escapes NUL in legitimate compiler output -- which is precisely the adversarial surface the tamper evidence record exists for. Required behaviour: a preflight failure on NUL-bearing or otherwise ValueError-raising source must journal an executor refusal via the established _journal_refusal mechanism under an honest kind consistent with the existing executor.* refusal kinds, then raise RuntimeCompError; no raw ValueError may escape run() from the preflight site. Bringing the preflight's existing SyntaxError and dunder/builtins refusal paths under the same journalled-refusal contract at that call site is in scope if the chosen guard shape covers them naturally; rewriting the preflight's detection logic is not. Add regression tests proving: NUL-bearing source with a matching hash journals a refusal and raises RuntimeCompError (not ValueError); legitimate executor sources still compile and run unchanged; and the refusal journal entry carries the entry_id and honest kind. Scope is exactly the reserved paths: selflearn/src/selflearn/compilation (runtime.py expected; sibling modules only if the guard genuinely requires a shared helper) and selflearn/tests/test_compilation_runtime.py. No workplan scripts, no discovery package, no prompt/evaluator/deployment wiring, no doctor.py (its NUL-path reporting gap is a separate recorded P3, out of scope).",
+        "stopCondition": "Stop and fail closed on: any edit outside the two reserved paths; any weakening of the existing preflight refusals (dunder access, __builtins__ reference), the executor hash-tamper check, the restricted-globals sandbox, or any existing executor.* refusal journalling; any change that lets a preflight or sandbox failure skip journalling; any new dependency; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The implementing seat may not self-approve. Pi/NeuralWatt GLM-5.2 reviews the frozen base..head diff read-only per AGENTS.md and returns P0-P3 findings with file:line evidence, preserved verbatim under .review-store/. Any P0/P1 requires a new commit and a fresh frozen-diff review; after any fix round, re-freeze the card to the head actually reviewed before submit. A distinct coordinator actor runs integrate and accept. This card grants no promotion, deployment, evaluator-write, or credential authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+        ],
+        "nextCheckpoint": "A hash-matched executor file containing NUL bytes is refused with a journalled executor refusal and RuntimeCompError instead of an unjournalled raw ValueError; every legitimate executor source compiles and runs exactly as before; all pre-existing selflearn and root suites stay green; and the ValueError escape class at the AST preflight call site is closed with regression tests pinning it shut.",
+        "allowedOwnerNamespaces": [
+          "claude"
+        ],
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:t020-qualify-20260724",
+          "revisionFrom": 118,
+          "revisionTo": 119,
+          "at": "2026-07-24T05:29:53.961Z"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mbp.home.lan:t020-build-20260724",
+          "revisionFrom": 120,
+          "revisionTo": 121,
+          "at": "2026-07-24T05:47:39.819Z"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mbp.home.lan:t020-build-20260724",
+          "revisionFrom": 121,
+          "revisionTo": 122,
+          "at": "2026-07-24T05:47:39.891Z"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "claude:charltons-mbp.home.lan:t020-build-20260724",
+          "revisionFrom": 122,
+          "revisionTo": 123,
+          "at": "2026-07-24T06:05:24.684Z",
+          "evidence": {
+            "branch": "dev/t020-ast-preflight-valueerror-guard",
+            "head": "345134e3ece39b9166114bb5729e2c4facb9e2f4"
+          }
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+          "revisionFrom": 123,
+          "revisionTo": 124,
+          "at": "2026-07-24T06:16:14.855Z",
+          "evidence": {
+            "reviewBranch": "dev/t020-ast-preflight-valueerror-guard",
+            "reviewHead": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
+            "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9"
+          }
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+          "revisionFrom": 124,
+          "revisionTo": 125,
+          "at": "2026-07-24T06:28:49.495Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+            "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+            "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+            "commands": [
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+              "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+              "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+            ],
+            "evidenceRefs": [
+              "git:integration:c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+              "git:review-head:345134e3ece39b9166114bb5729e2c4facb9e2f4",
+              "github:pull/65:merged",
+              "pytest:compilation-runtime:32-passed",
+              "pytest:selflearn:339-passed:1-skipped",
+              "pytest:root:1768-passed:4-skipped:2-xfailed",
+              "git-diff-check:clean",
+              "review:.review-store/t020-glm-gate-review-811ef42.txt:sha256:07e66f553788341fec8bf9161f437926af7d77d152d98316d59c8569e5cee715:glm-5.2-approve-no-p0-p1-p2-3-p3",
+              "review:.review-store/t020-glm-gate-review-345134e.txt:sha256:d9b5f8a1ecae15fe53fd9063ab1606836998a274a4abfec5cfd5d19514d6a53d:glm-5.2-approve-no-p0-p1-p2",
+              "behavioral-verify:.review-store/t020-behavioral-verify-811ef42.txt:sha256:b6747f9d3791a0c6f15fdd111d38b5dad6bb64d01e6c6ab43ba96cb4a97003a3:6-of-6-pass-py310-py312",
+              "deferred-p3:glm-p3-1-escape-kind-taxonomy,glm-p3-2-recursionerror-memoryerror-unjournalled"
+            ],
+            "receiptHash": "sha256:22c4176c54e6ce84dc825c109b70cf716eb14a3346dab5fe2667b236c92f6c43"
+          }
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "claude:charltons-mbp.home.lan:t020-build-20260724",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "sourceRevision": "git:c338ec094830dd6f4186935cf6130a4585fb1a68;AGENTS-sha256:a8bc72172a1b203aba56509e555cef3753e9e6a6f8a355d5d6a90f2aac69bf06;charter-sha256:62e0732813b392da5c4e897c66066a7f50fefbd80203788a34330cf550dfd36c;discovered-by:meta17-gate6-F1-2026-07-24",
+        "worktreePath": "/private/tmp/meta-harness-t020",
+        "branch": "dev/t020-ast-preflight-valueerror-guard",
+        "baseCommit": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "currentHead": "c338ec094830dd6f4186935cf6130a4585fb1a68",
+        "paths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Close the unjournalled-ValueError escape class at the selflearn compilation runtime's AST preflight (META-17 gate-6 finding F1, P2, pre-existing). _ast_preflight (selflearn/src/selflearn/compilation/runtime.py:36) calls ast.parse at line 45 catching only SyntaxError; ast.parse raises ValueError -- not SyntaxError -- on NUL-bearing source, so at the call site (runtime.py:277) that ValueError escapes run() raw and unjournalled, violating both the journalled-refusal evidence contract and the RuntimeCompError normalization contract. The path-resolution subclass of this escape class was closed in 5d2fb52 (control-character preflight plus (OSError, ValueError) on the read guards, journalled under executor.malformed-path); this source-NUL subclass at the AST preflight was explicitly left open. Only reachable via a tampered hash-matched executor file, since json.dumps escapes NUL in legitimate compiler output -- which is precisely the adversarial surface the tamper evidence record exists for. Required behaviour: a preflight failure on NUL-bearing or otherwise ValueError-raising source must journal an executor refusal via the established _journal_refusal mechanism under an honest kind consistent with the existing executor.* refusal kinds, then raise RuntimeCompError; no raw ValueError may escape run() from the preflight site. Bringing the preflight's existing SyntaxError and dunder/builtins refusal paths under the same journalled-refusal contract at that call site is in scope if the chosen guard shape covers them naturally; rewriting the preflight's detection logic is not. Add regression tests proving: NUL-bearing source with a matching hash journals a refusal and raises RuntimeCompError (not ValueError); legitimate executor sources still compile and run unchanged; and the refusal journal entry carries the entry_id and honest kind. Scope is exactly the reserved paths: selflearn/src/selflearn/compilation (runtime.py expected; sibling modules only if the guard genuinely requires a shared helper) and selflearn/tests/test_compilation_runtime.py. No workplan scripts, no discovery package, no prompt/evaluator/deployment wiring, no doctor.py (its NUL-path reporting gap is a separate recorded P3, out of scope).",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+        ],
+        "nextCheckpoint": "A hash-matched executor file containing NUL bytes is refused with a journalled executor refusal and RuntimeCompError instead of an unjournalled raw ValueError; every legitimate executor source compiles and runs exactly as before; all pre-existing selflearn and root suites stay green; and the ValueError escape class at the AST preflight call site is closed with regression tests pinning it shut.",
+        "revisionFrom": 120,
+        "revisionTo": 121,
+        "at": "2026-07-24T05:47:39.819Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/t020-ast-preflight-valueerror-guard",
+        "head": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
+        "revisionFrom": 122,
+        "revisionTo": 123,
+        "at": "2026-07-24T06:05:24.684Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "reviewBranch": "dev/t020-ast-preflight-valueerror-guard",
+        "reviewHead": "345134e3ece39b9166114bb5729e2c4facb9e2f4",
+        "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "revisionFrom": 123,
+        "revisionTo": 124,
+        "at": "2026-07-24T06:16:14.855Z"
+      },
+      "releasedPaths": [
+        "selflearn/src/selflearn/compilation",
+        "selflearn/tests/test_compilation_runtime.py"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "definitionHash": "sha256:eebf9edf6e95be0b7db9386aab012b3e22509e3482814687b265e54440a93758",
+        "integrationCommit": "c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+        "commands": [
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests/test_compilation_runtime.py",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider selflearn/tests",
+          "cd /private/tmp/meta-harness-t020 && .venv/bin/pytest -q -p no:cacheprovider",
+          "git -C /private/tmp/meta-harness-t020 diff --check c338ec094830dd6f4186935cf6130a4585fb1a68"
+        ],
+        "evidenceRefs": [
+          "git:integration:c550bb453a6ff3bb937595089d77ae78ac6d07b9",
+          "git:review-head:345134e3ece39b9166114bb5729e2c4facb9e2f4",
+          "github:pull/65:merged",
+          "pytest:compilation-runtime:32-passed",
+          "pytest:selflearn:339-passed:1-skipped",
+          "pytest:root:1768-passed:4-skipped:2-xfailed",
+          "git-diff-check:clean",
+          "review:.review-store/t020-glm-gate-review-811ef42.txt:sha256:07e66f553788341fec8bf9161f437926af7d77d152d98316d59c8569e5cee715:glm-5.2-approve-no-p0-p1-p2-3-p3",
+          "review:.review-store/t020-glm-gate-review-345134e.txt:sha256:d9b5f8a1ecae15fe53fd9063ab1606836998a274a4abfec5cfd5d19514d6a53d:glm-5.2-approve-no-p0-p1-p2",
+          "behavioral-verify:.review-store/t020-behavioral-verify-811ef42.txt:sha256:b6747f9d3791a0c6f15fdd111d38b5dad6bb64d01e6c6ab43ba96cb4a97003a3:6-of-6-pass-py310-py312",
+          "deferred-p3:glm-p3-1-escape-kind-taxonomy,glm-p3-2-recursionerror-memoryerror-unjournalled"
+        ],
+        "receiptHash": "sha256:22c4176c54e6ce84dc825c109b70cf716eb14a3346dab5fe2667b236c92f6c43",
+        "actor": "coordinator:charltons-mbp.home.lan:t020-closeout-20260724",
+        "releasedPaths": [
+          "selflearn/src/selflearn/compilation",
+          "selflearn/tests/test_compilation_runtime.py"
+        ],
+        "revisionFrom": 124,
+        "revisionTo": 125,
+        "at": "2026-07-24T06:28:49.495Z"
+      }
+    },
+    {
+      "id": "TASK-20260724-021",
+      "title": "Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity",
+      "status": "backlog",
+      "owner": "workplan:add",
+      "paths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs",
+        "development/remote_workplan/gateway.py",
+        "tests/development/test_remote_workplan_gateway.py",
+        "AGENTS.md"
+      ],
+      "priority": 4,
+      "trace": "User decision 2026-07-24: generic pi namespace (not per-provider). The control root hard-codes claimable owner namespaces to codex|claude: the claim owner regex (workplan.mjs:192), the allowedOwnerNamespaces whitelist (workplan.mjs:1177,1183), and the remote gateway set {codex,claude,dev-orchestrator} (development/remote_workplan/gateway.py:235). A pi seat can execute the claim CLI but can only present a false codex/claude identity, which the append-only ledger honesty rules forbid. Add pi to all three enforcement points plus regression tests, and add a pi lane label to AGENTS.md:38. Provider identity stays visible via the session segment of pi:<host>:<session> naming convention. Cards already Ready keep their frozen namespaces (t020 remains claude-only).",
       "next": [
         "coordinator qualifies to Ready"
       ]
