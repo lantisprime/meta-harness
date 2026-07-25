@@ -1,4 +1,4 @@
-# Session Handoff — meta-harness (2026-07-26, session 57: META-32 source merged; closeout PR pending)
+# Session Handoff — meta-harness (2026-07-26, session 57: META-32 fully landed)
 
 ## State in one line
 
@@ -7,7 +7,8 @@ The reviewed source head is `48ca5db`; the separate local coordinator integratio
 commit is `b70a5bf`. Acceptance receipt `.workplan/t023-acceptance.json`
 (`sha256:6286cf57…835b`) released both paths. Source PR #74 passed CI and merged as
 `9863e3c`; the coordinator integration branch was also pushed so the receipt's
-integration commit remains remotely reachable. Only the closeout-records PR remains.
+integration commit remains remotely reachable. Closeout PR #75 passed CI and merged
+as `28dc775`. No TASK-023 work remains.
 
 ## What changed
 
@@ -44,13 +45,10 @@ The declared residual remains: an attacker who deletes or rewrites both
 
 ## Repository state and next steps
 
-1. Publish and merge the closeout records: board revisions 145→151,
-   definition/build spec, review artifact, acceptance receipt, and this handoff.
-2. Preserve unrelated pre-existing primary-worktree changes in the two episodic
+1. Preserve unrelated pre-existing primary-worktree changes in the two episodic
    memory skill files and untracked `.codex/`.
-3. Worktrees `/private/tmp/meta-harness-t023` and
-   `/private/tmp/meta-harness-t023-coordinator` remain intentionally available until
-   closeout publication is verified.
+2. Worktrees `/private/tmp/meta-harness-t023` and
+   `/private/tmp/meta-harness-t023-coordinator` are now deletable when convenient.
 
 ---
 
