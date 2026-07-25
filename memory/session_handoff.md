@@ -1,3 +1,59 @@
+# Session Handoff — meta-harness (2026-07-26, session 57: META-32 source merged; closeout PR pending)
+
+## State in one line
+
+META-32 / `TASK-20260725-023` is **`done`** at atomic board revision **151**.
+The reviewed source head is `48ca5db`; the separate local coordinator integration
+commit is `b70a5bf`. Acceptance receipt `.workplan/t023-acceptance.json`
+(`sha256:6286cf57…835b`) released both paths. Source PR #74 passed CI and merged as
+`9863e3c`; the coordinator integration branch was also pushed so the receipt's
+integration commit remains remotely reachable. Only the closeout-records PR remains.
+
+## What changed
+
+`appendReceipt` now maintains an optional per-card `receiptCount` outside the receipt
+array. Existing cards without the field migrate on their next append by anchoring the
+current array length. Once anchored, a nonnegative-integer count must exactly match
+the pre-append array length; a successful append increments it exactly once.
+
+This closes both confirmed attacks without relying on global revision adjacency:
+
+- deletion of an entire returning `block → resume` detour whose surviving tail still
+  matches the card's current status;
+- full receipt-array truncation followed by a false genesis append.
+
+The declared residual remains: an attacker who deletes or rewrites both
+`receiptCount` and `receipts` is in the broader rewrite-with-recompute class.
+
+## Evidence and review
+
+- Repro-before: both new attack fixtures failed because the vulnerable transitions
+  returned exit 0.
+- Frozen review head and coordinator merge: 155 passed, 0 failed on each; both diff
+  checks clean.
+- Scope: `scripts/workplan.mjs`, `scripts/workplan.test.mjs`; 247 insertions,
+  2 deletions, only 15 production lines.
+- Herdr session `drv-t023-glm-0726a` launched Pi through NeuralWatt GLM-5.2 with bare
+  `--no-extensions`, no permission-status line, and read-only tools. Verdict:
+  APPROVE, no P0/P1/P2/P3 findings. Owned session stopped and deleted.
+- Verbatim artifact:
+  `.review-store/t023-glm-herdr-review-48ca5db.md`
+  (`sha256:d464e27f…ea2`).
+- Local episodic milestone:
+  `20260725-231623-task-20260725-023-accepted-receiptcount--23ed`.
+
+## Repository state and next steps
+
+1. Publish and merge the closeout records: board revisions 145→151,
+   definition/build spec, review artifact, acceptance receipt, and this handoff.
+2. Preserve unrelated pre-existing primary-worktree changes in the two episodic
+   memory skill files and untracked `.codex/`.
+3. Worktrees `/private/tmp/meta-harness-t023` and
+   `/private/tmp/meta-harness-t023-coordinator` remain intentionally available until
+   closeout publication is verified.
+
+---
+
 # Session Handoff — meta-harness (2026-07-25, session 56: META-31 accepted and done at board 144; TASK-20260725-023 filed at 145; closeout PR pending)
 
 ## State in one line

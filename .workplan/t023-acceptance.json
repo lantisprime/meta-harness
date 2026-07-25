@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+  "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+  "integrationCommit": "b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+  "commands": [
+    "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+  ],
+  "evidenceRefs": [
+    "git:integration:b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+    "git:review-head:48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+    "git:base:c27ff5e1475d051922e7d97d7296619b26f4d121",
+    "node-test:review-head:155-pass-0-fail",
+    "node-test:integration:155-pass-0-fail",
+    "git-diff-check:review-head-clean",
+    "git-diff-check:integration-clean",
+    "diff-scope:2-files:247-insertions-2-deletions",
+    "review:.review-store/t023-glm-herdr-review-48ca5db.md:sha256:d464e27f4ddc0ad190910ef92e5cf018f202d89c87659216bf298cff31333ea2:neuralwatt-glm-5.2-approve-no-findings",
+    "herdr:drv-t023-glm-0726a:owned-stopped-deleted",
+    "repro:returning-detour-and-empty-ledger-attacks-failed-before-fix-and-rejected-after",
+    "residual:co-deleting-receiptCount-with-receipts-remains-rewrite-with-recompute-class"
+  ],
+  "receiptHash": "sha256:6286cf57e863dc945e77712ea382057fc1fdd1f8f748be89ffc1003c007b835b"
+}
