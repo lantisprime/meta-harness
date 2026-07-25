@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+  "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1",
+  "integrationCommit": "35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+  "commands": [
+    "cd /private/tmp/meta-harness-t022 && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-t022 diff --check 07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121"
+  ],
+  "evidenceRefs": [
+    "git:integration:35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+    "git:review-head:932ffca7e1bd626f3b3e8affc20da35295db843a",
+    "git:base:07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+    "github:pull/72:merged",
+    "github:ci:run-30148242641:test-success",
+    "node-test:workplan:151-pass-0-fail:baseline-143",
+    "git-diff-check:clean",
+    "diff-scope:2-files:workplan.mjs+5-2:workplan.test.mjs+257-0-additions-only",
+    "mutation-check:orchestrator:3-of-4-rejection-tests-fail-without-production-check",
+    "pytest:root-baseline-unaffected:1843-passed:2-xfailed:no-python-in-slice",
+    "plan-review:.review-store/t022-glm-plan-review.md:sha256:7705f6085a31dde31fc52f6388b1894210cd3dc4e6709c125aebb3e7c29cba76:glm-5.2-approve-4p3-folded-pre-build",
+    "review:.review-store/t022-panel-frozen-diff-932ffca.md:sha256:72cb18a1e8f7fc7e0fa63a1cf3c74f416bf957df4c6281c6312a741e4ab4f6eb:glm-5.2-approve+kimi-k3-approve-convergent-1p2-3p3",
+    "behavioral-verify:.review-store/t022-behavioral-verify-932ffca.md:sha256:b8ff93e339e2fbbc706906545254f0401480c06ffde49f41be353109a2474d23:minimax-m3-p1-p5-p7-pass-disposable-roots",
+    "deferred:returning-detour-tail-strip-confirmed-live-follow-up-card-filed",
+    "residual:full-truncation-to-empty-receipts-treated-as-genesis-documented",
+    "seat-note:codex-lens-superseded-by-kimi-k3-per-user-directive-mid-run"
+  ],
+  "receiptHash": "sha256:627e12783b0458c488e62dd9eed6a834fffd27c63e431a7b880de0a7a3be0210"
+}
