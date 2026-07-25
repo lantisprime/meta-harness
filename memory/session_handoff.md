@@ -1,3 +1,116 @@
+# Session Handoff — meta-harness (2026-07-25, session 56: META-31 accepted and done at board 144; TASK-20260725-023 filed at 145; closeout PR pending)
+
+## State in one line
+
+META-31 / `TASK-20260724-022` (ledger transition-completeness) is **`done`** at board
+revision **144**: PR #72 merged as `35c13e8`, reviewed head `932ffca`, acceptance
+receipt `.workplan/t022-acceptance.json` (`sha256:627e1278…0210`), both paths
+released. Follow-up **`TASK-20260725-023`** (returning-detour strip) filed at **145**
+and is now the only backlog card. Only the closeout records PR remains.
+
+## What shipped
+
+5 net production lines. `appendReceipt` now rejects an append whose ledger tail's
+`to` does not equal the transition's `from`. Two things are load-bearing:
+
+- **It compares the `from` ARGUMENT, never `card.status`.** `card.status` is mutated
+  *before* `appendReceipt` at 5 of 9 call sites (claim 1456→1459, claim-next
+  1553→1556, accept 2445→2463, block 2649→2651, ready 2875→2881) and *after* at the
+  other 4 (start, submit, integrate, resume). The card's own title said "matches the
+  card's current status" — that phrasing is **not implementable**; the orchestrator
+  caught this before the spec was frozen.
+- **Legacy tolerance is absence, not mismatch.** Absent/empty `receipts` passes;
+  a tail that exists is checked even when un-chained. The live board had zero chained
+  records, so legacy ledgers are where the attack was cheapest.
+
+Placement inside `appendReceipt` is deliberate: it is the single choke point for all 9
+sites, and it sits strictly downstream of every pre-existing receipts check
+(accept 2416/2417, block 2635, resume 2738/2740/2748), so no existing error message is
+displaced. Hoisting it to command entry would break the assertions at
+`workplan.test.mjs:8001`, `:8789`, `:6786`.
+
+node 151/151 (baseline 143), test diff additions-only 257/0. pytest untouched
+(no Python in slice), baseline 1843 passed / 2 xfailed.
+
+## The process record
+
+1. **Scouts (2× sonnet)** mapped all 9 append sites and the legacy-fixture surface.
+2. **Orchestrator ground-truthing** corrected the scouts and found the mutation-order
+   split that redirected the whole design to the `from` argument.
+3. **Plan review (GLM-5.2, pre-build)**: APPROVE with 4× P3, all citation/wording —
+   folded in before any code was written.
+4. **Build (MiniMax-M3)** in an isolated worktree; builder did not commit.
+5. **Orchestrator mutation check**: reverted the production check and re-ran — 3 of 4
+   rejection tests failed, proving they genuinely pin the defect.
+6. **Panel (GLM-5.2 + kimi-k3)**, both APPROVE, **convergent P2** found independently.
+7. **Behavioral verify (MiniMax-M3)**: P1–P5, P7 all PASS on real CLI + disposable roots.
+
+## The deferred residual — now `TASK-20260725-023`
+
+A **returning-detour** strip still succeeds. A `block`/`resume` pair starts and ends at
+the same status, so deleting both records leaves a tail that satisfies
+`tail.to === from` **and** leaves the chain internally consistent — so unlike other
+strip shapes, `validateReceiptChain` does not catch it at accept either. Verified live:
+`submit` exit 0, then `integrate` exit 0. `blockReason` / `retainPaths` / `blockedFrom`
+evidence is permanently lost.
+
+Both reviewers classed it as a limitation of the frozen invariant, faithfully
+implemented. Net effect of this card is still a large reduction in surface: before,
+*any* tail strip re-anchored; now only a same-status detour does.
+
+**Do not adopt kimi's proposed `tail.revisionTo === revisionFrom` fix as written** — the
+global revision counter advances from unrelated cards, which is exactly why
+`validateIntegrationReceipt` uses a `<=` bound (`workplan.mjs:2273-2292`).
+
+## Seats and cost
+
+Private herdr sessions `drv-t022-plan-7464`, `drv-t022-build-52039`,
+`drv-t022-panel-77721`, `drv-t022-verify-99488` — all stopped and deleted.
+GLM-5.2 plan review ~$0.71; MiniMax-M3 builder ~$0.06; GLM-5.2 panel ~$0.45;
+kimi-k3 panel ~$0.09; MiniMax-M3 verifier ~$0.24.
+
+## Process notes
+
+- **User directive mid-run: use herdr pi with kimi-k3 instead of codex** for panel
+  seats. `pi --provider moonshotai --model kimi-k3` returns **401 Invalid
+  Authentication**; the working route is `pi --provider kimi-coding --model k3`
+  (note the model is `k3`, not `kimi-k3`). Recorded in local episodes.
+- **`WORKPLAN_HOST_ALIASES` is NOT needed.** `isThisHost` checks
+  `host === os.hostname()` FIRST; aliases are only a fallback for stale names. Build
+  every `--owner`/`--actor` from `os.hostname()` (`Charltons-MacBook-Pro.local`) and no
+  env var is ever required. Copying the board's legacy `charltons-mbp.home.lan` is what
+  forces the alias. Host validation is parse-time on FLAGS only (:173, :197, :211,
+  plus lock metadata :774) — nothing re-validates a card's STORED owner host, so
+  legacy-owned cards integrate and accept fine. `origin/fix/workplan-host-aliases` is
+  provably redundant (main has `isThisHost` at all 4 sites; both of that branch's tests
+  are already in main) and can be deleted. Recorded in local episodes.
+- **zsh gotcha, again**: `"coordinator:$H:t022-…"` silently applied the `:t` history
+  modifier and ate the colon, producing `…Pro.local022-…`. Always brace: `${H}`.
+- The codex `exec` lens (superseded) could not run the suite at all — every test failed
+  at `mkdtemp` with EPERM under its read-only sandbox. Static-only review; kept as
+  `.review-store/t022-codex-supplementary-932ffca.txt`.
+
+## Housekeeping done
+
+All 4 stale worktrees swept after verification (`meta-17`, `meta-8`,
+`meta18-coordinator`, `wp-fix`) — 11/12 meta18 staged blobs were byte-identical to
+origin/main and `docs/architecture.md` had 0 lines at risk.
+
+## Next steps
+
+1. **Merge the closeout PR** (board 138 → 145 records, acceptance receipt, definition,
+   build spec, review artifacts, this handoff).
+2. Coordinator may qualify `TASK-20260725-023` — the only backlog card.
+3. Delete `origin/fix/workplan-host-aliases` (provably redundant, see above).
+4. Worktree `/private/tmp/meta-harness-t022` (card done) is deletable.
+5. 9 unmerged `agent/*`-class branches still await a human decision (session-50 list,
+   minus the host-aliases one above).
+6. Untracked `.codex/` (episodic-memory hook config) — gitignore or commit.
+7. Two orphan herdr sessions `drv-meta8-20260723`, `drv-pi-ext-mcpgw-31596` left
+   untouched (running sessions may belong to a sibling).
+
+---
+
 # Session Handoff — meta-harness (2026-07-24, session 55: META-28 accepted and done at board 137; META-31 follow-up filed at 138; closeout PR pending)
 
 ## State in one line

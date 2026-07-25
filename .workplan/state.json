@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 138,
+  "revision": 145,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -4160,6 +4160,239 @@
     {
       "id": "TASK-20260724-022",
       "title": "Enforce ledger transition-completeness so an append-side tail-strip cannot be re-anchored: before appending, each transition validates that the ledger tail's 'to' status matches the card's current status (legacy-tolerant), closing the codex P2 residual from TASK-20260724-019 where deleting a trailing receipt and running the next legitimate transition permanently re-anchors the chain over the gap.",
+      "status": "done",
+      "owner": "pi:charltons-mbp.home.lan:t022-build-20260725",
+      "paths": [],
+      "priority": 3,
+      "trace": "Deferred codex P2 from the TASK-20260724-019 panel (.review-store/t019-codex-review-b141afd.txt): remove ready->claimed from a claimed card, run start; the new record anchors to backlog->ready and all later chain validation passes despite the missing transition. Interacts with hand-written legacy fixtures and the gateway; needs its own design pass (status-vs-tail continuity, legacy scoping).",
+      "definition": {
+        "sourceRevision": "git:07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121;trace:TASK-20260724-022;linear:META-31;decided-by:t019-codex-P2-defer-20260724;plan-review:glm-5.2-APPROVE-4xP3-folded-20260725",
+        "worktreePath": "/private/tmp/meta-harness-t022",
+        "branch": "card/t022-transition-completeness",
+        "baseCommit": "07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+        "currentHead": "07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Enforce ledger transition-completeness at append time so an append-side tail-strip cannot be silently re-anchored, closing the codex P2 deferred from the TASK-20260724-019 panel (.review-store/t019-codex-review-b141afd.txt:31; Linear META-31). Threat boundary: hash-chaining proves the INTEGRITY of records that are present; it cannot prove COMPLETENESS. Stripping a ledger tail leaves a structurally valid, shorter chain, and the next legitimate append re-anchors prevEntryHash across the gap so every later validation passes. This card makes that gap detectable at the moment of the next append. Exactly one behavioral change plus its tests, both inside the two reserved paths. (1) In appendReceipt (scripts/workplan.mjs:1304-1331), before the new record is built, enforce the invariant tail.to === from, where tail is the last element of card.receipts and from is the argument ALREADY PASSED to appendReceipt. The comparison MUST use the from argument and MUST NOT read card.status: card.status is mutated BEFORE appendReceipt at 5 of the 9 call sites (claim 1456 before 1459, claim-next 1553 before 1556, accept 2445 before 2463, block 2649 before 2651, ready 2875 before 2881) and AFTER it at the other 4 (start 1888 before 1896, submit 1975 before 1984, integrate 2092 before 2106, resume 2761 before 2771), so any implementation reading card.status is wrong at half the sites. The from argument is the true pre-transition status at all 9 sites, including block, where from = card.blockedFrom is captured at 2646 before card.status is overwritten at 2649. (2) Legacy tolerance, stated exactly: tolerate ABSENCE, never MISMATCH. A card whose receipts array is absent or empty passes (genesis; also the seeded bootstrap card TASK-20260714-001, which is done with no receipts key on the live board). When a tail EXISTS the invariant is enforced regardless of whether that tail carries entryHash - legacy un-chained records are still records, and a fully legacy ledger is exactly where this attack is cheapest. The rejected weaker alternative, enforcing only when the tail is chained, would leave the entire live board (zero chained records today) undefended. (3) Placement inside appendReceipt is load-bearing, not cosmetic: it is the single choke point through which all 9 append sites funnel, card.receipts is already resident so no new I/O is needed, and because the three commands that already carry receipts-relevant checks run them first (accept validateIntegrationReceipt 2416 and validateReceiptChain 2417 before 2463; block validateReceiptChain 2635 before 2651; resume the latestReceipt.to !== blocked guard 2738, validateBlockedReceipt 2740 and validateReceiptChain 2748 before 2761) the new check can never displace an existing error message. The other 6 commands carry no pre-existing receipts checks, so the new check is simply the first such check there. Hoisting this as a blanket pre-check at command entry is FORBIDDEN: it would break the assertions at scripts/workplan.test.mjs:8001, :8789 and :6786, each of which deliberately constructs a tail/status mismatch and asserts on the existing narrower message. (4) On violation, fail() with a distinct greppable message; the frozen wording is: ledger tail <tail.to> does not match transition from <from>. Regression tests in scripts/workplan.test.mjs following existing conventions (repository/state/card builders :33-81, reachVerifying :349-381, blockCard :383-411, resumeCard :413-430): (a) THE CODEX REPRO EXACTLY - legitimately reach claimed, strip the ready-to-claimed record, run start, and assert it fails with the new message; this is the card reason to exist; (b) the same strip shape on a fully legacy un-chained ledger also fails; (c) genesis regression - a card with no receipts key still goes ready cleanly (guarding :8195); (d) an empty receipts array on a non-backlog card is allowed, pinned explicitly because no existing test covers that shape; (e) happy-path per transition - ready, claim, start, submit, integrate, block, resume all still append normally with a consistent tail; (f) block from review passes the check via blockedFrom; (g) resume from blocked passes with tail.to === blocked; (h) byte-preservation - state.json is unchanged after a rejected transition, mirroring the existing preserves-bytes pattern.",
+        "stopCondition": "Stop and fail closed on: any edit outside the two reserved paths (scripts/workplan.mjs, scripts/workplan.test.mjs); any implementation that reads card.status instead of the from argument inside appendReceipt; any hoisting of the new check to command entry or to validateState; any rewrite, re-hash, deletion or reordering of ledger records already present in a state file - append-only is inviolable; any check that rejects a card with an absent or empty receipts array; any weakening, rewording or deletion of an existing assertion in scripts/workplan.test.mjs to make the new check fit - if an existing test genuinely conflicts, STOP and report rather than edit it; any change to the declared residual pinned at scripts/workplan.test.mjs:8877, which strips chain FIELDS but no RECORD and must keep passing untouched; any edit to development/remote_workplan/gateway.py or any other file the trace mentions but the paths do not reserve; any new CLI flag, subcommand or dependency; validation ordered after mutation; a failing acceptance command; or an unresolved P0/P1 review finding.",
+        "evaluatorAuthority": "The implementing seat may not self-approve. Independent provider-diverse reviewers examine the frozen base..head diff read-only per AGENTS.md and return P0-P3 findings with file:line evidence, preserved verbatim under .review-store/. Any P0/P1 requires a new commit and a fresh frozen-diff review; after any fix round, re-freeze the card to the head actually reviewed before submit. Behavioral verification must drive the real workplan CLI against a disposable control root (a throwaway git repo, never the live board) and must demonstrate live: the codex P2 repro rejected at start; the same strip rejected on a fully legacy ledger; a genesis ready succeeding on a card with no receipts key; every happy-path transition still appending; and canonical files byte-identical after each rejection. The transcript is captured under .review-store/. A distinct coordinator actor runs integrate and accept. This card grants no promotion, deployment, evaluator-write, or credential authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t022 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t022 diff --check 07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121"
+        ],
+        "nextCheckpoint": "appendReceipt enforces tail.to === from at every one of its 9 call sites using the from argument; a card whose ledger tail was stripped is rejected at the next legitimate transition with the frozen message, on both chained and fully legacy ledgers; cards with an absent or empty receipts array still transition cleanly; every existing assertion in scripts/workplan.test.mjs is untouched and the declared-residual test at :8877 still passes; the node suite is green against the baseline of 143/143; the Python suite is unaffected (no Python in the writable slice) against the baseline of 1843 passed 2 xfailed; and a real seat has demonstrated the codex repro rejection and the legacy tolerance against a disposable control root with the transcript preserved under .review-store/.",
+        "allowedOwnerNamespaces": [
+          "claude",
+          "pi"
+        ],
+        "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1"
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:t022-20260725",
+          "revisionFrom": 138,
+          "revisionTo": 139,
+          "at": "2026-07-25T06:04:20.521Z",
+          "prevEntryHash": null,
+          "entryHash": "sha256:4572baaab4705fd4897cd13ba3dad43731b817eaa4dbb6c1ab48e83268067df0"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "pi:charltons-mbp.home.lan:t022-build-20260725",
+          "revisionFrom": 139,
+          "revisionTo": 140,
+          "at": "2026-07-25T06:04:38.150Z",
+          "prevEntryHash": "sha256:4572baaab4705fd4897cd13ba3dad43731b817eaa4dbb6c1ab48e83268067df0",
+          "entryHash": "sha256:cbf8a62d9474786b92a56e94d6e8141270e220aa6e34deca85b2e2827e4b50cd"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "pi:charltons-mbp.home.lan:t022-build-20260725",
+          "revisionFrom": 140,
+          "revisionTo": 141,
+          "at": "2026-07-25T06:04:38.224Z",
+          "prevEntryHash": "sha256:cbf8a62d9474786b92a56e94d6e8141270e220aa6e34deca85b2e2827e4b50cd",
+          "entryHash": "sha256:35129d07793023bfd34db6dbfdb916f086f45a88547465bea6a6d28e4230e3bf"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "pi:charltons-mbp.home.lan:t022-build-20260725",
+          "revisionFrom": 141,
+          "revisionTo": 142,
+          "at": "2026-07-25T06:50:30.397Z",
+          "evidence": {
+            "branch": "card/t022-transition-completeness",
+            "head": "932ffca7e1bd626f3b3e8affc20da35295db843a"
+          },
+          "prevEntryHash": "sha256:35129d07793023bfd34db6dbfdb916f086f45a88547465bea6a6d28e4230e3bf",
+          "entryHash": "sha256:4ac777f3cfa9e1f860612a724238e161a6d207ee3dcab47505e358023bad38d4"
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+          "revisionFrom": 142,
+          "revisionTo": 143,
+          "at": "2026-07-25T08:04:59.664Z",
+          "evidence": {
+            "reviewBranch": "card/t022-transition-completeness",
+            "reviewHead": "932ffca7e1bd626f3b3e8affc20da35295db843a",
+            "integrationCommit": "35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+            "integrationReceiptHash": "sha256:bf3869244bb74437f6c4275ccf6f868d94f5530017987ed22f6427090fabd1fe"
+          },
+          "prevEntryHash": "sha256:4ac777f3cfa9e1f860612a724238e161a6d207ee3dcab47505e358023bad38d4",
+          "entryHash": "sha256:dfade08a30c60621b6dda78fd96b03dd28b0f876ef54a0be1b438e1b64f52219"
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+          "revisionFrom": 143,
+          "revisionTo": 144,
+          "at": "2026-07-25T08:06:55.970Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+            "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1",
+            "integrationCommit": "35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+            "commands": [
+              "cd /private/tmp/meta-harness-t022 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-t022 diff --check 07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121"
+            ],
+            "evidenceRefs": [
+              "git:integration:35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+              "git:review-head:932ffca7e1bd626f3b3e8affc20da35295db843a",
+              "git:base:07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+              "github:pull/72:merged",
+              "github:ci:run-30148242641:test-success",
+              "node-test:workplan:151-pass-0-fail:baseline-143",
+              "git-diff-check:clean",
+              "diff-scope:2-files:workplan.mjs+5-2:workplan.test.mjs+257-0-additions-only",
+              "mutation-check:orchestrator:3-of-4-rejection-tests-fail-without-production-check",
+              "pytest:root-baseline-unaffected:1843-passed:2-xfailed:no-python-in-slice",
+              "plan-review:.review-store/t022-glm-plan-review.md:sha256:7705f6085a31dde31fc52f6388b1894210cd3dc4e6709c125aebb3e7c29cba76:glm-5.2-approve-4p3-folded-pre-build",
+              "review:.review-store/t022-panel-frozen-diff-932ffca.md:sha256:72cb18a1e8f7fc7e0fa63a1cf3c74f416bf957df4c6281c6312a741e4ab4f6eb:glm-5.2-approve+kimi-k3-approve-convergent-1p2-3p3",
+              "behavioral-verify:.review-store/t022-behavioral-verify-932ffca.md:sha256:b8ff93e339e2fbbc706906545254f0401480c06ffde49f41be353109a2474d23:minimax-m3-p1-p5-p7-pass-disposable-roots",
+              "deferred:returning-detour-tail-strip-confirmed-live-follow-up-card-filed",
+              "residual:full-truncation-to-empty-receipts-treated-as-genesis-documented",
+              "seat-note:codex-lens-superseded-by-kimi-k3-per-user-directive-mid-run"
+            ],
+            "receiptHash": "sha256:627e12783b0458c488e62dd9eed6a834fffd27c63e431a7b880de0a7a3be0210"
+          },
+          "prevEntryHash": "sha256:dfade08a30c60621b6dda78fd96b03dd28b0f876ef54a0be1b438e1b64f52219",
+          "entryHash": "sha256:15f470fbdfb67ae2f8bbceb98ab61828a1bcaca7789c28c75b0648106ad5545d"
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "pi:charltons-mbp.home.lan:t022-build-20260725",
+        "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1",
+        "sourceRevision": "git:07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121;trace:TASK-20260724-022;linear:META-31;decided-by:t019-codex-P2-defer-20260724;plan-review:glm-5.2-APPROVE-4xP3-folded-20260725",
+        "worktreePath": "/private/tmp/meta-harness-t022",
+        "branch": "card/t022-transition-completeness",
+        "baseCommit": "07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+        "currentHead": "07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+        "paths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Enforce ledger transition-completeness at append time so an append-side tail-strip cannot be silently re-anchored, closing the codex P2 deferred from the TASK-20260724-019 panel (.review-store/t019-codex-review-b141afd.txt:31; Linear META-31). Threat boundary: hash-chaining proves the INTEGRITY of records that are present; it cannot prove COMPLETENESS. Stripping a ledger tail leaves a structurally valid, shorter chain, and the next legitimate append re-anchors prevEntryHash across the gap so every later validation passes. This card makes that gap detectable at the moment of the next append. Exactly one behavioral change plus its tests, both inside the two reserved paths. (1) In appendReceipt (scripts/workplan.mjs:1304-1331), before the new record is built, enforce the invariant tail.to === from, where tail is the last element of card.receipts and from is the argument ALREADY PASSED to appendReceipt. The comparison MUST use the from argument and MUST NOT read card.status: card.status is mutated BEFORE appendReceipt at 5 of the 9 call sites (claim 1456 before 1459, claim-next 1553 before 1556, accept 2445 before 2463, block 2649 before 2651, ready 2875 before 2881) and AFTER it at the other 4 (start 1888 before 1896, submit 1975 before 1984, integrate 2092 before 2106, resume 2761 before 2771), so any implementation reading card.status is wrong at half the sites. The from argument is the true pre-transition status at all 9 sites, including block, where from = card.blockedFrom is captured at 2646 before card.status is overwritten at 2649. (2) Legacy tolerance, stated exactly: tolerate ABSENCE, never MISMATCH. A card whose receipts array is absent or empty passes (genesis; also the seeded bootstrap card TASK-20260714-001, which is done with no receipts key on the live board). When a tail EXISTS the invariant is enforced regardless of whether that tail carries entryHash - legacy un-chained records are still records, and a fully legacy ledger is exactly where this attack is cheapest. The rejected weaker alternative, enforcing only when the tail is chained, would leave the entire live board (zero chained records today) undefended. (3) Placement inside appendReceipt is load-bearing, not cosmetic: it is the single choke point through which all 9 append sites funnel, card.receipts is already resident so no new I/O is needed, and because the three commands that already carry receipts-relevant checks run them first (accept validateIntegrationReceipt 2416 and validateReceiptChain 2417 before 2463; block validateReceiptChain 2635 before 2651; resume the latestReceipt.to !== blocked guard 2738, validateBlockedReceipt 2740 and validateReceiptChain 2748 before 2761) the new check can never displace an existing error message. The other 6 commands carry no pre-existing receipts checks, so the new check is simply the first such check there. Hoisting this as a blanket pre-check at command entry is FORBIDDEN: it would break the assertions at scripts/workplan.test.mjs:8001, :8789 and :6786, each of which deliberately constructs a tail/status mismatch and asserts on the existing narrower message. (4) On violation, fail() with a distinct greppable message; the frozen wording is: ledger tail <tail.to> does not match transition from <from>. Regression tests in scripts/workplan.test.mjs following existing conventions (repository/state/card builders :33-81, reachVerifying :349-381, blockCard :383-411, resumeCard :413-430): (a) THE CODEX REPRO EXACTLY - legitimately reach claimed, strip the ready-to-claimed record, run start, and assert it fails with the new message; this is the card reason to exist; (b) the same strip shape on a fully legacy un-chained ledger also fails; (c) genesis regression - a card with no receipts key still goes ready cleanly (guarding :8195); (d) an empty receipts array on a non-backlog card is allowed, pinned explicitly because no existing test covers that shape; (e) happy-path per transition - ready, claim, start, submit, integrate, block, resume all still append normally with a consistent tail; (f) block from review passes the check via blockedFrom; (g) resume from blocked passes with tail.to === blocked; (h) byte-preservation - state.json is unchanged after a rejected transition, mirroring the existing preserves-bytes pattern.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t022 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t022 diff --check 07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121"
+        ],
+        "nextCheckpoint": "appendReceipt enforces tail.to === from at every one of its 9 call sites using the from argument; a card whose ledger tail was stripped is rejected at the next legitimate transition with the frozen message, on both chained and fully legacy ledgers; cards with an absent or empty receipts array still transition cleanly; every existing assertion in scripts/workplan.test.mjs is untouched and the declared-residual test at :8877 still passes; the node suite is green against the baseline of 143/143; the Python suite is unaffected (no Python in the writable slice) against the baseline of 1843 passed 2 xfailed; and a real seat has demonstrated the codex repro rejection and the legacy tolerance against a disposable control root with the transcript preserved under .review-store/.",
+        "revisionFrom": 139,
+        "revisionTo": 140,
+        "at": "2026-07-25T06:04:38.150Z"
+      },
+      "reviewFreeze": {
+        "branch": "card/t022-transition-completeness",
+        "head": "932ffca7e1bd626f3b3e8affc20da35295db843a",
+        "revisionFrom": 141,
+        "revisionTo": 142,
+        "at": "2026-07-25T06:50:30.397Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+        "reviewBranch": "card/t022-transition-completeness",
+        "reviewHead": "932ffca7e1bd626f3b3e8affc20da35295db843a",
+        "integrationCommit": "35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+        "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1",
+        "revisionFrom": 142,
+        "revisionTo": 143,
+        "at": "2026-07-25T08:04:59.663Z"
+      },
+      "releasedPaths": [
+        "scripts/workplan.mjs",
+        "scripts/workplan.test.mjs"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+        "definitionHash": "sha256:404336148ed9fd78048dc3862a24f98a3bb5fcf1d8b69781a760ae53773dd1c1",
+        "integrationCommit": "35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+        "commands": [
+          "cd /private/tmp/meta-harness-t022 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t022 diff --check 07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121"
+        ],
+        "evidenceRefs": [
+          "git:integration:35c13e8cec75d41a812952d5ef91ab1c6561bcfb",
+          "git:review-head:932ffca7e1bd626f3b3e8affc20da35295db843a",
+          "git:base:07c50954e3ddf1b21b0bd2e52c7f5a4b131dd121",
+          "github:pull/72:merged",
+          "github:ci:run-30148242641:test-success",
+          "node-test:workplan:151-pass-0-fail:baseline-143",
+          "git-diff-check:clean",
+          "diff-scope:2-files:workplan.mjs+5-2:workplan.test.mjs+257-0-additions-only",
+          "mutation-check:orchestrator:3-of-4-rejection-tests-fail-without-production-check",
+          "pytest:root-baseline-unaffected:1843-passed:2-xfailed:no-python-in-slice",
+          "plan-review:.review-store/t022-glm-plan-review.md:sha256:7705f6085a31dde31fc52f6388b1894210cd3dc4e6709c125aebb3e7c29cba76:glm-5.2-approve-4p3-folded-pre-build",
+          "review:.review-store/t022-panel-frozen-diff-932ffca.md:sha256:72cb18a1e8f7fc7e0fa63a1cf3c74f416bf957df4c6281c6312a741e4ab4f6eb:glm-5.2-approve+kimi-k3-approve-convergent-1p2-3p3",
+          "behavioral-verify:.review-store/t022-behavioral-verify-932ffca.md:sha256:b8ff93e339e2fbbc706906545254f0401480c06ffde49f41be353109a2474d23:minimax-m3-p1-p5-p7-pass-disposable-roots",
+          "deferred:returning-detour-tail-strip-confirmed-live-follow-up-card-filed",
+          "residual:full-truncation-to-empty-receipts-treated-as-genesis-documented",
+          "seat-note:codex-lens-superseded-by-kimi-k3-per-user-directive-mid-run"
+        ],
+        "receiptHash": "sha256:627e12783b0458c488e62dd9eed6a834fffd27c63e431a7b880de0a7a3be0210",
+        "actor": "coordinator:Charltons-MacBook-Pro.local:t022-closeout-20260725",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "revisionFrom": 143,
+        "revisionTo": 144,
+        "at": "2026-07-25T08:06:55.970Z"
+      }
+    },
+    {
+      "id": "TASK-20260725-023",
+      "title": "Close the returning-detour ledger strip that TASK-20260724-022's tail.to===from invariant cannot detect: because a block/resume detour starts and ends at the same status, deleting the whole detour leaves a tail that still satisfies the invariant AND leaves the hash chain internally consistent, so neither the append-side check nor validateReceiptChain at accept catches it. Confirmed live: submit returns exit 0 and integrate then also returns exit 0, and the blockReason/retainPaths/blockedFrom evidence is permanently lost. Needs a strictly stronger continuity rule (e.g. per-card record sequence numbers, or no-revisit / most-recent-record detection). Also covers the adjacent full-truncation-to-empty case, where clearing the receipts array entirely makes the next transition write a fresh genesis record with prevEntryHash null. WARNING: the naive strengthening tail.revisionTo===revisionFrom is UNSAFE and must not be adopted as-is - the global revision counter advances from unrelated cards, which is exactly why validateIntegrationReceipt uses a <= bound rather than equality (scripts/workplan.mjs:2273-2292); any fix must survive an unrelated card transitioning in between two of this card's transitions.",
       "status": "backlog",
       "owner": "workplan:add",
       "paths": [
@@ -4167,7 +4400,7 @@
         "scripts/workplan.test.mjs"
       ],
       "priority": 3,
-      "trace": "Deferred codex P2 from the TASK-20260724-019 panel (.review-store/t019-codex-review-b141afd.txt): remove ready->claimed from a claimed card, run start; the new record anchors to backlog->ready and all later chain validation passes despite the missing transition. Interacts with hand-written legacy fixtures and the gateway; needs its own design pass (status-vs-tail continuity, legacy scoping)."
+      "trace": "Convergent P2 from the TASK-20260724-022 frozen-diff panel at 932ffca, found independently by GLM-5.2 and kimi-k3, then CONFIRMED LIVE by the MiniMax-M3 behavioral verifier probe P8 against disposable roots. Artifacts: .review-store/t022-panel-frozen-diff-932ffca.md, .review-store/t022-behavioral-verify-932ffca.md. Both reviewers classified it as a limitation of the frozen invariant, faithfully implemented, not an implementation defect; closing it was forbidden by that card's stop condition. Sibling-class follow-up in the same lineage as t018-panel-P3 -> META-28 -> META-31."
     }
   ]
 }
