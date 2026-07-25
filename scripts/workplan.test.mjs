@@ -8958,3 +8958,260 @@ test("wholesale removal of every chain field pins the declared residual (tampere
     code: "ENOENT",
   });
 });
+
+test("start rejects a stripped ready-to-claimed tail before re-anchoring", async (context) => {
+  // Pins the exact codex repro: a legitimately chained claimed card must not
+  // bridge directly from the surviving ready tail into in_progress.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/tail-strip"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  tampered.cards[0].receipts.pop();
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const result = await run([
+    "start",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /ledger tail ready does not match transition from claimed/,
+  );
+});
+
+test("start rejects a stripped tail in a fully legacy un-chained ledger", async (context) => {
+  // Pins legacy mismatch handling: removing chain fields must not exempt a
+  // surviving tail whose destination differs from the transition source.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/legacy-tail-strip"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  for (const receipt of tampered.cards[0].receipts) {
+    delete receipt.entryHash;
+    delete receipt.prevEntryHash;
+  }
+  tampered.cards[0].receipts.pop();
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const result = await run([
+    "start",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /ledger tail ready does not match transition from claimed/,
+  );
+});
+
+test("ready allows genesis when the receipts key is absent", async (context) => {
+  // Pins absence tolerance for genesis cards: no receipts key is not a tail
+  // mismatch, and ready creates the first backlog-to-ready record.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/genesis-absence"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  await readyCard(root, "TASK-20260711-001");
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "ready");
+  assert.deepEqual(
+    finalState.cards[0].receipts.map(({ from, to }) => ({ from, to })),
+    [{ from: "backlog", to: "ready" }],
+  );
+});
+
+test("start allows an empty receipts array on a non-backlog card", async (context) => {
+  // Pins the other absence shape explicitly: an empty ledger is allowed even
+  // when the card is claimed, and start creates a new genesis receipt.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/empty-non-backlog"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const emptied = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  emptied.cards[0].receipts = [];
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(emptied, null, 2)}\n`,
+  );
+
+  await startCard(root, "TASK-20260711-001", owner);
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "in_progress");
+  assert.equal(finalState.cards[0].receipts.length, 1);
+  assert.equal(finalState.cards[0].receipts[0].from, "claimed");
+  assert.equal(finalState.cards[0].receipts[0].to, "in_progress");
+  assert.equal(finalState.cards[0].receipts[0].prevEntryHash, null);
+});
+
+test("consistent tails allow every normal append transition", async (context) => {
+  // Pins the happy path through ready, claim, start, submit, integrate, block,
+  // and resume: each appended record begins where the preceding record ended.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/complete-happy-path"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachVerifying(root, "TASK-20260711-001");
+  await blockCard(root, "TASK-20260711-001", owner, "6", "pause", true);
+  await resumeCard(root, "TASK-20260711-001", owner, "7");
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "in_progress");
+  assert.deepEqual(
+    finalState.cards[0].receipts.map(({ from, to }) => ({ from, to })),
+    [
+      { from: "backlog", to: "ready" },
+      { from: "ready", to: "claimed" },
+      { from: "claimed", to: "in_progress" },
+      { from: "in_progress", to: "review" },
+      { from: "review", to: "verifying" },
+      { from: "verifying", to: "blocked" },
+      { from: "blocked", to: "in_progress" },
+    ],
+  );
+});
+
+test("block from review checks the captured blockedFrom source", async (context) => {
+  // Pins the pre-mutation source argument for block: card.status is already
+  // blocked at append time, while blockedFrom still identifies review.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/block-from-review-tail"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachReview(root, "TASK-20260711-001");
+  await blockCard(root, "TASK-20260711-001", owner, "5", "pause review", true);
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "blocked");
+  assert.equal(finalState.cards[0].blockedFrom, "review");
+  assert.equal(finalState.cards[0].receipts.at(-1).from, "review");
+  assert.equal(finalState.cards[0].receipts.at(-1).to, "blocked");
+});
+
+test("resume accepts a blocked ledger tail and lands in in_progress", async (context) => {
+  // Pins resume's source and destination: tail.to blocked satisfies from
+  // blocked, and the resulting receipt lands in in_progress.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/resume-blocked-tail"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  await blockCard(root, "TASK-20260711-001", owner, "3", "pause claim", true);
+  await resumeCard(root, "TASK-20260711-001", owner, "4");
+
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].status, "in_progress");
+  assert.equal(finalState.cards[0].receipts.at(-2).to, "blocked");
+  assert.equal(finalState.cards[0].receipts.at(-1).from, "blocked");
+  assert.equal(finalState.cards[0].receipts.at(-1).to, "in_progress");
+});
+
+test("tail mismatch rejection preserves canonical bytes", async (context) => {
+  // Pins fail-before-write behavior: rejecting a stripped claimed tail leaves
+  // both state.json and its WORKPLAN.md projection byte-identical.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/tail-mismatch-bytes"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  tampered.cards[0].receipts.pop();
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+
+  const result = await run([
+    "start",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /ledger tail ready does not match transition from claimed/,
+  );
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+});

@@ -1311,9 +1311,12 @@ function appendReceipt(
   evidence,
 ) {
   card.receipts = [...(card.receipts || [])];
-  const lastReceipt =
+  const tail =
     card.receipts.length > 0 ? card.receipts[card.receipts.length - 1] : null;
-  const prevEntryHash = lastReceipt ? computeRecordEntryHash(lastReceipt) : null;
+  if (tail && tail.to !== from) {
+    fail(`ledger tail ${tail.to} does not match transition from ${from}`);
+  }
+  const prevEntryHash = tail ? computeRecordEntryHash(tail) : null;
   const receipt = {
     from,
     to,
