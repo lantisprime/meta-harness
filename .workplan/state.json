@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 145,
+  "revision": 151,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -4393,14 +4393,227 @@
     {
       "id": "TASK-20260725-023",
       "title": "Close the returning-detour ledger strip that TASK-20260724-022's tail.to===from invariant cannot detect: because a block/resume detour starts and ends at the same status, deleting the whole detour leaves a tail that still satisfies the invariant AND leaves the hash chain internally consistent, so neither the append-side check nor validateReceiptChain at accept catches it. Confirmed live: submit returns exit 0 and integrate then also returns exit 0, and the blockReason/retainPaths/blockedFrom evidence is permanently lost. Needs a strictly stronger continuity rule (e.g. per-card record sequence numbers, or no-revisit / most-recent-record detection). Also covers the adjacent full-truncation-to-empty case, where clearing the receipts array entirely makes the next transition write a fresh genesis record with prevEntryHash null. WARNING: the naive strengthening tail.revisionTo===revisionFrom is UNSAFE and must not be adopted as-is - the global revision counter advances from unrelated cards, which is exactly why validateIntegrationReceipt uses a <= bound rather than equality (scripts/workplan.mjs:2273-2292); any fix must survive an unrelated card transitioning in between two of this card's transitions.",
-      "status": "backlog",
-      "owner": "workplan:add",
-      "paths": [
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:t023-build-20260726",
+      "paths": [],
+      "priority": 3,
+      "trace": "Convergent P2 from the TASK-20260724-022 frozen-diff panel at 932ffca, found independently by GLM-5.2 and kimi-k3, then CONFIRMED LIVE by the MiniMax-M3 behavioral verifier probe P8 against disposable roots. Artifacts: .review-store/t022-panel-frozen-diff-932ffca.md, .review-store/t022-behavioral-verify-932ffca.md. Both reviewers classified it as a limitation of the frozen invariant, faithfully implemented, not an implementation defect; closing it was forbidden by that card's stop condition. Sibling-class follow-up in the same lineage as t018-panel-P3 -> META-28 -> META-31.",
+      "definition": {
+        "sourceRevision": "git:c27ff5e1475d051922e7d97d7296619b26f4d121;trace:TASK-20260725-023;linear:META-32;t022-panel:932ffca-convergent-P2",
+        "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+        "worktreePath": "/private/tmp/meta-harness-t023",
+        "branch": "card/t023-ledger-continuity",
+        "baseCommit": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+        "currentHead": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Close the receipt-ledger completeness gap left by TASK-20260724-022 without using global revision adjacency. Add one optional per-card receiptCount anchor outside card.receipts. In appendReceipt, copy the existing receipt array, then: when receiptCount is absent, treat the card as legacy and initialize the anchor from the current array length; when present, require a nonnegative integer exactly equal to the current array length before constructing or appending any new receipt. Reject a mismatch with one distinct greppable error. After a successful append, increment receiptCount exactly once. Existing entryHash/prevEntryHash validation continues to prove integrity of surviving records; receiptCount proves the number of records has not decreased. This must reject (1) deletion of an entire returning block-to-resume detour whose surviving tail still ends at the current status and (2) clearing the whole receipt array before the next transition. It must preserve legitimate transitions when unrelated cards advance the global board revision. Legacy cards without receiptCount, including absent or empty receipt arrays, may migrate on their next append; once anchored, deleting receiptCount together with records remains an explicitly documented rewrite-with-recompute class outside this card. Only scripts/workplan.mjs and scripts/workplan.test.mjs may change.",
+        "stopCondition": "Stop and fail closed on any edit outside scripts/workplan.mjs and scripts/workplan.test.mjs; any use of tail.revisionTo === revisionFrom or another global-revision adjacency assumption; any new dependency, CLI flag, subcommand, state schema bump, or product-runtime change; any rewrite, deletion, reordering, or re-hashing of existing receipts; any validation performed only after canonical files are written; any behavior that prevents a legacy card with no receiptCount from migrating on its next append; any weakening or rewording of an existing assertion; any failure of the 151-test baseline or new attack fixtures; a moving-diff review; or an unresolved P0/P1 Pi/GLM-5.2 finding.",
+        "evaluatorAuthority": "The implementing Codex seat may not self-approve. Pi using NeuralWatt GLM-5.2 must review the frozen base c27ff5e1475d051922e7d97d7296619b26f4d121 through exact review head in read-only mode, with acceptance criteria, charter invariant, and test evidence in the brief and file-and-line evidence for every P0-P3 finding. Review output is preserved verbatim under .review-store/ and substantive findings receive ACCEPT, ACCEPT-WITH-MOD, REJECT, DEFER, or NEEDS-EVIDENCE dispositions. Any accepted fix requires a new frozen commit and fresh review. A distinct coordinator remains responsible for integration and acceptance. This card grants no evaluator-write, merge, promotion, deployment, credential, or runtime authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+        ],
+        "nextCheckpoint": "Baseline 151/151 remains green; new tests first reproduce and then reject returning block/resume detour deletion and full receipt-array truncation with byte-identical canonical files; a legacy card without receiptCount migrates and gains the correct count; an anchored happy path increments exactly once per transition; an unrelated-card revision between transitions remains valid; the exact two-file diff is frozen in a commit and Pi/NeuralWatt GLM-5.2 reports no unresolved P0/P1.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:t023-qualify-20260726",
+          "revisionFrom": 145,
+          "revisionTo": 146,
+          "at": "2026-07-25T22:01:35.668Z",
+          "prevEntryHash": null,
+          "entryHash": "sha256:166027ccdfa40511e2e9fff4039c3cad14ae1325a29da836eb8d4b320d650fa1"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:t023-build-20260726",
+          "revisionFrom": 146,
+          "revisionTo": 147,
+          "at": "2026-07-25T22:02:01.069Z",
+          "prevEntryHash": "sha256:166027ccdfa40511e2e9fff4039c3cad14ae1325a29da836eb8d4b320d650fa1",
+          "entryHash": "sha256:4e4e23b9b4657ce3f3c029c7b6b205f8c360bdb3719e69f4719407abcc3ca3b7"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:t023-build-20260726",
+          "revisionFrom": 147,
+          "revisionTo": 148,
+          "at": "2026-07-25T22:02:01.141Z",
+          "prevEntryHash": "sha256:4e4e23b9b4657ce3f3c029c7b6b205f8c360bdb3719e69f4719407abcc3ca3b7",
+          "entryHash": "sha256:ba30d78d0873f4669e25148a511faec1e9dbba260e369d813ec2afe319cfe5ee"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:t023-build-20260726",
+          "revisionFrom": 148,
+          "revisionTo": 149,
+          "at": "2026-07-25T22:47:04.282Z",
+          "evidence": {
+            "branch": "card/t023-ledger-continuity",
+            "head": "48ca5db92cee45f3700a4c15841c6075bb95cfdc"
+          },
+          "prevEntryHash": "sha256:ba30d78d0873f4669e25148a511faec1e9dbba260e369d813ec2afe319cfe5ee",
+          "entryHash": "sha256:735ebd7ba5305dda5a93386dec0ec54674c9ed693007839479564d694b024093"
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+          "revisionFrom": 149,
+          "revisionTo": 150,
+          "at": "2026-07-25T23:13:20.373Z",
+          "evidence": {
+            "reviewBranch": "card/t023-ledger-continuity",
+            "reviewHead": "48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+            "integrationCommit": "b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+            "integrationReceiptHash": "sha256:ab47463bac486bec209c81ebc0bafdae2308bfcbbe0c819ad4d882dfceca43e3"
+          },
+          "prevEntryHash": "sha256:735ebd7ba5305dda5a93386dec0ec54674c9ed693007839479564d694b024093",
+          "entryHash": "sha256:598ecc2ad15c31f59e7ea0e15de95e51681a87a36f67563f7375e8abc8f03fc7"
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+          "revisionFrom": 150,
+          "revisionTo": 151,
+          "at": "2026-07-25T23:15:41.566Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+            "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+            "integrationCommit": "b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+            "commands": [
+              "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+            ],
+            "evidenceRefs": [
+              "git:integration:b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+              "git:review-head:48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+              "git:base:c27ff5e1475d051922e7d97d7296619b26f4d121",
+              "node-test:review-head:155-pass-0-fail",
+              "node-test:integration:155-pass-0-fail",
+              "git-diff-check:review-head-clean",
+              "git-diff-check:integration-clean",
+              "diff-scope:2-files:247-insertions-2-deletions",
+              "review:.review-store/t023-glm-herdr-review-48ca5db.md:sha256:d464e27f4ddc0ad190910ef92e5cf018f202d89c87659216bf298cff31333ea2:neuralwatt-glm-5.2-approve-no-findings",
+              "herdr:drv-t023-glm-0726a:owned-stopped-deleted",
+              "repro:returning-detour-and-empty-ledger-attacks-failed-before-fix-and-rejected-after",
+              "residual:co-deleting-receiptCount-with-receipts-remains-rewrite-with-recompute-class"
+            ],
+            "receiptHash": "sha256:6286cf57e863dc945e77712ea382057fc1fdd1f8f748be89ffc1003c007b835b"
+          },
+          "prevEntryHash": "sha256:598ecc2ad15c31f59e7ea0e15de95e51681a87a36f67563f7375e8abc8f03fc7",
+          "entryHash": "sha256:efbd6470aec1e232fad21cc2da861f89bce632648702df80fdd1d68404f92536"
+        }
+      ],
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:t023-build-20260726",
+        "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+        "sourceRevision": "git:c27ff5e1475d051922e7d97d7296619b26f4d121;trace:TASK-20260725-023;linear:META-32;t022-panel:932ffca-convergent-P2",
+        "worktreePath": "/private/tmp/meta-harness-t023",
+        "branch": "card/t023-ledger-continuity",
+        "baseCommit": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+        "currentHead": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+        "paths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Close the receipt-ledger completeness gap left by TASK-20260724-022 without using global revision adjacency. Add one optional per-card receiptCount anchor outside card.receipts. In appendReceipt, copy the existing receipt array, then: when receiptCount is absent, treat the card as legacy and initialize the anchor from the current array length; when present, require a nonnegative integer exactly equal to the current array length before constructing or appending any new receipt. Reject a mismatch with one distinct greppable error. After a successful append, increment receiptCount exactly once. Existing entryHash/prevEntryHash validation continues to prove integrity of surviving records; receiptCount proves the number of records has not decreased. This must reject (1) deletion of an entire returning block-to-resume detour whose surviving tail still ends at the current status and (2) clearing the whole receipt array before the next transition. It must preserve legitimate transitions when unrelated cards advance the global board revision. Legacy cards without receiptCount, including absent or empty receipt arrays, may migrate on their next append; once anchored, deleting receiptCount together with records remains an explicitly documented rewrite-with-recompute class outside this card. Only scripts/workplan.mjs and scripts/workplan.test.mjs may change.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+        ],
+        "nextCheckpoint": "Baseline 151/151 remains green; new tests first reproduce and then reject returning block/resume detour deletion and full receipt-array truncation with byte-identical canonical files; a legacy card without receiptCount migrates and gains the correct count; an anchored happy path increments exactly once per transition; an unrelated-card revision between transitions remains valid; the exact two-file diff is frozen in a commit and Pi/NeuralWatt GLM-5.2 reports no unresolved P0/P1.",
+        "revisionFrom": 146,
+        "revisionTo": 147,
+        "at": "2026-07-25T22:02:01.069Z"
+      },
+      "reviewFreeze": {
+        "branch": "card/t023-ledger-continuity",
+        "head": "48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+        "revisionFrom": 148,
+        "revisionTo": 149,
+        "at": "2026-07-25T22:47:04.282Z"
+      },
+      "receiptCount": 6,
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+        "reviewBranch": "card/t023-ledger-continuity",
+        "reviewHead": "48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+        "integrationCommit": "b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+        "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+        "revisionFrom": 149,
+        "revisionTo": 150,
+        "at": "2026-07-25T23:13:20.373Z"
+      },
+      "releasedPaths": [
         "scripts/workplan.mjs",
         "scripts/workplan.test.mjs"
       ],
-      "priority": 3,
-      "trace": "Convergent P2 from the TASK-20260724-022 frozen-diff panel at 932ffca, found independently by GLM-5.2 and kimi-k3, then CONFIRMED LIVE by the MiniMax-M3 behavioral verifier probe P8 against disposable roots. Artifacts: .review-store/t022-panel-frozen-diff-932ffca.md, .review-store/t022-behavioral-verify-932ffca.md. Both reviewers classified it as a limitation of the frozen invariant, faithfully implemented, not an implementation defect; closing it was forbidden by that card's stop condition. Sibling-class follow-up in the same lineage as t018-panel-P3 -> META-28 -> META-31."
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+        "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+        "integrationCommit": "b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+        "commands": [
+          "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+        ],
+        "evidenceRefs": [
+          "git:integration:b70a5bfab3286ac0f3113ef2e23f0d29218156ec",
+          "git:review-head:48ca5db92cee45f3700a4c15841c6075bb95cfdc",
+          "git:base:c27ff5e1475d051922e7d97d7296619b26f4d121",
+          "node-test:review-head:155-pass-0-fail",
+          "node-test:integration:155-pass-0-fail",
+          "git-diff-check:review-head-clean",
+          "git-diff-check:integration-clean",
+          "diff-scope:2-files:247-insertions-2-deletions",
+          "review:.review-store/t023-glm-herdr-review-48ca5db.md:sha256:d464e27f4ddc0ad190910ef92e5cf018f202d89c87659216bf298cff31333ea2:neuralwatt-glm-5.2-approve-no-findings",
+          "herdr:drv-t023-glm-0726a:owned-stopped-deleted",
+          "repro:returning-detour-and-empty-ledger-attacks-failed-before-fix-and-rejected-after",
+          "residual:co-deleting-receiptCount-with-receipts-remains-rewrite-with-recompute-class"
+        ],
+        "receiptHash": "sha256:6286cf57e863dc945e77712ea382057fc1fdd1f8f748be89ffc1003c007b835b",
+        "actor": "coordinator:charltons-mbp.home.lan:t023-coordinator-20260726",
+        "releasedPaths": [
+          "scripts/workplan.mjs",
+          "scripts/workplan.test.mjs"
+        ],
+        "revisionFrom": 150,
+        "revisionTo": 151,
+        "at": "2026-07-25T23:15:41.566Z"
+      }
     }
   ]
 }

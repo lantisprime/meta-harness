@@ -1,0 +1,25 @@
+{
+  "sourceRevision": "git:c27ff5e1475d051922e7d97d7296619b26f4d121;trace:TASK-20260725-023;linear:META-32;t022-panel:932ffca-convergent-P2",
+  "definitionHash": "sha256:5e41125ff6fa88753a5fb2d908da1fab7e28be19bf05ce0093a50031250e7f6a",
+  "worktreePath": "/private/tmp/meta-harness-t023",
+  "branch": "card/t023-ledger-continuity",
+  "baseCommit": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+  "currentHead": "c27ff5e1475d051922e7d97d7296619b26f4d121",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "Close the receipt-ledger completeness gap left by TASK-20260724-022 without using global revision adjacency. Add one optional per-card receiptCount anchor outside card.receipts. In appendReceipt, copy the existing receipt array, then: when receiptCount is absent, treat the card as legacy and initialize the anchor from the current array length; when present, require a nonnegative integer exactly equal to the current array length before constructing or appending any new receipt. Reject a mismatch with one distinct greppable error. After a successful append, increment receiptCount exactly once. Existing entryHash/prevEntryHash validation continues to prove integrity of surviving records; receiptCount proves the number of records has not decreased. This must reject (1) deletion of an entire returning block-to-resume detour whose surviving tail still ends at the current status and (2) clearing the whole receipt array before the next transition. It must preserve legitimate transitions when unrelated cards advance the global board revision. Legacy cards without receiptCount, including absent or empty receipt arrays, may migrate on their next append; once anchored, deleting receiptCount together with records remains an explicitly documented rewrite-with-recompute class outside this card. Only scripts/workplan.mjs and scripts/workplan.test.mjs may change.",
+  "stopCondition": "Stop and fail closed on any edit outside scripts/workplan.mjs and scripts/workplan.test.mjs; any use of tail.revisionTo === revisionFrom or another global-revision adjacency assumption; any new dependency, CLI flag, subcommand, state schema bump, or product-runtime change; any rewrite, deletion, reordering, or re-hashing of existing receipts; any validation performed only after canonical files are written; any behavior that prevents a legacy card with no receiptCount from migrating on its next append; any weakening or rewording of an existing assertion; any failure of the 151-test baseline or new attack fixtures; a moving-diff review; or an unresolved P0/P1 Pi/GLM-5.2 finding.",
+  "evaluatorAuthority": "The implementing Codex seat may not self-approve. Pi using NeuralWatt GLM-5.2 must review the frozen base c27ff5e1475d051922e7d97d7296619b26f4d121 through exact review head in read-only mode, with acceptance criteria, charter invariant, and test evidence in the brief and file-and-line evidence for every P0-P3 finding. Review output is preserved verbatim under .review-store/ and substantive findings receive ACCEPT, ACCEPT-WITH-MOD, REJECT, DEFER, or NEEDS-EVIDENCE dispositions. Any accepted fix requires a new frozen commit and fresh review. A distinct coordinator remains responsible for integration and acceptance. This card grants no evaluator-write, merge, promotion, deployment, credential, or runtime authority.",
+  "acceptanceCommands": [
+    "cd /private/tmp/meta-harness-t023 && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-t023 diff --check c27ff5e1475d051922e7d97d7296619b26f4d121"
+  ],
+  "nextCheckpoint": "Baseline 151/151 remains green; new tests first reproduce and then reject returning block/resume detour deletion and full receipt-array truncation with byte-identical canonical files; a legacy card without receiptCount migrates and gains the correct count; an anchored happy path increments exactly once per transition; an unrelated-card revision between transitions remains valid; the exact two-file diff is frozen in a commit and Pi/NeuralWatt GLM-5.2 reports no unresolved P0/P1.",
+  "allowedOwnerNamespaces": [
+    "codex"
+  ]
+}
