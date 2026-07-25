@@ -1311,10 +1311,24 @@ function appendReceipt(
   evidence,
 ) {
   card.receipts = [...(card.receipts || [])];
+  const anchoredReceiptCount = Object.hasOwn(card, "receiptCount")
+    ? card.receiptCount
+    : card.receipts.length;
   const tail =
     card.receipts.length > 0 ? card.receipts[card.receipts.length - 1] : null;
   if (tail && tail.to !== from) {
     fail(`ledger tail ${tail.to} does not match transition from ${from}`);
+  }
+  if (
+    !Number.isInteger(anchoredReceiptCount) ||
+    anchoredReceiptCount < 0
+  ) {
+    fail("receipt ledger count must be a nonnegative integer");
+  }
+  if (anchoredReceiptCount !== card.receipts.length) {
+    fail(
+      `receipt ledger count ${anchoredReceiptCount} does not match receipts length ${card.receipts.length}`,
+    );
   }
   const prevEntryHash = tail ? computeRecordEntryHash(tail) : null;
   const receipt = {
@@ -1331,6 +1345,7 @@ function appendReceipt(
   receipt.prevEntryHash = prevEntryHash;
   receipt.entryHash = computeRecordEntryHash(receipt);
   card.receipts.push(receipt);
+  card.receiptCount = anchoredReceiptCount + 1;
 }
 
 // Validates the per-card ledger's hash chain. A record is "chained" when it
