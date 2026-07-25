@@ -9063,8 +9063,9 @@ test("ready allows genesis when the receipts key is absent", async (context) => 
 });
 
 test("start allows an empty receipts array on a non-backlog card", async (context) => {
-  // Pins the other absence shape explicitly: an empty ledger is allowed even
-  // when the card is claimed, and start creates a new genesis receipt.
+  // Pins the explicit legacy-migration shape: when both the receipt array and
+  // the external receipt count are absent, start may create a new genesis
+  // receipt even though the card is already claimed.
   const { root, parent } = await repository(
     state([card({ paths: ["src/empty-non-backlog"] })]),
   );
@@ -9077,6 +9078,7 @@ test("start allows an empty receipts array on a non-backlog card", async (contex
     await readFile(join(root, ".workplan", "state.json"), "utf8"),
   );
   emptied.cards[0].receipts = [];
+  delete emptied.cards[0].receiptCount;
   await writeFile(
     join(root, ".workplan", "state.json"),
     `${JSON.stringify(emptied, null, 2)}\n`,
@@ -9091,6 +9093,7 @@ test("start allows an empty receipts array on a non-backlog card", async (contex
   assert.equal(finalState.cards[0].receipts[0].from, "claimed");
   assert.equal(finalState.cards[0].receipts[0].to, "in_progress");
   assert.equal(finalState.cards[0].receipts[0].prevEntryHash, null);
+  assert.equal(finalState.cards[0].receiptCount, 1);
 });
 
 test("consistent tails allow every normal append transition", async (context) => {
@@ -9122,6 +9125,11 @@ test("consistent tails allow every normal append transition", async (context) =>
       { from: "verifying", to: "blocked" },
       { from: "blocked", to: "in_progress" },
     ],
+  );
+  assert.equal(finalState.cards[0].receiptCount, 7);
+  assert.equal(
+    finalState.cards[0].receiptCount,
+    finalState.cards[0].receipts.length,
   );
 });
 
@@ -9214,4 +9222,226 @@ test("tail mismatch rejection preserves canonical bytes", async (context) => {
     stateBytesBefore,
   );
   assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+});
+
+test("submit rejects deletion of a returning block-resume detour and preserves canonical bytes", async (context) => {
+  // A block/resume detour returns the card to in_progress. Deleting both
+  // records leaves the older tail ending at in_progress, so tail.to === from
+  // and the surviving hash chain is internally valid. The external receipt
+  // count must make the missing pair observable before submit re-anchors it.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/returning-detour-strip"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachInProgress(root, "TASK-20260711-001");
+  await blockCard(root, "TASK-20260711-001", owner, "4", "pause", true);
+  await resumeCard(root, "TASK-20260711-001", owner, "5");
+
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.deepEqual(
+    tampered.cards[0].receipts.slice(-2).map(({ from, to }) => ({ from, to })),
+    [
+      { from: "in_progress", to: "blocked" },
+      { from: "blocked", to: "in_progress" },
+    ],
+  );
+  tampered.cards[0].receipts.splice(-2);
+  assert.equal(tampered.cards[0].receipts.at(-1).to, "in_progress");
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  await createBranch(root, "detour-review");
+  const reviewHead = await commitOnBranch(
+    root,
+    "detour-review",
+    "detour review",
+  );
+  await execGit(["-C", root, "checkout", "detour-review"]);
+
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const result = await run([
+    "submit",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "6",
+    "--owner",
+    owner,
+    "--expected-head",
+    reviewHead,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /receipt ledger count 5 does not match receipts length 3/,
+  );
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+});
+
+test("start rejects full receipt-array truncation and preserves canonical bytes", async (context) => {
+  // Clearing every record used to let start write a fresh genesis record.
+  // Once the card has an external count, an empty array cannot masquerade as
+  // an untouched legacy ledger.
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/full-receipt-truncation"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const tampered = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  tampered.cards[0].receipts = [];
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(tampered, null, 2)}\n`,
+  );
+
+  const stateBytesBefore = await readFile(join(root, ".workplan", "state.json"));
+  const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+  const result = await run([
+    "start",
+    "TASK-20260711-001",
+    "--control-root",
+    root,
+    "--caller-worktree",
+    root,
+    "--expected-revision",
+    "3",
+    "--owner",
+    owner,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /receipt ledger count 2 does not match receipts length 0/,
+  );
+  assert.deepEqual(
+    await readFile(join(root, ".workplan", "state.json")),
+    stateBytesBefore,
+  );
+  assert.deepEqual(await readFile(join(root, "WORKPLAN.md")), workplanBefore);
+});
+
+test("legacy card without receiptCount migrates on its next append", async (context) => {
+  const { root, parent } = await repository(
+    state([card({ paths: ["src/receipt-count-migration"] })]),
+  );
+  context.after(() => rm(parent, { recursive: true, force: true }));
+  await seedCommit(root);
+  await ensureMainBranch(root);
+
+  const { owner } = await reachClaimed(root, "TASK-20260711-001");
+  const legacy = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  delete legacy.cards[0].receiptCount;
+  await writeFile(
+    join(root, ".workplan", "state.json"),
+    `${JSON.stringify(legacy, null, 2)}\n`,
+  );
+
+  await startCard(root, "TASK-20260711-001", owner);
+  const finalState = JSON.parse(
+    await readFile(join(root, ".workplan", "state.json"), "utf8"),
+  );
+  assert.equal(finalState.cards[0].receipts.length, 3);
+  assert.equal(finalState.cards[0].receiptCount, 3);
+  assert.equal(finalState.cards[0].receipts.at(-1).to, "in_progress");
+});
+
+test("invalid or mismatched receiptCount values fail closed", async (context) => {
+  const cases = [
+    {
+      label: "negative",
+      value: -1,
+      message: /receipt ledger count must be a nonnegative integer/,
+    },
+    {
+      label: "fractional",
+      value: 1.5,
+      message: /receipt ledger count must be a nonnegative integer/,
+    },
+    {
+      label: "string",
+      value: "2",
+      message: /receipt ledger count must be a nonnegative integer/,
+    },
+    {
+      label: "length mismatch",
+      value: 3,
+      message: /receipt ledger count 3 does not match receipts length 2/,
+    },
+  ];
+
+  for (const fixture of cases) {
+    const { root, parent } = await repository(
+      state([
+        card({
+          id: `TASK-${fixture.label.replaceAll(" ", "-")}`,
+          paths: [`src/${fixture.label.replaceAll(" ", "-")}`],
+        }),
+      ]),
+    );
+    context.after(() => rm(parent, { recursive: true, force: true }));
+    await seedCommit(root);
+    await ensureMainBranch(root);
+
+    const id = `TASK-${fixture.label.replaceAll(" ", "-")}`;
+    const { owner } = await reachClaimed(root, id);
+    const tampered = JSON.parse(
+      await readFile(join(root, ".workplan", "state.json"), "utf8"),
+    );
+    tampered.cards[0].receiptCount = fixture.value;
+    await writeFile(
+      join(root, ".workplan", "state.json"),
+      `${JSON.stringify(tampered, null, 2)}\n`,
+    );
+
+    const stateBytesBefore = await readFile(
+      join(root, ".workplan", "state.json"),
+    );
+    const workplanBefore = await readFile(join(root, "WORKPLAN.md"));
+    const result = await run([
+      "start",
+      id,
+      "--control-root",
+      root,
+      "--caller-worktree",
+      root,
+      "--expected-revision",
+      "3",
+      "--owner",
+      owner,
+    ]);
+    assert.notEqual(result.code, 0, fixture.label);
+    assert.match(result.stderr, fixture.message, fixture.label);
+    assert.deepEqual(
+      await readFile(join(root, ".workplan", "state.json")),
+      stateBytesBefore,
+      fixture.label,
+    );
+    assert.deepEqual(
+      await readFile(join(root, "WORKPLAN.md")),
+      workplanBefore,
+      fixture.label,
+    );
+  }
 });
