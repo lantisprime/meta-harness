@@ -1,3 +1,74 @@
+# Session Handoff — meta-harness (2026-07-26, session 60: META-33 source landed)
+
+## State in one line
+
+META-33 / `TASK-20260726-025` is **`done`** at atomic board revision
+**170** and Linear META-33 is Done. The bounded MEM-011 metadata correction
+passed GitHub CI and PR #80 merged to `main` as `15a684a`; all acceptance checks
+passed and the four reserved paths are released. This branch prepares the
+canonical board and handoff closeout without touching the dirty primary
+worktree.
+
+## What changed
+
+- `tests/fixtures/meta5/corpus.json` now marks MEM-011 `enforced`, removes the
+  stale requirement placeholder, and describes the shipped promotion-boundary
+  rejection contract without implying activation or deployment authority.
+- `tests/adversarial/test_memory_skill_boundaries.py` now treats only MEM-009 as
+  absent and includes a load-bearing assertion that binds the MEM-011 corpus
+  record to the executable contract.
+- No production implementation changed. The work advances product-loop stage 3
+  (managed rehearsal/evaluation) and evidence fidelity; H, E, and W stayed
+  frozen.
+
+The first immutable qualification, `TASK-20260726-024`, contained an incorrectly
+expanded base SHA. It was blocked with `retainPaths=false`; replacement card
+`TASK-20260726-025` was qualified with the exact
+`b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d` base rather than mutating the
+frozen definition.
+
+## Review and verification
+
+- Pi / MiniMax-M3 completed the bounded builder seat without committing.
+- Frozen reviewed source head: `8bc19f18d654621d0b6c480739e849f9daa99fde`.
+- Pi / NeuralWatt GLM-5.2: **APPROVE**, no P0/P1/P2. Optional P3-1 was
+  dispositioned `REJECT`: the corpus target identifies the rejection-contract
+  types, not an exhaustive module export list.
+- Verbatim review:
+  `.review-store/meta33-glm-5.2-review.txt`
+  (`sha256:d15e8de55e869c0c9ce1a71ec88b5adcc3daffff70e226853a3063ab4c21bf0f`).
+- Integration/artifact commit:
+  `0167c9fd4dd8a90b5eab184581511d2bf9c4578e`.
+- Focused pytest: 48 passed, 1 expected xfail.
+- Full pytest: 1,866 passed, 1 expected xfail, 733 warnings.
+- Workplan TAP: 155 passed, 0 failed; `git diff --check` clean.
+- GitHub Actions run `30190582275`: pass on exact accepted head `0167c9f`.
+- Source PR #80: merged as `15a684a`.
+- Acceptance receipt:
+  `sha256:59f02e72fdf1be3f9e5b5605e9c16d8d52f6a3ae86f35e8cdcf5fa084d98c84c`.
+- Episodic milestone:
+  `20260726-052835-meta-33-completed-mem-011-corpus-metadat-d832`.
+
+## Repository state and next steps
+
+1. Publish and merge the canonical board/handoff closeout from
+   `chore/meta-33-closeout`, then record the final closeout merge in a minimal
+   handoff update.
+2. The clean feature worktree `/private/tmp/meta-harness-meta33` is now
+   deletable after the remote branch is no longer needed.
+3. Preserve the primary worktree's unrelated pre-existing edits in the two
+   episodic-memory skill files and untracked `.codex/`; do not use that dirty
+   worktree for closeout publication.
+4. The development board has no Ready, claimed, in-progress, Review, or
+   Verifying card. The only non-Done card is superseded blocked qualification
+   `TASK-20260726-024`, which retains no paths.
+5. The next product step toward META-10 is a real protected-H campaign and
+   evidence package. Do not treat the deterministic fixture or this metadata
+   correction as scientific evidence, promotion approval, or authority to start
+   W_mem.
+
+---
+
 # Session Handoff — meta-harness (2026-07-26, session 58: META-9 fully landed)
 
 ## State in one line
