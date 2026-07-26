@@ -1,0 +1,28 @@
+{
+  "sourceRevision": "git:24a489134f9fd0e9a5780fbe3110a650f91ed013;linear:META-34;blocked-target:META-10;plan:docs/dual-subscription-high-level-implementation-plan.md:503-544;charter:docs/PROJECT_CHARTER.md",
+  "definitionHash": "sha256:725e6fa9cb67b2a80687fd046d645f7fdd815064b37bf1de26570e9e2336d712",
+  "worktreePath": "/private/tmp/meta-harness-meta10-gate",
+  "branch": "dev/meta-34-real-protected-h-campaign",
+  "baseCommit": "24a489134f9fd0e9a5780fbe3110a650f91ed013",
+  "currentHead": "24a489134f9fd0e9a5780fbe3110a650f91ed013",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "Implement and execute only the missing real protected scaffold-H prerequisite for META-10. Add a load-bearing memory-aware Runner wrapper that injects brokered CONSULT evidence into the task model's untrusted advice slot and records post-observation LOG receipts without granting domain-action authority. Add a generic protected-H campaign runner and secret-safe verification/reload path. Before inference, freeze a versioned memory-management goal family; approved-target, mandatory, development, validation and one-time sealed-holdout designations; deterministic non-model evaluator; local Ollama qwen3.5:35b-a3b-coding-nvfp4 model ID/digest and inference parameters; no-memory/base/optimized immutable H snapshots with optimized parent-bound to base and exact base rollback; equal E/task-model/W/environment/case/seed/budget inputs; and a development-only optimized-scaffold selection protocol. Run actual local-model inference for exactly the canonical three H cells across all six protected views and retain full per-case/per-repetition response, receipt, token, latency, report, manifest and result evidence. No W training or dependency installation, live activation, E evolution, active-pointer mutation, promotion, deployment, evaluator self-approval, holdout feedback, or claim beyond the frozen goal family.",
+  "stopCondition": "Stop before inference on any unfrozen goal/model/evaluator/case/seed/budget field, model digest drift, missing protected input, holdout exposure to the builder/candidate, non-H axis drift, path escape, secret capture, or missing scaffold-to-inference wiring. Stop the campaign on budget exhaustion, evaluator/reference/receipt/digest/rollback mismatch, unsafe memory action, mandatory regression or unverified mandatory case, or unresolved P0/P1 review finding. The only terminal product verdicts are eligible_pending_human_promotion or ineligible with closest protected result and unresolved gap; neither authorizes META-10, W training, promotion, activation or deployment.",
+  "evaluatorAuthority": "The H candidate and implementing seats cannot define a verdict after seeing protected outcomes or approve themselves. The coordinator freezes the memory-management goal/evaluator/case/model/budget spec before inference under the operator's autonomous development authorization. Deterministic verifiers, not a model judge, score the pre-registered outputs; one-time sealed holdout is separately supplied to the protected evaluator and never fed back into H selection. Pi/NeuralWatt GLM-5.2 reviews the frozen base/head diff read-only with P0-P3 file-and-line findings; accepted fixes require a new frozen commit and fresh review. A distinct coordinator integrates and accepts. A later human decision is required before META-10 can be qualified.",
+  "acceptanceCommands": [
+    "cd /private/tmp/meta-harness-meta10-gate && .venv/bin/python -m metaharness.evals.h_campaign verify --spec .agents/meta34-campaign-spec.json --evidence-root /private/tmp/meta34-protected/evidence",
+    "cd /private/tmp/meta-harness-meta10-gate && .venv/bin/python -m pytest -q tests/test_real_h_campaign.py tests/test_protected_h_ablation.py tests/test_memory_broker.py tests/adversarial/test_memory_skill_boundaries.py",
+    "cd /private/tmp/meta-harness-meta10-gate && .venv/bin/python -m pytest -q",
+    "cd /private/tmp/meta-harness-meta10-gate && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-meta10-gate diff --check 24a489134f9fd0e9a5780fbe3110a650f91ed013"
+  ],
+  "nextCheckpoint": "Invalid-input and no-op wiring tests fail before implementation; the memory-aware wrapper proves CONSULT changes model-visible untrusted advice and LOG emits bounded receipts while the task model alone owns domain output; the pre-registered three-cell local campaign executes all six views with full evidence and exact frozen-axis/rollback bindings; reload verification derives either eligible_pending_human_promotion or ineligible plus closest result/gap; focused/full/workplan/diff checks pass; the exact frozen diff receives mandatory GLM-5.2 review with no unresolved P0/P1.",
+  "allowedOwnerNamespaces": [
+    "codex"
+  ]
+}

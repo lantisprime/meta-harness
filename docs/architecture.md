@@ -163,6 +163,25 @@ metadata still says this module is absent because that fixture is outside the
 frozen META-9 path reservation; a bounded follow-up must correct that stale
 metadata. No runtime or gate behavior depends on the stale corpus entry.
 
+**META-34 real-execution surface.** `metaharness.evals.h_campaign` is the
+narrow, evaluator-owned real-execution and reload contract layered over this
+fixture: it freezes all non-memory H surfaces, uses development evidence only
+for optimized-H selection while preregistering approved-target eligibility
+cases only in validation, records a create-only one-time holdout consumption
+key, and permits only deterministic `equals`/`contains`/`one_of` checks. Its
+terminal evidence status is either `eligible_pending_human_promotion` or
+`ineligible`; it has no promotion, activation, deployment, or W-start
+operation. A real campaign status is intentionally not asserted here; the
+orchestrator fills it from protected evidence after the run. Any eligible
+result still requires a later human promotion decision before META-10 can be
+qualified, and this prerequisite does not authorize META-10 or W training.
+Real task adapters must expose immutable `model_frozen_config` transport
+attestation (model, loopback base URL, temperature, max tokens, thinking, and
+extra body) before inference. The campaign derives that same projection from
+the repository's concrete `OpenAICompatWorker` public frozen fields; all other
+unattested adapters fail closed. The only exception is the explicitly marked
+hermetic test adapter protocol.
+
 ### 3.7 Observability
 
 - Every layer emits OpenTelemetry spans with attributes for model, tier, tokens, cost, verdict, and MAST label (as a span event on failure). An in-memory span store feeds the web UI live; the same provider can fan out to a real OTLP collector.

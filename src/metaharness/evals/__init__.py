@@ -36,6 +36,11 @@ __all__ = [
     "evaluate_protected_h_ablation",
     "ExactSuiteEvaluator", "IsolatedCaseExecution", "SandboxedCaseRunner",
     "create_tuning_proposal", "apply_tuning_proposal_to_draft",
+    "CampaignContractError", "CampaignSpec", "CaseContract", "CellContract",
+    "EvaluatorContract", "HSurface", "HoldoutAlreadyConsumedError",
+    "HoldoutConsumptionLedger", "ModelContract", "ProtectedInputPackage",
+    "SelectionDeclaration", "deterministic_verify", "load_protected_inputs",
+    "run_campaign", "verify_campaign",
 ]
 
 
@@ -88,4 +93,15 @@ def __getattr__(name: str):
         from metaharness.evals import tuning
 
         return getattr(tuning, name)
+    campaign_names = {
+        "CampaignContractError", "CampaignSpec", "CaseContract", "CellContract",
+        "EvaluatorContract", "HSurface", "HoldoutAlreadyConsumedError",
+        "HoldoutConsumptionLedger", "ModelContract", "ProtectedInputPackage",
+        "SelectionDeclaration", "deterministic_verify", "load_protected_inputs",
+        "run_campaign", "verify_campaign",
+    }
+    if name in campaign_names:
+        from metaharness.evals import h_campaign
+
+        return getattr(h_campaign, name)
     raise AttributeError(name)
