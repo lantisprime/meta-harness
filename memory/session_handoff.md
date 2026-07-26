@@ -1,3 +1,62 @@
+# Session Handoff — meta-harness (2026-07-26, session 58: META-9 fully landed)
+
+## State in one line
+
+META-9 / `TASK-20260714-007` is **`done`** at atomic board revision **158**.
+Protected scaffold-H ablation PR #77 merged as `43fa843`; board closeout PR #78
+passed CI and merged as `7f4f791`. Linear META-9 is Done, all reserved paths are
+released, and coordinator acceptance receipt
+`sha256:707beaf4fc416ec7df8521c85e6301a4b12b13c7e0582250cee3f70e97c216cf`
+records the distinct integration/acceptance gate.
+
+## What shipped
+
+- An immutable, self-hashing, three-cell protected H ablation:
+  no-external-memory, base scaffold, and optimized scaffold.
+- Exact frozen E/task/runner/W/schedule/budget binding, per-case/repetition
+  evidence, variance, rollback, and the six required views: approved target,
+  transfer, replay retention, privacy, safety, and efficiency.
+- Create-only result storage that re-derives summaries and decisions on both
+  create and reload.
+- An inert `PromotionGate` that rejects repeated-search-set evidence without a
+  held-out evaluation and can return only pending human eligibility. No
+  promotion, activation, deployment, evaluator self-approval, or live-worker
+  authority was added.
+
+The deterministic fixture exercises the eligible-pending and W_mem-unblocked
+contract path. It is integration evidence, not a scientific or production
+claim; real promotion and W_mem work still require independent protected
+evidence and human control.
+
+## Review and verification
+
+- Frozen source head `d70412b`; review-artifact commit `76bc764`.
+- Herdr Pi / Kimi K3: **APPROVE**, no findings.
+- Mandatory NeuralWatt GLM-5.2: **APPROVE**, no P0/P1. Its sole P2 was
+  dispositioned `REJECT`: sealed protected-holdout confirmation is intentional,
+  while the projection strips assertions, outputs, per-case digests, and
+  verifier details and provides no tuning or promotion authority.
+- MiniMax behavioral verification: PASS.
+- Focused pytest: 95 passed, 1 xfailed.
+- Full pytest: 1796 passed, 4 skipped, 1 xfailed.
+- Workplan: 155 passed; diff check clean; both PR CIs green.
+- Episodic milestone:
+  `20260726-015709-meta-9-protected-scaffold-h-ablation-mer-d542`.
+
+## Repository state and next steps
+
+1. META-33 is a bounded Backlog/unclaimed follow-up to reconcile stale META5
+   MEM-011 corpus metadata. A coordinator must qualify it and seed atomic path
+   reservations before edits.
+2. Preserve the primary worktree's unrelated pre-existing edits in the two
+   episodic-memory skill files, `memory/session_handoff.md`, and untracked
+   `.codex/`; none are part of META-9 commits.
+3. Do not start TASK-20260714-008 solely from the deterministic fixture. Its real
+   W_mem gate remains conditional on approved protected evidence and human
+   promotion.
+
+---
+
 # Session Handoff — meta-harness (2026-07-26, session 57: META-32 fully landed)
 
 ## State in one line
