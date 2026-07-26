@@ -27,6 +27,13 @@ __all__ = [
     "EvalMetrics", "EvalAttemptResult", "EvalCaseResult", "EvaluationReport",
     "EvaluationReportRef",
     "TuningProposal", "EvaluationReportStore", "TuningProposalStore",
+    "AblationBudgetError", "AblationContractError",
+    "AblationReferenceMismatchError", "ArtifactDigestRef", "BudgetEnvelope",
+    "CellEvidenceBinding", "HAblationCampaign", "HAblationCell",
+    "HAblationResult", "HAblationResultStore", "ProtectedCaseResult",
+    "ProtectedEvaluationReportRef", "ProtectedRunContextManifest",
+    "RepetitionSeed", "build_protected_evidence_row",
+    "evaluate_protected_h_ablation",
     "ExactSuiteEvaluator", "IsolatedCaseExecution", "SandboxedCaseRunner",
     "create_tuning_proposal", "apply_tuning_proposal_to_draft",
 ]
@@ -55,10 +62,22 @@ def __getattr__(name: str):
         from metaharness.evals import artifacts
 
         return getattr(artifacts, name)
-    if name in {"EvaluationReportStore", "TuningProposalStore"}:
+    if name in {"EvaluationReportStore", "TuningProposalStore", "HAblationResultStore"}:
         from metaharness.evals import artifact_store
 
         return getattr(artifact_store, name)
+    ablation_names = {
+        "AblationBudgetError", "AblationContractError",
+        "AblationReferenceMismatchError", "ArtifactDigestRef", "BudgetEnvelope",
+        "CellEvidenceBinding", "HAblationCampaign", "HAblationCell",
+        "HAblationResult", "ProtectedCaseResult", "ProtectedEvaluationReportRef",
+        "ProtectedRunContextManifest", "RepetitionSeed",
+        "build_protected_evidence_row", "evaluate_protected_h_ablation",
+    }
+    if name in ablation_names:
+        from metaharness.evals import ablation
+
+        return getattr(ablation, name)
     if name in {
         "ExactSuiteEvaluator", "IsolatedCaseExecution", "SandboxedCaseRunner",
     }:

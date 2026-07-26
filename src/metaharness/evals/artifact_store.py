@@ -7,12 +7,15 @@ import re
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from pydantic import BaseModel
 
 from metaharness.blueprints.models import _validate_slug
 from metaharness.evals.artifacts import EvaluationReport, TuningProposal
+
+if TYPE_CHECKING:
+    from metaharness.evals.ablation import HAblationResult
 
 
 class EvalArtifactStoreError(RuntimeError):
@@ -170,3 +173,46 @@ class TuningProposalStore(_ImmutableModelStore[TuningProposal]):
 
     def __init__(self, root: str | Path) -> None:
         super().__init__(root, "tuning-proposals", TuningProposal)
+
+
+class HAblationResultStore(_ImmutableModelStore["HAblationResult"]):
+    """Create-only protected result store that re-resolves every report ref."""
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        report_store: EvaluationReportStore,
+    ) -> None:
+        from metaharness.evals.ablation import HAblationResult
+
+        super().__init__(root, "h-ablation-results", HAblationResult)
+        self.report_store = report_store
+
+    def _rederive(self, value: "HAblationResult") -> "HAblationResult":
+        from metaharness.evals.ablation import (
+            AblationContractError,
+            evaluate_protected_h_ablation,
+        )
+
+        expected = evaluate_protected_h_ablation(
+            result_id=value.id,
+            campaign=value.campaign,
+            evidence_rows=value.evidence_rows,
+            report_store=self.report_store,
+            created_at=value.created_at,
+        )
+        if expected != value:
+            raise AblationContractError(
+                "stored ablation result does not match the protected derived verdict"
+            )
+        return expected
+
+    def create(self, value: "HAblationResult") -> "HAblationResult":
+        validated = self.model_type.model_validate(value.model_dump(mode="python"))
+        self._rederive(validated)
+        return super().create(validated)
+
+    def get(self, artifact_id: str) -> "HAblationResult":
+        value = super().get(artifact_id)
+        return self._rederive(value)

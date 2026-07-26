@@ -1,0 +1,27 @@
+{
+  "sourceRevision": "git:86329987f94fa6402c76df6d594c25b8ebc71ef3;linear:META-9;plan:docs/dual-subscription-high-level-implementation-plan.md:419-524",
+  "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+  "worktreePath": "/private/tmp/meta-harness-meta-9",
+  "branch": "dev/meta-9-protected-evaluation-h-ablation",
+  "baseCommit": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+  "currentHead": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "Implement one protected, deterministic three-cell scaffold-H ablation contract and run it through fixture-backed evaluation. Compare no-external-memory, base-scaffold, and optimized-scaffold H under identical frozen E/task/runner/W/schedule/budget inputs; retain exact per-case/repetition/report/memory-receipt evidence and variance; require all approved-target, transfer, replay-retention, privacy, safety, and efficiency views; allow pending human promotion only after at least one approved target improves with zero mandatory-case regression; block repeated-search-set leakage and any evaluator self-approval; persist an immutable self-hashing result with exact base rollback. No live worker/prompt activation, optimizer, W_mem training, evaluator evolution, Web API, promotion pointer, or scientific claim.",
+  "stopCondition": "Stop on any edit outside the frozen writable slice; live worker/prompt/memory activation; change to E or W; candidate evaluator/promotion/deployment authority; holdout disclosure; aggregate-only promotion; mandatory-case regression; missing protected view; lineage, report, receipt, budget, digest, or rollback mismatch; non-deterministic fixed-input digest; dependency change; unresolved P0/P1 Kimi or Pi/GLM finding; focused/full/workplan/diff-check failure.",
+  "evaluatorAuthority": "The implementing seat cannot self-approve. Herdr-driven Pi using kimi-coding/k3 performs the primary plan and frozen-diff review read-only. Repository policy additionally requires Pi using NeuralWatt GLM-5.2 to review the same frozen base/head diff read-only. Briefs identify exact commits, acceptance criteria, charter invariants, and test evidence; forbid edits; require file-and-line evidence and P0-P3 classification. Verbatim artifacts are stored under .review-store. Every substantive finding is dispositioned; accepted fixes require a new frozen commit and fresh reviews. A distinct coordinator integrates and accepts. No reviewer or candidate receives promotion, merge, deployment, credential, or runtime authority.",
+  "acceptanceCommands": [
+    "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q tests/test_protected_h_ablation.py tests/adversarial/test_memory_skill_boundaries.py tests/test_exact_eval_tuning.py tests/test_memory_broker.py",
+    "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q",
+    "cd /private/tmp/meta-harness-meta-9 && node --test scripts/workplan.test.mjs",
+    "git -C /private/tmp/meta-harness-meta-9 diff --check 86329987f94fa6402c76df6d594c25b8ebc71ef3"
+  ],
+  "nextCheckpoint": "Kimi K3 approves the frozen plan; invalid-input tests fail before implementation; the three-cell fixture campaign passes with all six views, per-case/repetition variance and exact refs, pending-only eligibility, immutable reload, and strict mandatory non-regression; focused and full suites pass; exact commit receives Kimi K3 plus mandatory NeuralWatt GLM-5.2 reviews with no unresolved P0/P1.",
+  "allowedOwnerNamespaces": [
+    "codex"
+  ]
+}

@@ -130,6 +130,39 @@ Framed strictly as integrity/authenticity — the same guarantees you get from s
 - **Third-party judge** (neither incumbent nor candidate model), binary rubrics, both-order pairwise, calibrated against human labels.
 - **Go/no-go report** with paired-difference statistics; below a few hundred examples per cell, use bootstrap intervals.
 
+#### Protected scaffold-H ablation (META-9)
+
+`metaharness.evals.ablation` now provides an evaluator-side, three-cell contract
+for `no_external_memory`, `base_scaffold`, and `optimized_scaffold`. Each cell's
+self-hashing `ProtectedRunContextManifest` witnesses the exact evaluator, case
+set, runner configuration, task-model portfolio and `W` snapshots, ordered
+repetition/seed schedule, budget, blueprint/workflow `H` surface, scaffold
+snapshot, reports, and protected evaluator authority. Comparison fails closed
+unless all non-`H` axes match. Evidence rows are built by resolving immutable
+`EvaluationReportStore` records; copied case outcomes or report references are
+never treated as reference truth, and sealed holdout assertions, outputs,
+digests, and verifier details are not copied.
+
+The protected evaluator derives per-view pass rates, repetition variance,
+resource totals, case deltas, mandatory regressions, conditional `W_mem` lane
+eligibility, the closest protected result and unresolved gap, and the exact base
+rollback snapshot. An optimized scaffold is only
+`eligible_pending_human_promotion` when an approved-target case improves and no
+mandatory case in any of the six protected views regresses or is unverified.
+`HAblationResultStore` is create-only and re-resolves every report before
+persistence. Neither the result nor its store can promote, activate, deploy, or
+mutate an active pointer.
+
+`metaharness.memory.promotion` supplies the narrow search-set leakage boundary:
+repeated search-set evaluations without held-out evidence are rejected before an
+ablation can become eligible. It is inert and is not wired into workers, prompt
+assembly, deployment, or the Web API. The deterministic three-cell test fixture
+is a contract/evaluator integration proof only; it is **not** evidence of a
+real-model or scientific performance improvement. The META5 `MEM-011` corpus
+metadata still says this module is absent because that fixture is outside the
+frozen META-9 path reservation; a bounded follow-up must correct that stale
+metadata. No runtime or gate behavior depends on the stale corpus entry.
+
 ### 3.7 Observability
 
 - Every layer emits OpenTelemetry spans with attributes for model, tier, tokens, cost, verdict, and MAST label (as a span event on failure). An in-memory span store feeds the web UI live; the same provider can fan out to a real OTLP collector.
