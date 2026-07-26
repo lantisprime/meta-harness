@@ -49,16 +49,40 @@ def _versions(**changes):
 
 
 def test_all_absent_cases_have_a_stable_requirement_id_and_a_test_below():
-    # Post-Stage-2 absent set: Stages 1 + 2 closed 13 of 15 META5-MEM cards.
-    # MEM-009 (memory.training) and MEM-011 (memory.promotion) stay strict-xfail
-    # by design — they are reserved for later cards outside this pipeline and
-    # are explicitly NOT implemented by Stage 2 or 3 per the build spec.
+    # Post-META-33 absent set: Stages 1 + 2 + META-9 closed 14 of 15 META5-MEM
+    # cards. MEM-011 (memory.promotion) is now enforced by PromotionGate
+    # (inert evidence gate shipped in META-9). MEM-009 (memory.training) is
+    # the sole remaining strict-xfail card, reserved for a later card.
     covered_requirement_ids = {
         "META5-MEM-009",
-        "META5-MEM-011",
     }
     corpus_requirement_ids = {case["requirement_id"] for case in ABSENT_CASES.values()}
     assert corpus_requirement_ids == covered_requirement_ids
+
+
+def test_repeated_set_promotion_gate_corpus_status_is_load_bearing():
+    # The META-5 corpus entry for MEM-011 was previously marked absent, but the
+    # PromotionGate has shipped (META-9): flipping the entry back to absent
+    # would silently reopen a closed contract. This assertion makes that
+    # bookkeeping load-bearing — corpus status and the enforced contract must
+    # agree.
+    corpus_case = next(
+        case for case in cases_for("test_memory_skill_boundaries")
+        if case["id"] == "repeated-set-promotion-gate"
+    )
+    assert corpus_case["status"] == "enforced", corpus_case
+    assert corpus_case["requirement_id"] is None, corpus_case
+
+    import metaharness.memory.promotion as promotion
+
+    gate = promotion.PromotionGate()
+    leaked = promotion.Evidence(
+        search_set_id="search-1",
+        evaluation_count=5,
+        held_out_evaluation_count=0,
+    )
+    with pytest.raises(promotion.SearchSetLeakageError):
+        gate.decide(leaked)
 
 
 def test_committed_memory_record_cannot_be_rewritten_in_place():
@@ -233,7 +257,7 @@ def test_envelope_rejects_confounded_live_and_pinned_sections_for_same_lineage()
 
 
 def test_promotion_gate_rejects_repeated_search_set_evidence():
-    import metaharness.memory.promotion as promotion  # not yet implemented
+    import metaharness.memory.promotion as promotion
 
     gate = promotion.PromotionGate()
     evidence = promotion.Evidence(
