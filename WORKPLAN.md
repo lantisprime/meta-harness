@@ -2,10 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 158
+Revision: 170
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
+| TASK-20260726-024 | Update META5 MEM-011 corpus metadata after promotion-boundary implementation | blocked | pi:charltons-mbp.home.lan:meta33-build-20260726 | `tests/fixtures/meta5/corpus.json`; `tests/adversarial/test_memory_skill_boundaries.py`; `.agents/meta33-review-brief-glm.md`; `.review-store/meta33-glm-5.2-review.txt` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
 | TASK-20260714-003 | Red-team the frozen context contracts with disjoint invalid-input, authority, determinism, and memory-skill fixtures | done | claude:charltons-mbp.home.lan:meta5-20260715 |  |
@@ -26,3 +27,4 @@ Revision: 158
 | TASK-20260724-021 | Add a generic pi owner namespace so pi-driven open-weights seats can claim and own workplan cards under their real identity | done | claude:charltons-mbp.home.lan:t021-build-20260724 |  |
 | TASK-20260724-022 | Enforce ledger transition-completeness so an append-side tail-strip cannot be re-anchored: before appending, each transition validates that the ledger tail's 'to' status matches the card's current status (legacy-tolerant), closing the codex P2 residual from TASK-20260724-019 where deleting a trailing receipt and running the next legitimate transition permanently re-anchors the chain over the gap. | done | pi:charltons-mbp.home.lan:t022-build-20260725 |  |
 | TASK-20260725-023 | Close the returning-detour ledger strip that TASK-20260724-022's tail.to===from invariant cannot detect: because a block/resume detour starts and ends at the same status, deleting the whole detour leaves a tail that still satisfies the invariant AND leaves the hash chain internally consistent, so neither the append-side check nor validateReceiptChain at accept catches it. Confirmed live: submit returns exit 0 and integrate then also returns exit 0, and the blockReason/retainPaths/blockedFrom evidence is permanently lost. Needs a strictly stronger continuity rule (e.g. per-card record sequence numbers, or no-revisit / most-recent-record detection). Also covers the adjacent full-truncation-to-empty case, where clearing the receipts array entirely makes the next transition write a fresh genesis record with prevEntryHash null. WARNING: the naive strengthening tail.revisionTo===revisionFrom is UNSAFE and must not be adopted as-is - the global revision counter advances from unrelated cards, which is exactly why validateIntegrationReceipt uses a <= bound rather than equality (scripts/workplan.mjs:2273-2292); any fix must survive an unrelated card transitioning in between two of this card's transitions. | done | codex:charltons-mbp.home.lan:t023-build-20260726 |  |
+| TASK-20260726-025 | Update META5 MEM-011 corpus metadata after promotion-boundary implementation (corrected qualification) | done | pi:charltons-mbp.home.lan:meta33-build-20260726b |  |

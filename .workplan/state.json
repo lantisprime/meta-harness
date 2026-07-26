@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 158,
+  "revision": 170,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -4884,6 +4884,397 @@
         "revisionFrom": 157,
         "revisionTo": 158,
         "at": "2026-07-26T01:50:38.223Z"
+      }
+    },
+    {
+      "id": "TASK-20260726-024",
+      "title": "Update META5 MEM-011 corpus metadata after promotion-boundary implementation",
+      "status": "blocked",
+      "owner": "pi:charltons-mbp.home.lan:meta33-build-20260726",
+      "paths": [
+        "tests/fixtures/meta5/corpus.json",
+        "tests/adversarial/test_memory_skill_boundaries.py",
+        ".agents/meta33-review-brief-glm.md",
+        ".review-store/meta33-glm-5.2-review.txt"
+      ],
+      "priority": 1,
+      "trace": "META-33",
+      "dependencies": [
+        "TASK-20260714-007"
+      ],
+      "evidence": [
+        "META-9",
+        "PR-77",
+        "43fa84352a575927f6a937e0cb31b026958acf46"
+      ],
+      "next": [
+        "qualify",
+        "claim",
+        "implement",
+        "review",
+        "verify"
+      ],
+      "definition": {
+        "sourceRevision": "META-33@2026-07-26T01:55:18.889Z",
+        "definitionHash": "sha256:a750240cec2f4489181d97ee58edf40c9149dce5b51bd2cf2c79b98834c63ff2",
+        "worktreePath": "/private/tmp/meta-harness-meta33",
+        "branch": "dev/meta-33-mem011-metadata",
+        "baseCommit": "b3d5389d33ad711deba70e21cf035573add286bc",
+        "currentHead": "b3d5389d33ad711deba70e21cf035573add286bc",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded metadata-and-contract-test correction. Change only the META5 MEM-011 corpus record, corresponding absence bookkeeping/comments, and focused drift assertions; preserve the shipped PromotionGate and protected H-ablation behavior. Pi/MiniMax-M3 builds without committing; Codex orchestrates and owns final diff quality.",
+        "stopCondition": "Stop on any production-code change, behavior change to PromotionGate or protected H-ablation eligibility, edit outside reserved paths, corpus/test disagreement, failing focused/full/workplan/diff-check verification, or unresolved independent-review P0/P1.",
+        "evaluatorAuthority": "The implementing Pi/MiniMax seat cannot self-approve. Codex inspects the exact diff and test evidence. Pi using NeuralWatt GLM-5.2 reviews the frozen base/head diff read-only with file-and-line evidence and P0-P3 findings; no unresolved P0/P1 may advance. A distinct coordinator remains responsible for integration and acceptance.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta33 && .venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+          "cd /private/tmp/meta-harness-meta33 && .venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta33 diff --check b3d5389d33ad711deba70e21cf035573add286bc"
+        ],
+        "nextCheckpoint": "META5-MEM-011 is marked enforced with current PromotionGate target/description, the absent set contains only MEM-009, focused drift assertions bind the corpus record to the green contract test, all acceptance commands pass, and the frozen diff receives mandatory GLM-5.2 approval.",
+        "allowedOwnerNamespaces": [
+          "pi"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta33-qualify-20260726",
+          "revisionFrom": 159,
+          "revisionTo": 160,
+          "at": "2026-07-26T05:03:33.678Z",
+          "prevEntryHash": null,
+          "entryHash": "sha256:f87239cbf60b7848f5056e084f558ffe5c815b959d28abd5426bcba845a85ced"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726",
+          "revisionFrom": 160,
+          "revisionTo": 161,
+          "at": "2026-07-26T05:03:33.750Z",
+          "prevEntryHash": "sha256:f87239cbf60b7848f5056e084f558ffe5c815b959d28abd5426bcba845a85ced",
+          "entryHash": "sha256:8ef760785333c8fc76a05badbeae24f2ed1c88d88a45ac73ce5fe012da2ad0af"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726",
+          "revisionFrom": 161,
+          "revisionTo": 162,
+          "at": "2026-07-26T05:03:33.822Z",
+          "prevEntryHash": "sha256:8ef760785333c8fc76a05badbeae24f2ed1c88d88a45ac73ce5fe012da2ad0af",
+          "entryHash": "sha256:d728e47595ee51805e6c6a1ba5e32dedda9b748bfd588915d9e18b825cad5109"
+        },
+        {
+          "from": "in_progress",
+          "to": "blocked",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726",
+          "revisionFrom": 162,
+          "revisionTo": 163,
+          "at": "2026-07-26T05:09:19.670Z",
+          "evidence": {
+            "reason": "Qualification defect: frozen baseCommit/currentHead and diff-check command expanded short b3d5389 to invalid b3d5389d33ad711deba70e21cf035573add286bc; exact base is b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d. Replace card rather than mutate its immutable definition.",
+            "retainPaths": false
+          },
+          "prevEntryHash": "sha256:d728e47595ee51805e6c6a1ba5e32dedda9b748bfd588915d9e18b825cad5109",
+          "entryHash": "sha256:8368f9741bf9ef98a3a9f53ec0b99169f83b539cd7d40c2aeae0bc9658a1be3f"
+        }
+      ],
+      "receiptCount": 4,
+      "claimSnapshot": {
+        "owner": "pi:charltons-mbp.home.lan:meta33-build-20260726",
+        "definitionHash": "sha256:a750240cec2f4489181d97ee58edf40c9149dce5b51bd2cf2c79b98834c63ff2",
+        "sourceRevision": "META-33@2026-07-26T01:55:18.889Z",
+        "worktreePath": "/private/tmp/meta-harness-meta33",
+        "branch": "dev/meta-33-mem011-metadata",
+        "baseCommit": "b3d5389d33ad711deba70e21cf035573add286bc",
+        "currentHead": "b3d5389d33ad711deba70e21cf035573add286bc",
+        "paths": [
+          "tests/fixtures/meta5/corpus.json",
+          "tests/adversarial/test_memory_skill_boundaries.py",
+          ".agents/meta33-review-brief-glm.md",
+          ".review-store/meta33-glm-5.2-review.txt"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "One bounded metadata-and-contract-test correction. Change only the META5 MEM-011 corpus record, corresponding absence bookkeeping/comments, and focused drift assertions; preserve the shipped PromotionGate and protected H-ablation behavior. Pi/MiniMax-M3 builds without committing; Codex orchestrates and owns final diff quality.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta33 && .venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+          "cd /private/tmp/meta-harness-meta33 && .venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta33 diff --check b3d5389d33ad711deba70e21cf035573add286bc"
+        ],
+        "nextCheckpoint": "META5-MEM-011 is marked enforced with current PromotionGate target/description, the absent set contains only MEM-009, focused drift assertions bind the corpus record to the green contract test, all acceptance commands pass, and the frozen diff receives mandatory GLM-5.2 approval.",
+        "revisionFrom": 160,
+        "revisionTo": 161,
+        "at": "2026-07-26T05:03:33.749Z"
+      },
+      "blockedFrom": "in_progress",
+      "blockReason": "Qualification defect: frozen baseCommit/currentHead and diff-check command expanded short b3d5389 to invalid b3d5389d33ad711deba70e21cf035573add286bc; exact base is b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d. Replace card rather than mutate its immutable definition.",
+      "retainPaths": false
+    },
+    {
+      "id": "TASK-20260726-025",
+      "title": "Update META5 MEM-011 corpus metadata after promotion-boundary implementation (corrected qualification)",
+      "status": "done",
+      "owner": "pi:charltons-mbp.home.lan:meta33-build-20260726b",
+      "paths": [],
+      "priority": 1,
+      "trace": "META-33",
+      "dependencies": [
+        "TASK-20260714-007"
+      ],
+      "evidence": [
+        "TASK-20260726-024-blocked-invalid-definition",
+        "META-9",
+        "PR-77",
+        "43fa84352a575927f6a937e0cb31b026958acf46"
+      ],
+      "next": [
+        "claim",
+        "verify-builder-output",
+        "review",
+        "verify"
+      ],
+      "definition": {
+        "sourceRevision": "META-33@2026-07-26T05:03:44.243Z",
+        "definitionHash": "sha256:0c31f38586689c4545a4b2787f11614d9c14f286614d0d78b759e0f5547de4d9",
+        "worktreePath": "/private/tmp/meta-harness-meta33",
+        "branch": "dev/meta-33-mem011-metadata",
+        "baseCommit": "b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d",
+        "currentHead": "b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Replacement for TASK-20260726-024 after its immutable definition contained an invalid expanded SHA. One bounded metadata-and-contract-test correction. Change only the META5 MEM-011 corpus record, corresponding absence bookkeeping/comments, and focused drift assertions; preserve the shipped PromotionGate and protected H-ablation behavior. Pi/MiniMax-M3 builds without committing; Codex orchestrates and owns final diff quality.",
+        "stopCondition": "Stop on any production-code change, behavior change to PromotionGate or protected H-ablation eligibility, edit outside reserved paths, corpus/test disagreement, failing focused/full/workplan/diff-check verification, or unresolved independent-review P0/P1.",
+        "evaluatorAuthority": "The implementing Pi/MiniMax seat cannot self-approve. Codex inspects the exact diff and test evidence. Pi using NeuralWatt GLM-5.2 reviews the frozen base/head diff read-only with file-and-line evidence and P0-P3 findings; no unresolved P0/P1 may advance. A distinct coordinator remains responsible for integration and acceptance.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta33 diff --check b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d"
+        ],
+        "nextCheckpoint": "META5-MEM-011 is marked enforced with current PromotionGate target/description, the absent set contains only MEM-009, focused drift assertions bind the corpus record to the green contract test, all acceptance commands pass, and the frozen diff receives mandatory GLM-5.2 approval.",
+        "allowedOwnerNamespaces": [
+          "pi"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta33-requalify-20260726",
+          "revisionFrom": 164,
+          "revisionTo": 165,
+          "at": "2026-07-26T05:10:10.400Z",
+          "prevEntryHash": null,
+          "entryHash": "sha256:ae3e96710e6d2c8fc8a8b71b87b22296743314f5e9a643d6997c6c632054929b"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726b",
+          "revisionFrom": 165,
+          "revisionTo": 166,
+          "at": "2026-07-26T05:10:10.477Z",
+          "prevEntryHash": "sha256:ae3e96710e6d2c8fc8a8b71b87b22296743314f5e9a643d6997c6c632054929b",
+          "entryHash": "sha256:8824db785384bb8044fdf8603c97cafadae5ebac41548b85773f1802f8f7fe6f"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726b",
+          "revisionFrom": 166,
+          "revisionTo": 167,
+          "at": "2026-07-26T05:10:10.549Z",
+          "prevEntryHash": "sha256:8824db785384bb8044fdf8603c97cafadae5ebac41548b85773f1802f8f7fe6f",
+          "entryHash": "sha256:2e4bcdef5d0232c469013b38ef422b58b7bd659a1780ad10a017428932bff44b"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "pi:charltons-mbp.home.lan:meta33-build-20260726b",
+          "revisionFrom": 167,
+          "revisionTo": 168,
+          "at": "2026-07-26T05:11:34.400Z",
+          "evidence": {
+            "branch": "dev/meta-33-mem011-metadata",
+            "head": "8bc19f18d654621d0b6c480739e849f9daa99fde"
+          },
+          "prevEntryHash": "sha256:2e4bcdef5d0232c469013b38ef422b58b7bd659a1780ad10a017428932bff44b",
+          "entryHash": "sha256:f96074924233c34f095f4fb7f1061e632e6414339a9597baddf654cca7e5d3dc"
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta33-integrate-20260726",
+          "revisionFrom": 168,
+          "revisionTo": 169,
+          "at": "2026-07-26T05:19:41.828Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-33-mem011-metadata",
+            "reviewHead": "8bc19f18d654621d0b6c480739e849f9daa99fde",
+            "integrationCommit": "0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+            "integrationReceiptHash": "sha256:2d7c4f7824febce9cea864f8c8c1dec3b5744f4f7cd939ffab48cd2093e32e23"
+          },
+          "prevEntryHash": "sha256:f96074924233c34f095f4fb7f1061e632e6414339a9597baddf654cca7e5d3dc",
+          "entryHash": "sha256:32cd1395df793070189649d03758531f65e9832717ff4eb87ba65be6202a380c"
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta33-accept-20260726",
+          "revisionFrom": 169,
+          "revisionTo": 170,
+          "at": "2026-07-26T05:27:45.817Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta33-accept-20260726",
+            "definitionHash": "sha256:0c31f38586689c4545a4b2787f11614d9c14f286614d0d78b759e0f5547de4d9",
+            "integrationCommit": "0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+            "commands": [
+              "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+              "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+              "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-meta33 diff --check b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d"
+            ],
+            "evidenceRefs": [
+              "focused-pytest:48-passed,1-xfailed",
+              "full-pytest:1866-passed,1-xfailed,733-warnings",
+              "workplan-node:tests-155,pass-155,fail-0",
+              "diff-check:clean",
+              "review-head:8bc19f18d654621d0b6c480739e849f9daa99fde",
+              "integration-commit:0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+              ".review-store/meta33-glm-5.2-review.txt#sha256:d15e8de55e869c0c9ce1a71ec88b5adcc3daffff70e226853a3063ab4c21bf0f"
+            ],
+            "receiptHash": "sha256:59f02e72fdf1be3f9e5b5605e9c16d8d52f6a3ae86f35e8cdcf5fa084d98c84c"
+          },
+          "prevEntryHash": "sha256:32cd1395df793070189649d03758531f65e9832717ff4eb87ba65be6202a380c",
+          "entryHash": "sha256:1eb39618bb7c50c70eb51d41a78edd8de11e5112faa04c062658b81b2e026b1d"
+        }
+      ],
+      "receiptCount": 6,
+      "claimSnapshot": {
+        "owner": "pi:charltons-mbp.home.lan:meta33-build-20260726b",
+        "definitionHash": "sha256:0c31f38586689c4545a4b2787f11614d9c14f286614d0d78b759e0f5547de4d9",
+        "sourceRevision": "META-33@2026-07-26T05:03:44.243Z",
+        "worktreePath": "/private/tmp/meta-harness-meta33",
+        "branch": "dev/meta-33-mem011-metadata",
+        "baseCommit": "b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d",
+        "currentHead": "b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d",
+        "paths": [
+          "tests/fixtures/meta5/corpus.json",
+          "tests/adversarial/test_memory_skill_boundaries.py",
+          ".agents/meta33-review-brief-glm.md",
+          ".review-store/meta33-glm-5.2-review.txt"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Replacement for TASK-20260726-024 after its immutable definition contained an invalid expanded SHA. One bounded metadata-and-contract-test correction. Change only the META5 MEM-011 corpus record, corresponding absence bookkeeping/comments, and focused drift assertions; preserve the shipped PromotionGate and protected H-ablation behavior. Pi/MiniMax-M3 builds without committing; Codex orchestrates and owns final diff quality.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta33 diff --check b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d"
+        ],
+        "nextCheckpoint": "META5-MEM-011 is marked enforced with current PromotionGate target/description, the absent set contains only MEM-009, focused drift assertions bind the corpus record to the green contract test, all acceptance commands pass, and the frozen diff receives mandatory GLM-5.2 approval.",
+        "revisionFrom": 165,
+        "revisionTo": 166,
+        "at": "2026-07-26T05:10:10.477Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-33-mem011-metadata",
+        "head": "8bc19f18d654621d0b6c480739e849f9daa99fde",
+        "revisionFrom": 167,
+        "revisionTo": 168,
+        "at": "2026-07-26T05:11:34.400Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta33-integrate-20260726",
+        "reviewBranch": "dev/meta-33-mem011-metadata",
+        "reviewHead": "8bc19f18d654621d0b6c480739e849f9daa99fde",
+        "integrationCommit": "0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+        "definitionHash": "sha256:0c31f38586689c4545a4b2787f11614d9c14f286614d0d78b759e0f5547de4d9",
+        "revisionFrom": 168,
+        "revisionTo": 169,
+        "at": "2026-07-26T05:19:41.828Z"
+      },
+      "releasedPaths": [
+        "tests/fixtures/meta5/corpus.json",
+        "tests/adversarial/test_memory_skill_boundaries.py",
+        ".agents/meta33-review-brief-glm.md",
+        ".review-store/meta33-glm-5.2-review.txt"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta33-accept-20260726",
+        "definitionHash": "sha256:0c31f38586689c4545a4b2787f11614d9c14f286614d0d78b759e0f5547de4d9",
+        "integrationCommit": "0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+        "commands": [
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q tests/adversarial/test_memory_skill_boundaries.py tests/adversarial/test_context_invalid_inputs.py tests/test_protected_h_ablation.py",
+          "cd /private/tmp/meta-harness-meta33 && PYTHONPATH=/private/tmp/meta-harness-meta33/src /Users/charltondho/Developer/projects/meta-harness/.venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta33 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta33 diff --check b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d"
+        ],
+        "evidenceRefs": [
+          "focused-pytest:48-passed,1-xfailed",
+          "full-pytest:1866-passed,1-xfailed,733-warnings",
+          "workplan-node:tests-155,pass-155,fail-0",
+          "diff-check:clean",
+          "review-head:8bc19f18d654621d0b6c480739e849f9daa99fde",
+          "integration-commit:0167c9fd4dd8a90b5eab184581511d2bf9c4578e",
+          ".review-store/meta33-glm-5.2-review.txt#sha256:d15e8de55e869c0c9ce1a71ec88b5adcc3daffff70e226853a3063ab4c21bf0f"
+        ],
+        "receiptHash": "sha256:59f02e72fdf1be3f9e5b5605e9c16d8d52f6a3ae86f35e8cdcf5fa084d98c84c",
+        "actor": "coordinator:charltons-mbp.home.lan:meta33-accept-20260726",
+        "releasedPaths": [
+          "tests/fixtures/meta5/corpus.json",
+          "tests/adversarial/test_memory_skill_boundaries.py",
+          ".agents/meta33-review-brief-glm.md",
+          ".review-store/meta33-glm-5.2-review.txt"
+        ],
+        "revisionFrom": 169,
+        "revisionTo": 170,
+        "at": "2026-07-26T05:27:45.817Z"
       }
     }
   ]
