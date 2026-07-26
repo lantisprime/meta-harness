@@ -1,13 +1,13 @@
-# Session Handoff — meta-harness (2026-07-26, session 60: META-33 source landed)
+# Session Handoff — meta-harness (2026-07-26, session 61: META-33 fully landed)
 
 ## State in one line
 
 META-33 / `TASK-20260726-025` is **`done`** at atomic board revision
 **170** and Linear META-33 is Done. The bounded MEM-011 metadata correction
-passed GitHub CI and PR #80 merged to `main` as `15a684a`; all acceptance checks
-passed and the four reserved paths are released. This branch prepares the
-canonical board and handoff closeout without touching the dirty primary
-worktree.
+passed GitHub CI and source PR #80 merged as `15a684a`. Canonical board/handoff
+closeout PR #81 then passed CI and merged as `f80f8d0`. All acceptance checks
+passed, the four reserved paths are released, and repository `main` now carries
+the accepted board revision.
 
 ## What changed
 
@@ -44,6 +44,8 @@ frozen definition.
 - Workplan TAP: 155 passed, 0 failed; `git diff --check` clean.
 - GitHub Actions run `30190582275`: pass on exact accepted head `0167c9f`.
 - Source PR #80: merged as `15a684a`.
+- Closeout GitHub Actions run `30190938832`: pass on exact head `a7e82ea`.
+- Board/handoff closeout PR #81: merged as `f80f8d0`.
 - Acceptance receipt:
   `sha256:59f02e72fdf1be3f9e5b5605e9c16d8d52f6a3ae86f35e8cdcf5fa084d98c84c`.
 - Episodic milestone:
@@ -51,14 +53,12 @@ frozen definition.
 
 ## Repository state and next steps
 
-1. Publish and merge the canonical board/handoff closeout from
-   `chore/meta-33-closeout`, then record the final closeout merge in a minimal
-   handoff update.
-2. The clean feature worktree `/private/tmp/meta-harness-meta33` is now
-   deletable after the remote branch is no longer needed.
+1. No META-33 implementation, review, CI, board, or closeout work remains.
+2. Worktrees `/private/tmp/meta-harness-meta33` and
+   `/private/tmp/meta-harness-meta33-closeout` are deletable when convenient.
 3. Preserve the primary worktree's unrelated pre-existing edits in the two
-   episodic-memory skill files and untracked `.codex/`; do not use that dirty
-   worktree for closeout publication.
+   episodic-memory skill files and untracked `.codex/` when reconciling it with
+   updated `origin/main`.
 4. The development board has no Ready, claimed, in-progress, Review, or
    Verifying card. The only non-Done card is superseded blocked qualification
    `TASK-20260726-024`, which retains no paths.
