@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 151,
+  "revision": 158,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -4613,6 +4613,277 @@
         "revisionFrom": 150,
         "revisionTo": 151,
         "at": "2026-07-25T23:15:41.566Z"
+      }
+    },
+    {
+      "id": "TASK-20260714-007",
+      "title": "Integrate protected evaluation and run the scaffold H ablation",
+      "status": "done",
+      "owner": "codex:charltons-mbp.home.lan:meta9-20260726",
+      "paths": [],
+      "priority": 0,
+      "trace": "Linear:META-9;charter:stages-3-4;invariants:frozen-comparisons,evaluator-non-self-approval,full-fidelity-evidence,bounded-authority,best-protected-over-latest",
+      "dependencies": [
+        "TASK-20260714-004",
+        "TASK-20260714-006"
+      ],
+      "evidence": [
+        "Linear:META-9;plan:docs/dual-subscription-high-level-implementation-plan.md:419-524;spec:.agents/meta9-build-spec.md;base:86329987f94fa6402c76df6d594c25b8ebc71ef3"
+      ],
+      "next": [
+        "Coordinator qualify Ready; claim and start; Kimi K3 plan review before builder edits"
+      ],
+      "definition": {
+        "sourceRevision": "git:86329987f94fa6402c76df6d594c25b8ebc71ef3;linear:META-9;plan:docs/dual-subscription-high-level-implementation-plan.md:419-524",
+        "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+        "worktreePath": "/private/tmp/meta-harness-meta-9",
+        "branch": "dev/meta-9-protected-evaluation-h-ablation",
+        "baseCommit": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+        "currentHead": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Implement one protected, deterministic three-cell scaffold-H ablation contract and run it through fixture-backed evaluation. Compare no-external-memory, base-scaffold, and optimized-scaffold H under identical frozen E/task/runner/W/schedule/budget inputs; retain exact per-case/repetition/report/memory-receipt evidence and variance; require all approved-target, transfer, replay-retention, privacy, safety, and efficiency views; allow pending human promotion only after at least one approved target improves with zero mandatory-case regression; block repeated-search-set leakage and any evaluator self-approval; persist an immutable self-hashing result with exact base rollback. No live worker/prompt activation, optimizer, W_mem training, evaluator evolution, Web API, promotion pointer, or scientific claim.",
+        "stopCondition": "Stop on any edit outside the frozen writable slice; live worker/prompt/memory activation; change to E or W; candidate evaluator/promotion/deployment authority; holdout disclosure; aggregate-only promotion; mandatory-case regression; missing protected view; lineage, report, receipt, budget, digest, or rollback mismatch; non-deterministic fixed-input digest; dependency change; unresolved P0/P1 Kimi or Pi/GLM finding; focused/full/workplan/diff-check failure.",
+        "evaluatorAuthority": "The implementing seat cannot self-approve. Herdr-driven Pi using kimi-coding/k3 performs the primary plan and frozen-diff review read-only. Repository policy additionally requires Pi using NeuralWatt GLM-5.2 to review the same frozen base/head diff read-only. Briefs identify exact commits, acceptance criteria, charter invariants, and test evidence; forbid edits; require file-and-line evidence and P0-P3 classification. Verbatim artifacts are stored under .review-store. Every substantive finding is dispositioned; accepted fixes require a new frozen commit and fresh reviews. A distinct coordinator integrates and accepts. No reviewer or candidate receives promotion, merge, deployment, credential, or runtime authority.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q tests/test_protected_h_ablation.py tests/adversarial/test_memory_skill_boundaries.py tests/test_exact_eval_tuning.py tests/test_memory_broker.py",
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta-9 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-9 diff --check 86329987f94fa6402c76df6d594c25b8ebc71ef3"
+        ],
+        "nextCheckpoint": "Kimi K3 approves the frozen plan; invalid-input tests fail before implementation; the three-cell fixture campaign passes with all six views, per-case/repetition variance and exact refs, pending-only eligibility, immutable reload, and strict mandatory non-regression; focused and full suites pass; exact commit receives Kimi K3 plus mandatory NeuralWatt GLM-5.2 reviews with no unresolved P0/P1.",
+        "allowedOwnerNamespaces": [
+          "codex"
+        ]
+      },
+      "authorityGrant": {
+        "executionCoordination": true,
+        "evaluator": false,
+        "merge": false,
+        "promotion": false,
+        "deployment": false,
+        "credentials": false,
+        "runtime": false
+      },
+      "receipts": [
+        {
+          "from": "backlog",
+          "to": "ready",
+          "actor": "coordinator:charltons-mbp.home.lan:meta9-qualify-20260726",
+          "revisionFrom": 152,
+          "revisionTo": 153,
+          "at": "2026-07-26T00:26:34.223Z",
+          "prevEntryHash": null,
+          "entryHash": "sha256:69891a0a3f1bd6db3e6e2595bc357ff63a77b9c672b25de056874fc8a65b3810"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "codex:charltons-mbp.home.lan:meta9-20260726",
+          "revisionFrom": 153,
+          "revisionTo": 154,
+          "at": "2026-07-26T00:26:54.683Z",
+          "prevEntryHash": "sha256:69891a0a3f1bd6db3e6e2595bc357ff63a77b9c672b25de056874fc8a65b3810",
+          "entryHash": "sha256:762f74e56a7241f464dd302869f42cbc227bc970f518d57998b6116d4c01f0ba"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "codex:charltons-mbp.home.lan:meta9-20260726",
+          "revisionFrom": 154,
+          "revisionTo": 155,
+          "at": "2026-07-26T00:26:54.756Z",
+          "prevEntryHash": "sha256:762f74e56a7241f464dd302869f42cbc227bc970f518d57998b6116d4c01f0ba",
+          "entryHash": "sha256:827dbcf41a6efd8910e148a58cc4a526de5e18e5626c92535d66bac82e854b8a"
+        },
+        {
+          "from": "in_progress",
+          "to": "review",
+          "actor": "codex:charltons-mbp.home.lan:meta9-20260726",
+          "revisionFrom": 155,
+          "revisionTo": 156,
+          "at": "2026-07-26T01:18:11.792Z",
+          "evidence": {
+            "branch": "dev/meta-9-protected-evaluation-h-ablation",
+            "head": "d70412b9b9d45404459443ed2b85a75fd535e826"
+          },
+          "prevEntryHash": "sha256:827dbcf41a6efd8910e148a58cc4a526de5e18e5626c92535d66bac82e854b8a",
+          "entryHash": "sha256:014d9f923970399400b150de7c9a811f168f8f4758a08c4c132212656232437f"
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+          "revisionFrom": 156,
+          "revisionTo": 157,
+          "at": "2026-07-26T01:49:53.633Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-9-protected-evaluation-h-ablation",
+            "reviewHead": "d70412b9b9d45404459443ed2b85a75fd535e826",
+            "integrationCommit": "43fa84352a575927f6a937e0cb31b026958acf46",
+            "integrationReceiptHash": "sha256:3d274b0b7bd896e57e654450b2eff81316cb241d6ccca4dea3f1755864765f5e"
+          },
+          "prevEntryHash": "sha256:014d9f923970399400b150de7c9a811f168f8f4758a08c4c132212656232437f",
+          "entryHash": "sha256:ed361ccd67d10686c2298d5461fd90e1546855f67435e402e14e2000db271c83"
+        },
+        {
+          "from": "verifying",
+          "to": "done",
+          "actor": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+          "revisionFrom": 157,
+          "revisionTo": 158,
+          "at": "2026-07-26T01:50:38.223Z",
+          "evidence": {
+            "schemaVersion": 1,
+            "verdict": "pass",
+            "evaluator": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+            "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+            "integrationCommit": "43fa84352a575927f6a937e0cb31b026958acf46",
+            "commands": [
+              "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q tests/test_protected_h_ablation.py tests/adversarial/test_memory_skill_boundaries.py tests/test_exact_eval_tuning.py tests/test_memory_broker.py",
+              "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q",
+              "cd /private/tmp/meta-harness-meta-9 && node --test scripts/workplan.test.mjs",
+              "git -C /private/tmp/meta-harness-meta-9 diff --check 86329987f94fa6402c76df6d594c25b8ebc71ef3"
+            ],
+            "evidenceRefs": [
+              "git:86329987f94fa6402c76df6d594c25b8ebc71ef3..d70412b9b9d45404459443ed2b85a75fd535e826",
+              "git:76bc764fb1f29f95347324969fe3a75cc745fe3c",
+              "git:43fa84352a575927f6a937e0cb31b026958acf46",
+              ".review-store/meta9-kimi-review.txt:frozen-diff APPROVE/no findings",
+              ".review-store/meta9-glm-5.2-review.txt:APPROVE; P2 REJECT disposition; no P0/P1",
+              "coordinator: git ancestry and merged-tree identity verified; focused pytest 95 passed, 1 xfailed",
+              ".agents/meta9-review-brief-glm.md: full pytest 1796 passed, 4 skipped, 1 xfailed; workplan 155 passed; diff --check clean",
+              "GitHub PR #77: merged with green CI"
+            ],
+            "receiptHash": "sha256:707beaf4fc416ec7df8521c85e6301a4b12b13c7e0582250cee3f70e97c216cf"
+          },
+          "prevEntryHash": "sha256:ed361ccd67d10686c2298d5461fd90e1546855f67435e402e14e2000db271c83",
+          "entryHash": "sha256:61558d0f0f1310f37dac3f1ad80affc2498b7bc5f53d69b37d187e406a8bc60a"
+        }
+      ],
+      "receiptCount": 6,
+      "claimSnapshot": {
+        "owner": "codex:charltons-mbp.home.lan:meta9-20260726",
+        "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+        "sourceRevision": "git:86329987f94fa6402c76df6d594c25b8ebc71ef3;linear:META-9;plan:docs/dual-subscription-high-level-implementation-plan.md:419-524",
+        "worktreePath": "/private/tmp/meta-harness-meta-9",
+        "branch": "dev/meta-9-protected-evaluation-h-ablation",
+        "baseCommit": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+        "currentHead": "86329987f94fa6402c76df6d594c25b8ebc71ef3",
+        "paths": [
+          "src/metaharness/evals/ablation.py",
+          "src/metaharness/evals/artifact_store.py",
+          "src/metaharness/evals/__init__.py",
+          "src/metaharness/memory/promotion.py",
+          "src/metaharness/memory/__init__.py",
+          "tests/test_protected_h_ablation.py",
+          "tests/adversarial/test_memory_skill_boundaries.py",
+          "docs/architecture.md",
+          ".agents/meta9-definition.json",
+          ".agents/meta9-build-spec.md",
+          ".agents/meta9-review-brief-kimi.md",
+          ".agents/meta9-review-brief-glm.md",
+          ".review-store/meta9-kimi-review.txt",
+          ".review-store/meta9-glm-5.2-review.txt"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Implement one protected, deterministic three-cell scaffold-H ablation contract and run it through fixture-backed evaluation. Compare no-external-memory, base-scaffold, and optimized-scaffold H under identical frozen E/task/runner/W/schedule/budget inputs; retain exact per-case/repetition/report/memory-receipt evidence and variance; require all approved-target, transfer, replay-retention, privacy, safety, and efficiency views; allow pending human promotion only after at least one approved target improves with zero mandatory-case regression; block repeated-search-set leakage and any evaluator self-approval; persist an immutable self-hashing result with exact base rollback. No live worker/prompt activation, optimizer, W_mem training, evaluator evolution, Web API, promotion pointer, or scientific claim.",
+        "acceptanceCommands": [
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q tests/test_protected_h_ablation.py tests/adversarial/test_memory_skill_boundaries.py tests/test_exact_eval_tuning.py tests/test_memory_broker.py",
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta-9 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-9 diff --check 86329987f94fa6402c76df6d594c25b8ebc71ef3"
+        ],
+        "nextCheckpoint": "Kimi K3 approves the frozen plan; invalid-input tests fail before implementation; the three-cell fixture campaign passes with all six views, per-case/repetition variance and exact refs, pending-only eligibility, immutable reload, and strict mandatory non-regression; focused and full suites pass; exact commit receives Kimi K3 plus mandatory NeuralWatt GLM-5.2 reviews with no unresolved P0/P1.",
+        "revisionFrom": 153,
+        "revisionTo": 154,
+        "at": "2026-07-26T00:26:54.682Z"
+      },
+      "reviewFreeze": {
+        "branch": "dev/meta-9-protected-evaluation-h-ablation",
+        "head": "d70412b9b9d45404459443ed2b85a75fd535e826",
+        "revisionFrom": 155,
+        "revisionTo": 156,
+        "at": "2026-07-26T01:18:11.792Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+        "reviewBranch": "dev/meta-9-protected-evaluation-h-ablation",
+        "reviewHead": "d70412b9b9d45404459443ed2b85a75fd535e826",
+        "integrationCommit": "43fa84352a575927f6a937e0cb31b026958acf46",
+        "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+        "revisionFrom": 156,
+        "revisionTo": 157,
+        "at": "2026-07-26T01:49:53.633Z"
+      },
+      "releasedPaths": [
+        "src/metaharness/evals/ablation.py",
+        "src/metaharness/evals/artifact_store.py",
+        "src/metaharness/evals/__init__.py",
+        "src/metaharness/memory/promotion.py",
+        "src/metaharness/memory/__init__.py",
+        "tests/test_protected_h_ablation.py",
+        "tests/adversarial/test_memory_skill_boundaries.py",
+        "docs/architecture.md",
+        ".agents/meta9-definition.json",
+        ".agents/meta9-build-spec.md",
+        ".agents/meta9-review-brief-kimi.md",
+        ".agents/meta9-review-brief-glm.md",
+        ".review-store/meta9-kimi-review.txt",
+        ".review-store/meta9-glm-5.2-review.txt"
+      ],
+      "acceptanceReceipt": {
+        "schemaVersion": 1,
+        "verdict": "pass",
+        "evaluator": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+        "definitionHash": "sha256:4cc4e6046d1cf797efe4eda9e67e817aebc9b00b01c462444b0b53f5736ddd2f",
+        "integrationCommit": "43fa84352a575927f6a937e0cb31b026958acf46",
+        "commands": [
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q tests/test_protected_h_ablation.py tests/adversarial/test_memory_skill_boundaries.py tests/test_exact_eval_tuning.py tests/test_memory_broker.py",
+          "cd /private/tmp/meta-harness-meta-9 && .venv/bin/python -m pytest -q",
+          "cd /private/tmp/meta-harness-meta-9 && node --test scripts/workplan.test.mjs",
+          "git -C /private/tmp/meta-harness-meta-9 diff --check 86329987f94fa6402c76df6d594c25b8ebc71ef3"
+        ],
+        "evidenceRefs": [
+          "git:86329987f94fa6402c76df6d594c25b8ebc71ef3..d70412b9b9d45404459443ed2b85a75fd535e826",
+          "git:76bc764fb1f29f95347324969fe3a75cc745fe3c",
+          "git:43fa84352a575927f6a937e0cb31b026958acf46",
+          ".review-store/meta9-kimi-review.txt:frozen-diff APPROVE/no findings",
+          ".review-store/meta9-glm-5.2-review.txt:APPROVE; P2 REJECT disposition; no P0/P1",
+          "coordinator: git ancestry and merged-tree identity verified; focused pytest 95 passed, 1 xfailed",
+          ".agents/meta9-review-brief-glm.md: full pytest 1796 passed, 4 skipped, 1 xfailed; workplan 155 passed; diff --check clean",
+          "GitHub PR #77: merged with green CI"
+        ],
+        "receiptHash": "sha256:707beaf4fc416ec7df8521c85e6301a4b12b13c7e0582250cee3f70e97c216cf",
+        "actor": "coordinator:charltons-mbp.home.lan:meta9-integrate-20260726",
+        "releasedPaths": [
+          "src/metaharness/evals/ablation.py",
+          "src/metaharness/evals/artifact_store.py",
+          "src/metaharness/evals/__init__.py",
+          "src/metaharness/memory/promotion.py",
+          "src/metaharness/memory/__init__.py",
+          "tests/test_protected_h_ablation.py",
+          "tests/adversarial/test_memory_skill_boundaries.py",
+          "docs/architecture.md",
+          ".agents/meta9-definition.json",
+          ".agents/meta9-build-spec.md",
+          ".agents/meta9-review-brief-kimi.md",
+          ".agents/meta9-review-brief-glm.md",
+          ".review-store/meta9-kimi-review.txt",
+          ".review-store/meta9-glm-5.2-review.txt"
+        ],
+        "revisionFrom": 157,
+        "revisionTo": 158,
+        "at": "2026-07-26T01:50:38.223Z"
       }
     }
   ]
