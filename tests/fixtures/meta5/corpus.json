@@ -224,10 +224,10 @@
       "id": "repeated-set-promotion-gate",
       "category": "repeated_set_promotion",
       "suite": "test_memory_skill_boundaries",
-      "status": "absent",
-      "requirement_id": "META5-MEM-011",
-      "target": "metaharness.memory.promotion (does not exist)",
-      "description": "A future promotion gate must refuse to promote a candidate/memory record whose supporting evidence comes from repeatedly re-evaluating the same search set (search-set leakage into the promotion decision). No promotion-gate module exists yet."
+      "status": "enforced",
+      "requirement_id": null,
+      "target": "metaharness.memory.promotion.PromotionGate / Evidence / SearchSetLeakageError",
+      "description": "metaharness.memory.promotion.PromotionGate.decide(Evidence) raises SearchSetLeakageError when evaluation_count > 1 and held_out_evaluation_count == 0 (repeated search-set evaluation with no held-out evidence). The gate is inert evidence only (PromotionEvidenceDecision.status == 'evidence_accepted'); it carries no active-pointer mutation, activate, promote, deploy, worker, evaluator, merge, or credential authority."
     },
     {
       "id": "incompatible-reuse-version-lineage",

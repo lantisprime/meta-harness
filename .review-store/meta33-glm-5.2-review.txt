@@ -1,0 +1,62 @@
+I now have complete, independently-gathered file-and-line evidence. Here is my second-opinion review.
+
+---
+
+# META-33 Independent Second-Opinion Review (Pi / GLM-5.2)
+
+**Card:** META-33 / `TASK-20260726-025`
+**Frozen diff reviewed:** `git diff b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d..8bc19f18d654621d0b6c480739e849f9daa99fde`
+**Base:** `b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d` · **Head:** `8bc19f18d654621d0b6c480739e849f9daa99fde`
+**Mode:** read-only. No files edited/created, no commits/push, no episodic memory, no state mutation, no destructive commands.
+
+## Verdict: `APPROVE`
+
+Approval rests on criteria 1–4, which I independently grounded in the cited files. Criteria 5–6 and reproduction of the pytest run could **not** be independently verified in this reviewer environment (see Limitations L1–L3); those rest on the brief's assertion plus head-state consistency, with **no positive evidence** of production scope creep.
+
+## Findings
+
+### P0 — None.
+### P1 — None.
+### P2 — None.
+
+### P3-1 (optional, non-blocking) — corpus `target` symbol list slightly under-inclusive
+- `tests/fixtures/meta5/corpus.json:229` lists `target` as `"metaharness.memory.promotion.PromotionGate / Evidence / SearchSetLeakageError"` but omits `PromotionEvidenceDecision`, even though `PromotionEvidenceDecision` is a public export (`src/metaharness/memory/promotion.py` `__all__`) and its `status == 'evidence_accepted'` is itself cited in the same case's `description` (`tests/fixtures/meta5/corpus.json:230`).
+- The `description` (line 230) is accurate and complete; only the illustrative `target` list omits one shipped symbol. Optional to add `PromotionEvidenceDecision` for completeness. Does not affect correctness, the gate's inertness claim, or any criterion.
+
+## Confirmation of acceptance criteria (file-and-line evidence)
+
+**Criterion 1 — corpus records enforced + cleared requirement ID + accurate description. PASS (grounded).**
+- `tests/fixtures/meta5/corpus.json:224` `id` = `repeated-set-promotion-gate`; `:227` `status` = `"enforced"`; `:228` `requirement_id` = `null` (obsolete outstanding ID cleared under the corpus convention); `:229` `target` names `PromotionGate / Evidence / SearchSetLeakageError`; `:230` description states `decide(Evidence)` raises `SearchSetLeakageError` when `evaluation_count > 1 and held_out_evaluation_count == 0` and that the gate "carries no active-pointer mutation, activate, promote, deploy, worker, evaluator, merge, or credential authority."
+- Shipped code matches exactly: `src/metaharness/memory/promotion.py:1` module docstring ("Inert evidence gate …"); `PromotionGate.decide` re-validates `Evidence`, raises `SearchSetLeakageError` iff `evaluation_count > 1 and held_out_evaluation_count == 0`, else returns `PromotionEvidenceDecision` (no mutation of any active/deployment pointer); `PromotionEvidenceDecision.status: Literal["evidence_accepted"]` is fixed; docstrings assert "grants no promotion or activation authority" / "without mutating any active or deployment state"; `__all__` exports exactly `Evidence`, `PromotionEvidenceDecision`, `PromotionGate`, `SearchSetLeakageError` → narrow and inert. ✓
+
+**Criterion 2 — test no longer counts MEM-011 absent / no "unimplemented" claim. PASS (grounded).**
+- `tests/adversarial/test_memory_skill_boundaries.py:36` `ABSENT_CASES = {… cases_for("test_memory_skill_boundaries", status="absent")}`. The corpus has exactly one `status:"absent"` case (`tests/fixtures/meta5/corpus.json:200`) = `task-action-training-target-schema` with `requirement_id:"META5-MEM-009"` (`:201`); the promotion case is `status:"enforced"` so it is excluded from `ABSENT_CASES`.
+- `tests/adversarial/test_memory_skill_boundaries.py:56-60` asserts `corpus_requirement_ids == {"META5-MEM-009"}` — MEM-011 is not counted as absent.
+- Repo-wide grep for `META5-MEM-011` returns **no** hits in `tests/fixtures/meta5/corpus.json` or `tests/adversarial/test_memory_skill_boundaries.py`. The only MEM-011 prose in `tests/` is `test_memory_skill_boundaries.py:53` ("MEM-011 (memory.promotion) is now enforced by PromotionGate") and `:64` ("The META-5 corpus entry for MEM-011 was previously marked absent, but the PromotionGate has shipped (META-9)…") — the opposite of "unimplemented." ✓
+
+**Criterion 3 — focused load-bearing assertion that trips loudly on stale absence. PASS (grounded).**
+- `tests/adversarial/test_memory_skill_boundaries.py:63-84` `test_repeated_set_promotion_gate_corpus_status_is_load_bearing`: locates the corpus case by `id` without a status filter (`:70-72`), then asserts `corpus_case["status"] == "enforced"` (`:73`) and `corpus_case["requirement_id"] is None` (`:74`), and re-exercises the shipped gate (`:76-84`, expecting `SearchSetLeakageError`).
+- Combined with `test_all_absent_cases_have_a_stable_requirement_id_and_a_test_below` (`:50-60`), every stale-return variant trips a hard failure:
+  - status→`absent` (req_id null): `ABSENT_CASES` gains the case with `requirement_id=None` → `corpus_requirement_ids = {"META5-MEM-009", None}` ≠ `{"META5-MEM-009"}` (`:60` fails) **and** `:73` fails.
+  - req_id→`META5-MEM-011` (status enforced): `:74` fails.
+  - both: `:73`, `:74`, and `:60` fail.
+  - The gate-behavior arm (`:83-84`) additionally couples corpus status to actual enforced behavior at runtime. ✓
+
+**Criterion 4 — MEM-009 the only genuinely absent strict-xfail contract. PASS (grounded).**
+- Corpus: exactly one `"status": "absent"` case in the whole file (`tests/fixtures/meta5/corpus.json:200`) → `task-action-training-target-schema`, `requirement_id:"META5-MEM-009"` (`:201`), `target:"metaharness.memory.training (does not exist)"` (`:202`).
+- Tests: exactly one `@pytest.mark.xfail(` decorator in `tests/` (`tests/adversarial/test_memory_skill_boundaries.py:200`), `strict=True`, `raises=ModuleNotFoundError`, reason cites `META5-MEM-009` (`:203-206`), body imports `metaharness.memory.training as training  # not yet implemented` (`:207-208`). Confirmed genuinely absent: `find src/metaharness/memory/*.py` lists `__init__, audit, broker, health, promotion, records, scaffold, skills, stores` — **no `training.py`**. ✓
+
+## Explicit P0/P1 confirmation
+**No P0 or P1 findings exist against this diff.** The sole finding is P3 (optional). Nothing blocks integration on technical grounds.
+
+## Limitations / test-evidence gaps (environmental — not defects in the diff)
+
+- **L1 — bash and git unavailable; criteria 5 and 6 not independently enumerable.** Every `bash` invocation in this reviewer environment was denied — including `git`/`git diff` ("Run git commands") and even `echo hi` / `python3 --version` ("Run bash commands" / "destructive shell commands"). The git binary cannot be invoked. `.git` in the worktree is a pointer file (`gitdir: /Users/charltondho/Developer/projects/meta-harness/.git/worktrees/meta-harness-meta33`), i.e. the real object store lives outside this project, and the `read` tool refuses paths outside the project ("Read files outside this project"). No META-33 frozen-diff artifact is stored under `.review-store/` (only pre-existing meta17/19/23/t019… review files) or `.agents/` (only the brief itself) for me to read.
+  - Therefore I could not run `git diff --stat` to confirm the changed-file set equals exactly `{tests/fixtures/meta5/corpus.json, tests/adversarial/test_memory_skill_boundaries.py}` (criterion 6), nor enumerate production/-protected/authority surfaces for "no change" (criterion 5). These two criteria rest on the brief's assertion.
+  - **Mitigating evidence (head-state consistency, not proof of zero-change):** the head-state production module `src/metaharness/memory/promotion.py` is exactly the narrow inert gate the corpus describes (criterion 1); the META-9 protected H-ablation test `tests/test_protected_h_ablation.py` imports `from metaharness.memory.promotion import Evidence, PromotionGate, SearchSetLeakageError` normally — no sign of a weakened or altered authority. There is no positive evidence of production scope creep, but a literal changed-file enumeration was not achievable here.
+
+- **L2 — pytest run not reproduced.** I could not execute `pytest …` (bash blocked). The brief's `48 passed, 1 xfailed` is **consistent** with my static findings: exactly one `@pytest.mark.xfail` exists in `tests/` (the MEM-009 case, `test_memory_skill_boundaries.py:200`), and the new load-bearing test's expected `SearchSetLeakageError` is exactly what `PromotionGate.decide` raises for `evaluation_count=5, held_out_evaluation_count=0` (`promotion.py`). But the run itself was not reproduced by me.
+
+- **L3 — historical artifacts still mention MEM-011 as a former xfail.** `META5-MEM-011` still appears in `.workplan/state.json`, `.agents/meta6-build-spec.md`, `.agents/meta9-build-spec.md`, `memory/session_handoff.md`, and `.review-store/meta7-glm-gate-brief.md`. This is **expected and correct** (those are immutable historical/episodic records of past states) and out of scope for criteria 1–4, which concern the active corpus/test bookkeeping only. No action needed; rewriting them would falsify history.
+
+**Recommendation to the coordinator/integrator:** because criteria 5–6 could not be independently verified here, if a reviewer environment with working `git`/`bash` is available, a trivial `git diff --stat b3d538974dd6bb24e30fcf23a31a2d4e48ecb79d..8bc19f18d654621d0b6c480739e849f9daa99fde` plus the named `pytest` command would close L1/L2. The content review (criteria 1–4) stands on its own as fully grounded.
