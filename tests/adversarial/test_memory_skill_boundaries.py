@@ -232,13 +232,6 @@ def test_envelope_rejects_confounded_live_and_pinned_sections_for_same_lineage()
         build()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ModuleNotFoundError,
-    reason="META5-MEM-011: a promotion gate must refuse to promote a candidate "
-    "whose supporting evidence comes from repeatedly re-evaluating the same "
-    "search set; no promotion-gate module exists yet",
-)
 def test_promotion_gate_rejects_repeated_search_set_evidence():
     import metaharness.memory.promotion as promotion  # not yet implemented
 

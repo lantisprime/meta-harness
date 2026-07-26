@@ -1,0 +1,110 @@
+META-9 MANDATORY PI / NEURALWATT GLM-5.2 REVIEW RECORD
+Transport: Herdr session drv-meta9-glm-diff-0726
+Seat: pi --provider neuralwatt --model glm-5.2 --thinking high --no-extensions --no-session --approve --tools read,grep,find,ls,bash
+Base: 86329987f94fa6402c76df6d594c25b8ebc71ef3
+Frozen head: d70412b9b9d45404459443ed2b85a75fd535e826
+Mode: read-only tools; no edits
+
+===== FROZEN-DIFF REVIEW — VERBATIM FINAL RESPONSE =====
+
+I have completed the frozen-diff review. I read AGENTS.md,
+docs/PROJECT_CHARTER.md, the frozen definition and build contract; reviewed only
+the exact committed diff 86329987..d70412b9; confirmed HEAD d70412b9 matches the
+frozen head; verified all 10 changed paths are within the frozen writable slice;
+confirmed no runtime (worker/prompt/Web API) component imports the new modules;
+and re-ran the focused suite (95 passed, 1 xfailed), workplan (155 passed, 0
+failed), and git diff --check (clean).
+
+```text
+VERDICT: APPROVE
+
+FINDINGS:
+- P2 Protected run-context refs allow binding the sealed holdout split into the promotion-track ablation
+  Evidence: src/metaharness/evals/ablation.py:184 declares `split: EvalSplit` on
+  `ProtectedEvaluationReportRef` and src/metaharness/evals/ablation.py:472 declares
+  `split: EvalSplit` on `ProtectedEvidenceRow`, where `EvalSplit =
+  Literal["development", "validation", "holdout"]`
+  (src/metaharness/evals/artifacts.py:15). `_resolve_report`
+  (src/metaharness/evals/ablation.py:606-608) checks only
+  `report.split != report_ref.split` for consistency and never rejects `"holdout"`;
+  `_project_case` (src/metaharness/evals/ablation.py:613-624) retains the case
+  `verdict` and `metrics`. The existing promotion-adjacent `EvaluationReportRef`
+  deliberately restricts `split: Literal["development", "validation"]`
+  (src/metaharness/evals/artifacts.py:186), excluding holdout.
+  Impact: A protected campaign can be constructed over holdout-split
+  `EvaluationReport` records. The holdout cases' pass/fail verdicts and resource
+  metrics would then be retained in `HAblationResult.evidence_rows` /
+  `view_summaries` and could drive
+  `status == "eligible_pending_human_promotion"`. No sealed assertion, output,
+  per-case digest, or verifier detail is copied (so acceptance criterion #3's
+  non-disclosure holds), but the sealed holdout partition would feed the
+  promotion-track eligibility signal, diverging from the `EvaluationReportRef`
+  precedent and the charter's sealed-holdout intent. It also leaves a path where
+  caller-attested `Evidence.held_out_evaluation_count` (criterion #6) can be
+  satisfied while the actually-bound reports are holdout-split, so the MEM-011
+  leakage boundary is not enforced at the report-binding layer.
+  Required change: Type `split` on `ProtectedEvaluationReportRef` (and the
+  derived `ProtectedEvidenceRow.split`) as `Literal["development", "validation"]`,
+  mirroring `EvaluationReportRef` at src/metaharness/evals/artifacts.py:186, and
+  add a regression test asserting that constructing or binding a `"holdout"`-split
+  report ref fails closed.
+```
+
+Summary of what I verified as sound (no finding):
+
+- Exactly three canonical cells; E/cases/runner-config/W/schedule/budget/authority
+  frozen per-cell via _FROZEN_AXIS_FIELDS and report_contract (ablation.py:203-258);
+  only H blueprint/workflow/scaffold/report-refs/own-digest may differ.
+- Lineage and rollback: optimized parent_snapshot_hash == base.content_hash;
+  rollback_snapshot_hash == base.content_hash; cell↔snapshot binding enforced
+  (ablation.py:240-256). Snapshot self-hash uses the sha256:-prefixed pattern
+  (context/models.py:19).
+- Report re-resolution: _resolve_report (digest/split/membership) +
+  _validate_reports_and_rows (eval/blueprint/workflow/runner provenance, manifest
+  membership, repetition schedule, re-projected case equality) re-resolve every
+  report; HAblationResultStore._rederive re-runs
+  evaluate_protected_h_ablation on both create and get
+  (artifact_store.py:198-221). Report-store tampering fails closed
+  (test test_result_store_rechecks_report_store_instead_of_trusting_copied_rows).
+- Self-hashing/determinism: _self_hash excludes content_digest and id/created_at
+  volatile fields; tampering decision fields raises; deterministic digest across
+  id/created_at
+  (tests test_result_digest_is_deterministic...,
+  test_fresh_self_hash_cannot_forge_eligibility_decision_fields).
+- Eligibility is fully re-derived (_derive_result_fields +
+  _structural_consistency); equal≠improvement; mandatory regression/unverified
+  block; aggregate cannot compensate; status
+  Literal["eligible_pending_human_promotion","ineligible"], never promoted; no
+  promote/activate/deploy on result, store, or PromotionEvidenceDecision.
+- PromotionGate rejects repeated search-set (count>1, held_out==0); invalid
+  counts/empty id rejected; inert (promotion.py:54-71). No worker/prompt/Web API
+  wiring of memory.promotion or evals.ablation.
+- Nested immutability (_FrozenStrictModel, frozen=True,
+  revalidate_instances="always"); store is create-only
+  (os.link, EvalArtifactAlreadyExistsError).
+- 14 required negative tests all present and substantive; MEM-009 remains
+  strict-xfail; MEM-011 xfail correctly removed with body unchanged in substance;
+  the stale MEM-011 corpus entry is explicitly acknowledged/deferred in the build
+  spec and architecture.md and is outside the frozen path reservation.
+- Fixture is a deterministic integration proof; docs explicitly disclaim a
+  real-model scientific win.
+
+The single P2 is non-blocking (no P0/P1). It should be dispositioned by the
+implementing seat; if ACCEPT/ACCEPT-WITH-MOD, a fresh frozen commit and re-review
+are required per policy.
+
+===== ORCHESTRATOR DISPOSITION =====
+
+- P2 holdout-split restriction: REJECT.
+  The task is the protected evaluation integration for Milestone 3, whose charter
+  stage explicitly includes held-out ID/OOD transfer and whose implementation
+  plan requires sealed confirmation. `EvaluationReportRef` is a visible-split
+  tuning-proposal input, not the authority model for protected evaluator results.
+  This ablation intentionally accepts `EvalSplit.holdout` while `_project_case`
+  strips the exact sealed fields named by the finding. The GLM review itself
+  confirms that no sealed assertion, output, per-case digest, or verifier detail
+  is copied. `Evidence.held_out_evaluation_count` is an independent search-set
+  reuse witness, not an assertion about the split of bound evaluation reports.
+  Restricting protected report refs to development/validation would remove
+  intended sealed confirmation rather than close a demonstrated bypass. No code
+  change is warranted.

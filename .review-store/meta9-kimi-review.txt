@@ -1,0 +1,154 @@
+META-9 KIMI K3 REVIEW RECORD
+Transport: Herdr session drv-meta9-kimi-plan-0726
+Seat: pi --provider kimi-coding --model k3 --thinking high --no-extensions --no-session --approve --tools read,grep,find,ls
+Base: 86329987f94fa6402c76df6d594c25b8ebc71ef3
+Plan: .agents/meta9-build-spec.md
+Brief: .agents/meta9-review-brief-kimi.md
+Mode: read-only
+
+===== PLAN REVIEW — VERBATIM FINAL RESPONSE =====
+
+VERDICT: REVISE
+
+FINDINGS:
+- P1 W-identity and seed-schedule fail-closed checks have no evidentiary anchor
+  Evidence: .agents/meta9-build-spec.md:93-94,105,197 require binding and failing closed on "task-model/portfolio/`W` identity" and "repetition/seed schedule"; but src/metaharness/evals/artifacts.py:116-136 (`EvaluationReport`) carries only blueprint_digest, workflow_digest, eval_digest, runner_id, cases, metrics — no model/portfolio/`W` identity and no seed; `EvalAttemptResult` (artifacts.py:37-45) records repetition numbers but no seed. Because `H` differs across the three cells, blueprint_digest legitimately differs per cell and cannot serve as a `W`-equality witness.
+  Impact: negative test 4's `W`/seed-schedule mismatch rejection is unimplementable from immutable evidence; the card's core "only `H` changes" comparability claim (charter invariant 3, frozen comparisons) reduces to caller assertion, and any per-cell `W`/seed attestation invented during implementation would be candidate-controlled — exactly what the gate must not trust.
+  Required change: either name an explicit immutable per-cell run-context anchor (content hash of the exact blueprint content, runner configuration, and seed schedule) with cross-cell equality enforced on the `W`/seed portion, or narrow the fail-closed requirement and negative test 4 to the axes verifiable from `EvaluationReport` (eval_digest, runner_id, case set, repetition counts, budget) and state explicitly that `W`/schedule equality is established by campaign construction.
+
+- P2 Non-regression rule omits transfer and approved_target, conflicting with "zero mandatory-case regression"
+  Evidence: .agents/meta9-build-spec.md:144 limits non-regression to "mandatory validation/replay/privacy/safety/efficiency" cases, while the required views are approved_target, transfer, replay_retention, privacy, safety, efficiency (spec section 2, "Required protected views"); .agents/meta9-definition.json:14 ("budget") requires "zero mandatory-case regression"; the spec's own stop condition (.agents/meta9-build-spec.md:261) says "any aggregate-only gate or mandatory-case regression"; negative test 9 is view-agnostic.
+  Impact: a literal reading of section 3 permits a mandatory transfer-view (or mandatory approved_target) regression without blocking eligibility — the protected gate rule, the card's central deliverable, is ambiguous and internally inconsistent.
+  Required change: restate eligibility rule 2 as "no mandatory case in any of the six required protected views regresses" (or explicitly enumerate all six views), matching the frozen definition and stop conditions.
+
+- P2 "Tampered report references" rejection lacks a stated verification source
+  Evidence: .agents/meta9-build-spec.md:163,201 require rejecting tampered/mismatched report refs; `EvaluationReportRef` (src/metaharness/evals/artifacts.py:181-196) is only id + content_digest + split, and content_digest (artifacts.py:143-148, digest over the whole report) cannot be recomputed from an evidence row's subset of case results; the spec never states that refs are resolved against the persisted `EvaluationReportStore`.
+  Impact: without a named reference truth, negative test 8's "report-ref digest mismatch / wrong case ID / split-view mismatch" cannot distinguish tampering from a self-asserted ref-plus-cases pair; implementations will drift on what the check means.
+  Required change: specify that evidence-row construction and `HAblationResultStore` validation resolve each report ref against the immutable `EvaluationReportStore`, verifying content_digest, split, and exact case membership, while copying no sealed holdout payloads.
+
+- P3 Writable slice excludes the meta5 corpus, forcing stale MEM-011 metadata
+  Evidence: the writable slice (.agents/meta9-build-spec.md, "Writable slice") omits tests/fixtures/meta5/corpus.json; corpus.json:224-230 declares MEM-011 status "absent" with target "metaharness.memory.promotion (does not exist)" — both false once this card lands. The consistency guard (tests/adversarial/test_memory_skill_boundaries.py:47-58) hardcodes the absent set {MEM-009, MEM-011}, so the corpus cannot be corrected without also editing that test (which is in the slice).
+  Impact: the machine-readable corpus that anchors the adversarial suite permanently mis-describes an implemented module; no test catches the drift.
+  Required change: add tests/fixtures/meta5/corpus.json to the writable slice and flip MEM-011's status/target together with the hardcoded absent set, or explicitly record the accepted staleness as a dispositioned decision on the card.
+
+NO-FINDINGS: n/a — findings listed above
+
+===== ORCHESTRATOR DISPOSITIONS — PLAN REVIEW =====
+
+- P1: ACCEPT-WITH-MOD. Add an immutable, self-hashing protected-evaluator run
+  manifest for each cell. It binds exact report refs, evaluator/case set, runner
+  configuration, model-portfolio/W identity, ordered seeds/repetitions, budget,
+  blueprint/workflow, and cell H snapshot. The evaluator compares all frozen
+  fields across cells and resolves reports from EvaluationReportStore.
+- P2 non-regression: ACCEPT. Require zero mandatory-case regression across every
+  one of the six required protected views.
+- P2 report verification: ACCEPT. The comparison and result-store validation
+  resolve every ref from EvaluationReportStore and verify digest, split, exact
+  case membership, runner, evaluator, repetitions, and metrics.
+- P3 corpus drift: DEFER. The behavioral MEM-011 test becomes enforced in this
+  card, but tests/fixtures/meta5/corpus.json is outside the already frozen path
+  reservation. Record the metadata discrepancy explicitly and file a bounded
+  follow-up rather than violating ownership. No runtime or gate behavior depends
+  on the stale prose/status entry.
+
+===== FROZEN-DIFF REVIEW =====
+
+Transport: Herdr session drv-meta9-kimi-diff2-0726
+Seat: pi --provider kimi-coding --model k3 --thinking medium --no-extensions --no-session --approve --tools read,grep,find,ls,bash
+Base: 86329987f94fa6402c76df6d594c25b8ebc71ef3
+Frozen head: d70412b9b9d45404459443ed2b85a75fd535e826
+Mode: read-only tools; no test rerun; no edits
+
+===== FROZEN-DIFF REVIEW — VERBATIM FINAL RESPONSE =====
+
+VERDICT: APPROVE
+
+FINDINGS:
+
+NO-FINDINGS: none
+
+===== ORCHESTRATOR DISPOSITION — FROZEN-DIFF REVIEW =====
+
+No findings to disposition. Kimi K3 approved the exact frozen base/head diff.
+
+===== INDEPENDENT BEHAVIORAL VERIFICATION =====
+
+Transport: Herdr session drv-meta9-behavior-0726
+Seat: pi --provider minimax --model MiniMax-M3 --thinking medium --no-extensions --no-session --approve --tools read,bash,grep,find,ls
+Frozen head: d70412b9b9d45404459443ed2b85a75fd535e826
+Mode: read-only repository; inline Python under tempfile; no pytest; no repository changes
+
+===== VERBATIM FINAL RESPONSE =====
+
+All seven probes passed under the public ablation/store/promotion API only. Repo
+git status confirms only the pre-existing untracked files (AGENTS.md,
+.review-store/*) and no further changes.
+
+Observed outputs
+
+1. HAblationResultStore.create(result) →
+   HAblationResultStore.get("ablation-result") round-trip:
+   status='eligible_pending_human_promotion', w_mem_lane_unblocked=True,
+   closest='optimized_scaffold', improved=['case-approved-target'],
+   content_digest matches pre/post-store.
+2. PromotionGate().decide(Evidence(evaluation_count=2, held_out=0)) →
+   SearchSetLeakageError("repeated search-set evaluation requires held-out
+   evidence").
+3. Forged manifest payload (mutated runner_id + stale content_digest) →
+   pydantic.ValidationError: content_digest mismatch at _self_hash wrap
+   validator.
+4. Optimized regresses on the approved_target mandatory case → result
+   status='ineligible', w_mem_lane_unblocked=False,
+   regressed_mandatory_case_ids=['case-approved-target'],
+   closest_protected_result.cell='base_scaffold'.
+5. All four nested assignments (manifest evaluation_report_refs, row
+   case_result.metrics, result.content_digest, result.cells) rejected by frozen
+   Pydantic models (ValidationError / AttributeError).
+6. Persisted-report tamper: after rewriting content_digest of
+   report-base-scaffold-approved-target.json on disk, HAblationResultStore.get
+   re-derives and raises AblationReferenceMismatchError("immutable report
+   'report-base-scaffold-approved-target' could not be resolved") (gate at
+   _resolve_report in src/metaharness/evals/ablation.py; called from
+   HAblationResultStore._rederive in
+   src/metaharness/evals/artifact_store.py); bytes restored after probe.
+7. No promote / activate / deploy / approve / rollback attribute present on
+   metaharness.evals.ablation module, HAblationCampaign, HAblationResult,
+   HAblationResultStore, or EvaluationReportStore.
+
+No file:line defects observed.
+
+VERDICT: PASS
+
+===== PLAN RE-REVIEW 1 — VERBATIM FINAL RESPONSE =====
+
+VERDICT: REVISE
+
+FINDINGS:
+- P2 Manifest cross-cell equality rule contradicts the manifest's own bound fields
+  Evidence: .agents/meta9-build-spec.md:117-119 requires the evaluator to "fail unless every field other than cell identity, blueprint/workflow `H` surface, and scaffold-H snapshot is identical"; but the same manifest binds "exact evaluation-report refs" (line 113) and "its own content digest" (line 115). Report refs are necessarily per-cell (each cell produces distinct `EvaluationReport` IDs/digests, per the report-identity model at src/metaharness/evals/artifacts.py:116-136), and a self-hash digest differs whenever any bound field differs. Neither field is in the exclusion list.
+  Impact: taken literally, the accepted P1 fix is unimplementable — no valid three-cell campaign can ever pass manifest comparison, since report refs and self digests cannot be identical across cells; implementers must silently deviate from the frozen spec, reintroducing the same class of gate ambiguity the prior P2 finding was accepted to remove.
+  Required change: extend the exclusion list in the comparison sentence to cover the per-cell outputs — i.e., "every field other than cell identity, blueprint/workflow `H` surface, scaffold-H snapshot, evaluation-report refs, and the manifest's own content digest is identical" (or explicitly partition the manifest into frozen axes compared for equality versus per-cell bindings carried as evidence).
+
+NO-FINDINGS: n/a — one finding listed above
+
+DISPOSITION VERIFICATION (accepted changes, no finding):
+- P1 (ACCEPT-WITH-MOD): resolved by the per-cell `ProtectedRunContextManifest` (.agents/meta9-build-spec.md:102-122) plus negative test 4 now exercised "through per-cell protected run-context manifests" (line 232-233); subject only to the residual wording defect above.
+- P2 non-regression (ACCEPT): resolved — "no mandatory case in any of the six required protected views regresses" (line 173), now consistent with .agents/meta9-definition.json:14 and the stop condition.
+- P2 report verification (ACCEPT): resolved — evidence-row construction resolves every ref through the immutable `EvaluationReportStore` verifying digest, split, evaluator digest, runner, case membership, repetitions, and metrics, and `HAblationResultStore` repeats the checks (lines 143-148).
+- P3 corpus drift (DEFER): disposition honored — staleness explicitly recorded with a bounded follow-up mandated (lines 219-223); no gate behavior depends on the stale entry.
+
+===== ORCHESTRATOR DISPOSITION — PLAN RE-REVIEW 1 =====
+
+- P2 manifest equality: ACCEPT. The spec now partitions per-cell fields from
+  frozen-axis fields and explicitly requires equality only for the latter.
+
+===== PLAN RE-REVIEW 2 — VERBATIM FINAL RESPONSE =====
+
+VERDICT: APPROVE
+
+FINDINGS:
+
+NO-FINDINGS: none
+
+The P2 is resolved.
+.agents/meta9-build-spec.md:117-124 now reads: "fail unless every frozen-axis field is identical. The per-cell fields allowed to differ are only cell identity, blueprint/workflow H surface, scaffold-H snapshot, evaluation-report refs, and the manifest's own content digest. Task-model/portfolio/W, runner configuration, seeds, repetitions, E, cases, budget, and protected evaluator authority must be identical across all three manifests." The exclusion list now covers exactly the per-cell outputs (report refs at line 113, self digest at line 115) that the previous wording made impossible to satisfy, and the frozen axes are explicitly enumerated — matching the required change. All prior dispositions (P1 ACCEPT-WITH-MOD, both P2 ACCEPTs, P3 DEFER recorded at lines 219-223 of the prior revision) stand implemented with no remaining P0–P3 findings.

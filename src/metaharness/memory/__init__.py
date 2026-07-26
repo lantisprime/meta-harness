@@ -15,6 +15,12 @@ from metaharness.memory.broker import (
     MemoryPhaseContract,
     MemoryProposalKind,
 )
+from metaharness.memory.promotion import (
+    Evidence,
+    PromotionEvidenceDecision,
+    PromotionGate,
+    SearchSetLeakageError,
+)
 from metaharness.memory.records import (
     ActivationState,
     LifecycleState,
@@ -42,6 +48,7 @@ from metaharness.memory.stores import (
 __all__ = [
     "ActivationState",
     "EpisodicMemoryStore",
+    "Evidence",
     "ImmutableRecordError",
     "LifecycleState",
     "MemoryAction",
@@ -59,7 +66,10 @@ __all__ = [
     "MemoryRecord",
     "MemoryStore",
     "ProceduralMemoryStore",
+    "PromotionEvidenceDecision",
+    "PromotionGate",
     "SemanticMemoryStore",
+    "SearchSetLeakageError",
     "UnreceiptedMutationError",
     "WorkingMemoryStore",
     "consult_memory",
