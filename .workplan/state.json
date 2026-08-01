@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 172,
+  "revision": 173,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -5280,8 +5280,8 @@
     {
       "id": "TASK-20260801-027",
       "title": "Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary",
-      "status": "ready",
-      "owner": "",
+      "status": "claimed",
+      "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
       "paths": [
         "src/metaharness/evals/h_campaign.py",
         "src/metaharness/evals/__init__.py",
@@ -5349,9 +5349,59 @@
           "at": "2026-08-01T01:30:49.258Z",
           "prevEntryHash": null,
           "entryHash": "sha256:dd46af594d588a14b8c88d95b24c9bd97af9c040c54a925188c1e44dce806f43"
+        },
+        {
+          "from": "ready",
+          "to": "claimed",
+          "actor": "claude:charltons-mini.home.lan:meta34-resume-20260801",
+          "revisionFrom": 172,
+          "revisionTo": 173,
+          "at": "2026-08-01T01:30:55.776Z",
+          "prevEntryHash": "sha256:dd46af594d588a14b8c88d95b24c9bd97af9c040c54a925188c1e44dce806f43",
+          "entryHash": "sha256:675001998f8542aaa2fd4882809468a629deff2031d75f0b2faedccfc4c23a16"
         }
       ],
-      "receiptCount": 1
+      "receiptCount": 2,
+      "claimSnapshot": {
+        "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
+        "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
+        "sourceRevision": "git:24a489134f9fd0e9a5780fbe3110a650f91ed013;linear:META-34;recovered-frozen-head:d9bc2ddc86e5e2c9f4f1b2618de0b5b1dff2f911;incident+amendment:Linear META-34 comment 7231461e-38f1-4f8c-8f4c-eb145f46e862 (2026-08-01)",
+        "worktreePath": "/Users/charltonho/Developer/worktrees/meta-harness-meta34",
+        "branch": "dev/meta-34-real-protected-h-campaign",
+        "baseCommit": "24a489134f9fd0e9a5780fbe3110a650f91ed013",
+        "currentHead": "d9bc2ddc86e5e2c9f4f1b2618de0b5b1dff2f911",
+        "paths": [
+          "src/metaharness/evals/h_campaign.py",
+          "src/metaharness/evals/__init__.py",
+          "src/metaharness/harness/memory.py",
+          "src/metaharness/harness/__init__.py",
+          "tests/test_real_h_campaign.py",
+          ".agents/meta34-build-spec.md",
+          ".agents/meta34-campaign-spec.json",
+          ".agents/meta34-definition.json",
+          ".agents/meta34r-definition.json",
+          ".review-store/meta34-glm-5.2-review-r2.txt",
+          "docs/architecture.md",
+          "memory/session_handoff.md"
+        ],
+        "plane": "development",
+        "frozenAxes": [
+          "H",
+          "E",
+          "W"
+        ],
+        "budget": "Resume META-34 from the recovered GLM-approved frozen head d9bc2dd after host loss of board revisions 171-177 and the uncommitted correction worktree. Scope: (1) reapply the six accepted GLM-5.2 dispositions recorded verbatim in Linear META-34 (recompute all implementation digests on every runtime guard; hermetic committed-spec drift test; per-attempt seed asserted in the actual request body; recursive verifier secret scan bound into the evaluator implementation digest; real read-spy holdout non-read assertion or explicit ledger proof; eligible-reload reconstructs the validation ablation and reruns protected derivation); (2) regenerate the campaign precommit spec against the operator-amended task model ollama qwen3.5:4b digest sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd on host charltons-mini.home.lan, replacing the retired qwen3.5:35b-a3b-coding-nvfp4 pin, with exact inference parameters and think:false recorded before any evidence collection; (3) full verification; (4) freeze a new commit for fresh mandatory review. Three-cell design (no_external_memory, base_scaffold, optimized_scaffold), deterministic non-self-approving evaluators, partitions, sealed holdout, equal budgets and seed schedules across cells, and the human-promotion boundary before META-10 are unchanged. Push the branch and the control root after every checkpoint; no worktree under /private/tmp.",
+        "acceptanceCommands": [
+          "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q tests/test_real_h_campaign.py",
+          "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q",
+          "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && node --test scripts/workplan.test.mjs",
+          "git -C /Users/charltonho/Developer/worktrees/meta-harness-meta34 diff --check 24a489134f9fd0e9a5780fbe3110a650f91ed013"
+        ],
+        "nextCheckpoint": "All six dispositions reapplied with citing tests; campaign spec regenerated hermetically against the pinned qwen3.5:4b digest with the committed-spec drift test green; focused and full suites plus workplan tests pass; new frozen commit pushed and receives mandatory Pi/NeuralWatt GLM-5.2 review with no unresolved P0/P1; then the one-time protected campaign runs and the terminal verdict is checkpointed to Linear, stopping at the human-promotion boundary.",
+        "revisionFrom": 172,
+        "revisionTo": 173,
+        "at": "2026-08-01T01:30:55.776Z"
+      }
     }
   ]
 }
