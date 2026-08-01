@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 173,
+  "revision": 174,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -5280,7 +5280,7 @@
     {
       "id": "TASK-20260801-027",
       "title": "Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary",
-      "status": "claimed",
+      "status": "in_progress",
       "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
       "paths": [
         "src/metaharness/evals/h_campaign.py",
@@ -5359,9 +5359,19 @@
           "at": "2026-08-01T01:30:55.776Z",
           "prevEntryHash": "sha256:dd46af594d588a14b8c88d95b24c9bd97af9c040c54a925188c1e44dce806f43",
           "entryHash": "sha256:675001998f8542aaa2fd4882809468a629deff2031d75f0b2faedccfc4c23a16"
+        },
+        {
+          "from": "claimed",
+          "to": "in_progress",
+          "actor": "claude:charltons-mini.home.lan:meta34-resume-20260801",
+          "revisionFrom": 173,
+          "revisionTo": 174,
+          "at": "2026-08-01T01:31:12.843Z",
+          "prevEntryHash": "sha256:675001998f8542aaa2fd4882809468a629deff2031d75f0b2faedccfc4c23a16",
+          "entryHash": "sha256:80f8f8a4b835fc6fa17ae1596edba2d496f165114f4748dd1a018720083ec80d"
         }
       ],
-      "receiptCount": 2,
+      "receiptCount": 3,
       "claimSnapshot": {
         "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
         "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",

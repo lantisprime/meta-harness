@@ -2,11 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 173
+Revision: 174
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
-| TASK-20260801-027 | Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary | claimed | claude:charltons-mini.home.lan:meta34-resume-20260801 | `src/metaharness/evals/h_campaign.py`; `src/metaharness/evals/__init__.py`; `src/metaharness/harness/memory.py`; `src/metaharness/harness/__init__.py`; `tests/test_real_h_campaign.py`; `.agents/meta34-build-spec.md`; `.agents/meta34-campaign-spec.json`; `.agents/meta34-definition.json`; `.agents/meta34r-definition.json`; `.review-store/meta34-glm-5.2-review-r2.txt`; `docs/architecture.md`; `memory/session_handoff.md` |
+| TASK-20260801-027 | Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary | in_progress | claude:charltons-mini.home.lan:meta34-resume-20260801 | `src/metaharness/evals/h_campaign.py`; `src/metaharness/evals/__init__.py`; `src/metaharness/harness/memory.py`; `src/metaharness/harness/__init__.py`; `tests/test_real_h_campaign.py`; `.agents/meta34-build-spec.md`; `.agents/meta34-campaign-spec.json`; `.agents/meta34-definition.json`; `.agents/meta34r-definition.json`; `.review-store/meta34-glm-5.2-review-r2.txt`; `docs/architecture.md`; `memory/session_handoff.md` |
 | TASK-20260726-024 | Update META5 MEM-011 corpus metadata after promotion-boundary implementation | blocked | pi:charltons-mbp.home.lan:meta33-build-20260726 | `tests/fixtures/meta5/corpus.json`; `tests/adversarial/test_memory_skill_boundaries.py`; `.agents/meta33-review-brief-glm.md`; `.review-store/meta33-glm-5.2-review.txt` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
