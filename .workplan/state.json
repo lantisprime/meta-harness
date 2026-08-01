@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 175,
+  "revision": 176,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -5280,7 +5280,7 @@
     {
       "id": "TASK-20260801-027",
       "title": "Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary",
-      "status": "review",
+      "status": "blocked",
       "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
       "paths": [
         "src/metaharness/evals/h_campaign.py",
@@ -5383,9 +5383,23 @@
           },
           "prevEntryHash": "sha256:80f8f8a4b835fc6fa17ae1596edba2d496f165114f4748dd1a018720083ec80d",
           "entryHash": "sha256:646adcf6ea6b4d36ae2981ae5ada69eab2d6eda985be056deab979d5c892c241"
+        },
+        {
+          "from": "review",
+          "to": "blocked",
+          "actor": "claude:charltons-mini.home.lan:meta34-resume-20260801",
+          "revisionFrom": 175,
+          "revisionTo": 176,
+          "at": "2026-08-01T15:56:56.683Z",
+          "evidence": {
+            "reason": "accepted review dispositions require new frozen head e21e500; retaining paths for re-freeze",
+            "retainPaths": true
+          },
+          "prevEntryHash": "sha256:646adcf6ea6b4d36ae2981ae5ada69eab2d6eda985be056deab979d5c892c241",
+          "entryHash": "sha256:4da1dbbf1bb07a3006e38a780a60bd13e0ac49b9b6e260dc8a49e80700eaf29c"
         }
       ],
-      "receiptCount": 4,
+      "receiptCount": 5,
       "claimSnapshot": {
         "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
         "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
@@ -5432,7 +5446,10 @@
         "revisionFrom": 174,
         "revisionTo": 175,
         "at": "2026-08-01T02:21:13.098Z"
-      }
+      },
+      "blockedFrom": "review",
+      "blockReason": "accepted review dispositions require new frozen head e21e500; retaining paths for re-freeze",
+      "retainPaths": true
     }
   ]
 }
