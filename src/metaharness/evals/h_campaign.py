@@ -360,9 +360,15 @@ class ModelContract(CampaignModel):
     inference_parameters: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _loopback(self) -> "ModelContract":
-        if not re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:/|$)", self.base_url):
-            raise CampaignContractError("task model base_url must be loopback")
+    def _approved_local_host(self) -> "ModelContract":
+        if not re.match(
+            r"^https?://(?:127\.0\.0\.1|localhost|\[::1\]|charltons-mini\.home\.lan)"
+            r"(?::\d+)?(?:/|$)",
+            self.base_url,
+        ):
+            raise CampaignContractError(
+                "task model base_url must use loopback or the pinned local runtime host"
+            )
         _require_hash(self.model_digest, "model_digest")
         allowed = {"temperature", "max_tokens", "thinking", "extra_body"}
         if set(self.inference_parameters) != allowed:
@@ -893,16 +899,26 @@ def _actual_contains_secret_material(actual: Any) -> bool:
     """
     from metaharness.portable.integrity import assert_secret_safe, PortableIntegrityError
     candidates: list[str] = []
-    if isinstance(actual, _SECRET_SCAN_KINDS):
-        candidates.append(actual)
-    elif isinstance(actual, (list, tuple)):
-        for item in actual:
-            if isinstance(item, _SECRET_SCAN_KINDS):
-                candidates.append(item)
-    elif isinstance(actual, dict):
-        for value in actual.values():
-            if isinstance(value, _SECRET_SCAN_KINDS):
-                candidates.append(value)
+    pending = [actual]
+    seen_containers: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, _SECRET_SCAN_KINDS):
+            candidates.append(value)
+            continue
+        if isinstance(value, dict):
+            identity = id(value)
+            if identity in seen_containers:
+                continue
+            seen_containers.add(identity)
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            identity = id(value)
+            if identity in seen_containers:
+                continue
+            seen_containers.add(identity)
+            pending.extend(value)
     if not candidates:
         return False
     # Reject any candidate that the canonical scanner flags.
@@ -1227,6 +1243,27 @@ def _enforce_runner_model_contract(
             expected_body["seed"] = seed
         if dict(inner.extra_body) != expected_body:
             raise CampaignContractError("concrete worker extra_body/seed drift")
+        if seed is not None:
+            try:
+                request_body = inner._body(
+                    Task(
+                        id="model-contract-seed-probe",
+                        objective="attest literal request seed",
+                    ),
+                    [],
+                    [],
+                )
+            except Exception as exc:
+                raise CampaignContractError(
+                    "concrete worker request body seed probe failed"
+                ) from exc
+            if (
+                not isinstance(request_body, dict)
+                or request_body.get("seed") != seed
+            ):
+                raise CampaignContractError(
+                    "concrete worker literal request body seed drift"
+                )
 
 
 def _runner_model_attestation(runner: Any) -> dict[str, Any] | None:
@@ -2577,38 +2614,45 @@ def _project_runtime_stores(
     return tuple(projections), record_index, corpus_digest
 
 
-_RUNTIME_IMPLEMENTATION_CACHE: dict[str, str] | None = None
 _TASK_TEMPLATE_CONTRACT_VERSION = "task-template-case-digest:v1"
 
 
 def _runtime_implementation_fields() -> dict[str, str]:
-    global _RUNTIME_IMPLEMENTATION_CACHE
-    if _RUNTIME_IMPLEMENTATION_CACHE is None:
-        _RUNTIME_IMPLEMENTATION_CACHE = {
-            "resolver_implementation_digest": _implementation_digest(
-                _resolve_indexed_record
-            ),
-            "task_template_implementation_digest": "sha256:" + sha256_hex(
-                canonical_json_bytes({
-                    "version": _TASK_TEMPLATE_CONTRACT_VERSION,
-                    "case_input_digest_implementation": _implementation_digest(
-                        case_input_digest
-                    ),
-                    "task_schema": tuple(Task.model_fields),
-                })
-            ),
-            "memory_aware_runner_implementation_digest": _implementation_digest(
-                MemoryAwareRunner
-            ),
-            "broker_policy_implementation_digest": _implementation_digest(
-                MemoryActionBroker
-            ),
-            "deterministic_evaluator_implementation_digest": _implementation_digest(
-                deterministic_verify
-            ),
-        }
     return {
-        **_RUNTIME_IMPLEMENTATION_CACHE,
+        "resolver_implementation_digest": _implementation_digest(
+            _resolve_indexed_record
+        ),
+        "task_template_implementation_digest": "sha256:" + sha256_hex(
+            canonical_json_bytes({
+                "version": _TASK_TEMPLATE_CONTRACT_VERSION,
+                "case_input_digest_implementation": _implementation_digest(
+                    case_input_digest
+                ),
+                "task_schema": tuple(Task.model_fields),
+            })
+        ),
+        "memory_aware_runner_implementation_digest": _implementation_digest(
+            MemoryAwareRunner
+        ),
+        "broker_policy_implementation_digest": _implementation_digest(
+            MemoryActionBroker
+        ),
+        "deterministic_evaluator_implementation_digest": "sha256:" + sha256_hex(
+            canonical_json_bytes({
+                "deterministic_verify": _implementation_digest(
+                    deterministic_verify
+                ),
+                "secret_scanner": _implementation_digest(
+                    _actual_contains_secret_material
+                ),
+                "secret_fragment_pattern": _SECRET_FRAGMENT.pattern,
+                "secret_fragment_flags": _SECRET_FRAGMENT.flags,
+                "secret_scan_kinds": tuple(
+                    f"{kind.__module__}.{kind.__qualname__}"
+                    for kind in _SECRET_SCAN_KINDS
+                ),
+            })
+        ),
         **_installed_worker_parser_fields(),
     }
 
@@ -2916,9 +2960,9 @@ def _verify_campaign(
         for split in expected_splits for cell in CELLS for view in VIEWS
     }
     seen_report_keys: set[tuple[str, str, str]] = set()
-    # Re-derive the protected verdict from the stored reports and stored
-    # ablation result. The re-derivation must agree with the persisted
-    # terminal result for the verification to succeed.
+    reloaded_reports: dict[tuple[str, str, str], EvaluationReport] = {}
+    # Re-derive the protected verdict from the reloaded evidence and reports.
+    # The stored ablation result is comparison material, never derivation input.
     report_root = root / "reports"
     report_store = EvaluationReportStore(report_root)
     for ref in report_refs:
@@ -2936,6 +2980,7 @@ def _verify_campaign(
         if ref.get("id") != expected_id:
             raise CampaignContractError("manifest report ID is not bound to cell/view")
         report = report_store.get(ref.get("id", ""))
+        reloaded_reports[key] = report
         if report.split != key[0] or report.content_digest != ref.get("content_digest"):
             raise CampaignContractError("stored report does not match manifest binding")
         if (
@@ -3003,7 +3048,55 @@ def _verify_campaign(
     result_root = root / "results"
     result_store = HAblationResultStore(result_root, report_store=report_store)
     result_id = result.get("protected_result_id") or f"{exact.campaign_id}-result"
-    derived = result_store.get(result_id)
+    stored = result_store.get(result_id)
+
+    validation_reports = {
+        (cell, view): reloaded_reports[("validation", cell, view)]
+        for cell in CELLS for view in VIEWS
+    }
+    validation_protected_rows, _ = _build_protected_rows(
+        exact,
+        rows=val_rows,
+        split="validation",
+        reports=validation_reports,
+        report_store=report_store,
+    )
+    validation_manifests = _build_protected_manifests(
+        exact, reports=validation_reports, split="validation",
+    )
+    base_snapshot = next(
+        cell.base_snapshot
+        for cell in exact.cells if cell.name == "base_scaffold"
+    )
+    optimized_snapshot = next(
+        cell.optimized_snapshot
+        for cell in exact.cells if cell.name == "optimized_scaffold"
+    )
+    if base_snapshot is None or optimized_snapshot is None:
+        raise CampaignContractError(
+            "frozen validation ablation snapshots are missing"
+        )
+    validation_ablation = _ablation_campaign_for_split(
+        exact,
+        base_snapshot=base_snapshot,
+        optimized_snapshot=optimized_snapshot,
+        manifests=validation_manifests,
+    )
+    derived = _rederive_protected_result(
+        exact,
+        ablation_campaign=validation_ablation,
+        protected_rows=validation_protected_rows,
+        report_store=report_store,
+    )
+    if (
+        stored.status != derived.status
+        or stored.closest_protected_result.cell
+        != derived.closest_protected_result.cell
+        or stored.content_digest != derived.content_digest
+    ):
+        raise CampaignContractError(
+            "stored protected result disagrees with evidence rederivation"
+        )
     if derived.status != result["status"]:
         raise CampaignContractError("derived verdict disagrees with persisted result")
     if derived.closest_protected_result.cell != result["closest_protected_result"]:

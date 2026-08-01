@@ -1614,7 +1614,9 @@ def test_campaign_spec_rejects_bad_case_id_slug():
 # ---------------------------------------------------------------------------
 
 
-def test_development_early_failure_never_touches_ledger_or_holdout(tmp_path):
+def test_development_early_failure_never_touches_ledger_or_holdout(
+    tmp_path, monkeypatch,
+):
     spec = _matching_spec()
     dev_path = tmp_path / "dev.json"
     val_path = tmp_path / "val.json"
@@ -1629,6 +1631,15 @@ def test_development_early_failure_never_touches_ledger_or_holdout(tmp_path):
     )
     ledger_root = tmp_path / "ledger"
     evidence_root = tmp_path / "evidence"
+    holdout_reads = []
+    original_read_text = Path.read_text
+
+    def read_text_spy(path, *args, **kwargs):
+        if path == holdout_path:
+            holdout_reads.append(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text_spy)
     result = run_campaign(
         spec, development_input_path=dev_path, validation_input_path=val_path,
         holdout_input_path=holdout_path, evidence_root=evidence_root,
@@ -1636,7 +1647,7 @@ def test_development_early_failure_never_touches_ledger_or_holdout(tmp_path):
     )
     assert result["status"] == "ineligible"
     assert not any(ledger_root.glob("*.json"))
-    assert not holdout_path.read_bytes() == b""  # ensure file was not opened
+    assert holdout_reads == []
     assert verify_campaign(spec, evidence_root=evidence_root) == result
     evidence, stored_result, manifest = _load_evidence_triplet(evidence_root)
     assert set(evidence) == {"rows"}
@@ -1645,7 +1656,9 @@ def test_development_early_failure_never_touches_ledger_or_holdout(tmp_path):
     assert "protected_result_id" not in manifest
 
 
-def test_validation_early_failure_never_touches_ledger_or_holdout(tmp_path):
+def test_validation_early_failure_never_touches_ledger_or_holdout(
+    tmp_path, monkeypatch,
+):
     spec = _matching_spec()
     dev_path = tmp_path / "dev.json"
     val_path = tmp_path / "val.json"
@@ -1656,6 +1669,15 @@ def test_validation_early_failure_never_touches_ledger_or_holdout(tmp_path):
     factory = _verdict_factory(_all_pass_map(spec, "development"), 2)
     ledger_root = tmp_path / "ledger"
     evidence_root = tmp_path / "evidence"
+    holdout_reads = []
+    original_read_text = Path.read_text
+
+    def read_text_spy(path, *args, **kwargs):
+        if path == holdout_path:
+            holdout_reads.append(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text_spy)
     result = run_campaign(
         spec, development_input_path=dev_path, validation_input_path=val_path,
         holdout_input_path=holdout_path, evidence_root=evidence_root,
@@ -1663,7 +1685,7 @@ def test_validation_early_failure_never_touches_ledger_or_holdout(tmp_path):
     )
     assert result["status"] == "ineligible"
     assert not any(ledger_root.glob("*.json"))
-    assert holdout_path.exists()
+    assert holdout_reads == []
     evidence, stored_result, manifest = _load_evidence_triplet(evidence_root)
     assert set(evidence) == {"rows"}
     assert "holdout_ledger_key" not in stored_result
@@ -1671,7 +1693,9 @@ def test_validation_early_failure_never_touches_ledger_or_holdout(tmp_path):
     assert "protected_result_id" not in manifest
 
 
-def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(tmp_path):
+def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(
+    tmp_path, monkeypatch,
+):
     spec = _matching_spec()
     dev_path = tmp_path / "dev.json"
     val_path = tmp_path / "val.json"
@@ -1681,12 +1705,28 @@ def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(tmp_
     _write_package_file(holdout_path, spec, "holdout")
     factory = _verdict_factory(_approval_map(spec), 2)
     ledger_root = tmp_path / "ledger"
+    ordered_access = []
+    original_consume = HoldoutConsumptionLedger.consume
+    original_read_text = Path.read_text
+
+    def consume_spy(ledger, *args, **kwargs):
+        ordered_access.append("consume")
+        return original_consume(ledger, *args, **kwargs)
+
+    def read_text_spy(path, *args, **kwargs):
+        if path == holdout_path:
+            ordered_access.append("holdout-read")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(HoldoutConsumptionLedger, "consume", consume_spy)
+    monkeypatch.setattr(Path, "read_text", read_text_spy)
     result = run_campaign(
         spec, development_input_path=dev_path, validation_input_path=val_path,
         holdout_input_path=holdout_path, evidence_root=tmp_path / "evidence",
         ledger_root=ledger_root, runner_factory=factory,
     )
     assert result["status"] == "eligible_pending_human_promotion"
+    assert ordered_access[:2] == ["consume", "holdout-read"]
     keys = list(ledger_root.glob("*.json"))
     assert len(keys) == 1
     ledger = HoldoutConsumptionLedger(ledger_root)
@@ -1696,16 +1736,17 @@ def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(tmp_
             holdout_package_digest=spec.package_digest_for("holdout"),
             evaluator_digest=spec.evaluator_digest,
         )
-    # Delete the holdout file; the second attempt must still fail BEFORE
-    # reading it because the ledger is consumed first.
-    holdout_path.unlink()
+    # A repeated campaign reaches the consume attempt but must fail before
+    # another holdout read because the ledger is consumed first.
+    holdout_read_count = ordered_access.count("holdout-read")
     factory2 = _verdict_factory(_approval_map(spec), 2)
     with pytest.raises(HoldoutAlreadyConsumedError):
         run_campaign(
             spec, development_input_path=dev_path, validation_input_path=val_path,
-            holdout_input_path=tmp_path / "missing.json", evidence_root=tmp_path / "evidence2",
+            holdout_input_path=holdout_path, evidence_root=tmp_path / "evidence2",
             ledger_root=ledger_root, runner_factory=factory2,
         )
+    assert ordered_access.count("holdout-read") == holdout_read_count
 
 
 def test_base_pass_and_optimized_pass_is_not_improvement(tmp_path):
@@ -1878,17 +1919,20 @@ def test_openai_compat_worker_public_fields_attest_frozen_contract():
         worker_id="local", model=spec.model.model_id, base_url=spec.model.base_url,
         temperature=0.0, max_tokens=64, thinking=False,
         extra_body={
-            "top_p": 1.0, "top_k": 1, "reasoning_effort": "none",
+            "top_p": 1.0, "top_k": 1, "reasoning_effort": "none", "seed": 73,
         },
     )
     runner = MemoryAwareRunner(
         inner=inner, snapshot=None, broker=None, record_resolver=None,
         memory_enabled=False,
     )
-    _enforce_runner_contract(runner, spec=spec, cell="no_external_memory")
+    _enforce_runner_contract(
+        runner, spec=spec, cell="no_external_memory", seed=73,
+    )
     body = inner._body(
         Task(id="transport", objective="answer"), [], [],
     )
+    assert body["seed"] == 73
     assert body["reasoning_effort"] == "none"
     assert body["top_p"] == 1.0
     assert body["top_k"] == 1
@@ -1908,6 +1952,36 @@ def test_openai_compat_worker_public_fields_attest_frozen_contract():
             ),
             spec=spec,
             cell="no_external_memory",
+        )
+
+
+def test_model_contract_rejects_worker_that_suppresses_seed_from_request_body():
+    from metaharness.evals.h_campaign import _enforce_runner_contract
+    from metaharness.harness.local import OpenAICompatWorker
+
+    spec = _matching_spec()
+    inner = OpenAICompatWorker(
+        worker_id="local", model=spec.model.model_id, base_url=spec.model.base_url,
+        temperature=0.0, max_tokens=64, thinking=False,
+        extra_body={
+            "top_p": 1.0, "top_k": 1, "reasoning_effort": "none", "seed": 73,
+        },
+    )
+    original_body = inner._body
+
+    def suppress_seed(task, messages, tool_schemas):
+        body = original_body(task, messages, tool_schemas)
+        body.pop("seed", None)
+        return body
+
+    inner._body = suppress_seed
+    runner = MemoryAwareRunner(
+        inner=inner, snapshot=None, broker=None, record_resolver=None,
+        memory_enabled=False,
+    )
+    with pytest.raises(CampaignContractError, match="literal request body seed"):
+        _enforce_runner_contract(
+            runner, spec=spec, cell="no_external_memory", seed=73,
         )
 
 
@@ -1987,6 +2061,11 @@ def test_deterministic_verify_only_equals_contains_one_of_and_no_forbidden_outpu
         deterministic_verify("x", {"kind": "equals", "value": "x", "forbidden_substrings": []})
 
 
+def test_deterministic_verify_rejects_secret_at_arbitrary_nested_depth():
+    actual = {"safe": [{"still_safe": [("token=do-not-leak",)]}]}
+    assert not deterministic_verify(actual, {"kind": "equals", "value": actual})
+
+
 def test_h_campaign_module_exposes_no_authority_operations():
     import metaharness.evals.h_campaign as campaign
     forbidden = {"promote", "activate", "deploy", "start_w", "judge", "semantic_judge",
@@ -2040,6 +2119,48 @@ def test_verify_campaign_reloads_manifest_evidence_result_no_model_call(tmp_path
 
     verify_campaign(spec, evidence_root=tmp_path / "evidence")
     assert factory_calls["count"] == 0
+
+
+def test_verify_campaign_rederives_instead_of_trusting_forged_result_store(
+    tmp_path,
+):
+    from metaharness.evals.ablation import evaluate_protected_h_ablation
+    from metaharness.evals.artifact_store import (
+        EvaluationReportStore,
+        HAblationResultStore,
+    )
+
+    spec, evidence_root = _run_eligible_fixture(tmp_path)
+    report_store = EvaluationReportStore(evidence_root / "reports")
+    result_store = HAblationResultStore(
+        evidence_root / "results", report_store=report_store,
+    )
+    result_id = f"{spec.campaign_id}-result"
+    stored = result_store.get(result_id)
+    forged_search_evidence = stored.campaign.search_evidence.model_copy(
+        update={"search_set_id": "forged-search-set"},
+    )
+    forged_campaign = stored.campaign.model_copy(
+        update={"search_evidence": forged_search_evidence},
+    )
+    forged = evaluate_protected_h_ablation(
+        result_id=stored.id,
+        campaign=forged_campaign,
+        evidence_rows=stored.evidence_rows,
+        report_store=report_store,
+        created_at=stored.created_at,
+    )
+    assert forged.content_digest != stored.content_digest
+    result_path = (
+        evidence_root / "results" / "h-ablation-results" / f"{result_id}.json"
+    )
+    result_path.write_text(
+        json.dumps(forged.model_dump(mode="json"), sort_keys=True),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CampaignContractError, match="evidence rederivation"):
+        verify_campaign(spec, evidence_root=evidence_root)
 
 
 def test_evidence_tamper_in_receipt_or_response_or_manifest_rejected(tmp_path):
@@ -2588,6 +2709,62 @@ def test_runtime_guard_recomputes_parser_after_attestation_creation(monkeypatch)
         )
 
 
+def test_runtime_guard_recomputes_core_implementations_after_attestation_creation(
+    monkeypatch,
+):
+    import metaharness.evals.h_campaign as campaign
+    from metaharness.evals.h_campaign import (
+        _enforce_runtime_attestation,
+        _test_runtime_attestation,
+    )
+
+    for target in (
+        "MemoryAwareRunner",
+        "MemoryActionBroker",
+        "deterministic_verify",
+    ):
+        spec = _matching_spec()
+        attestation = _test_runtime_attestation(spec)
+
+        if target == "deterministic_verify":
+            def substituted_implementation(actual, assertion):
+                return True
+        else:
+            class substituted_implementation:
+                pass
+
+        with monkeypatch.context() as patch:
+            patch.setattr(campaign, target, substituted_implementation)
+            with pytest.raises(CampaignContractError, match="installed"):
+                _enforce_runtime_attestation(
+                    attestation, spec=spec, stores=None,
+                )
+
+
+def test_runtime_guard_recomputes_secret_scanner_after_attestation_creation(
+    monkeypatch,
+):
+    import metaharness.evals.h_campaign as campaign
+    from metaharness.evals.h_campaign import (
+        _enforce_runtime_attestation,
+        _test_runtime_attestation,
+    )
+
+    spec = _matching_spec()
+    attestation = _test_runtime_attestation(spec)
+
+    def substituted_secret_scanner(actual):
+        return False
+
+    monkeypatch.setattr(
+        campaign, "_actual_contains_secret_material", substituted_secret_scanner,
+    )
+    with pytest.raises(CampaignContractError, match="installed"):
+        _enforce_runtime_attestation(
+            attestation, spec=spec, stores=None,
+        )
+
+
 def test_public_runtime_rejects_config_compatible_substituted_worker_before_inference(
     tmp_path, monkeypatch,
 ):
@@ -2779,6 +2956,62 @@ def test_file_spec_requires_explicit_precommitted_digest(tmp_path):
         load_spec(path)
     # In-memory construction remains the explicit fixture seam.
     assert CampaignSpec.model_validate(raw).spec_digest
+
+
+def test_committed_campaign_spec_matches_live_runtime_implementations():
+    from metaharness.evals.h_campaign import (
+        _runtime_implementation_fields,
+        load_spec,
+    )
+
+    spec = load_spec(
+        Path(__file__).resolve().parents[1]
+        / ".agents"
+        / "meta34-campaign-spec.json"
+    )
+    live = _runtime_implementation_fields()
+    for cell in spec.cells:
+        assert cell.h.resolver_digest == live["resolver_implementation_digest"]
+        assert (
+            cell.h.task_template_digest
+            == live["task_template_implementation_digest"]
+        )
+        assert (
+            cell.h.wrapper_digest
+            == live["memory_aware_runner_implementation_digest"]
+        )
+        assert cell.h.policy_digest == live["broker_policy_implementation_digest"]
+        assert (
+            cell.h.worker_implementation_digest
+            == live["openai_worker_implementation_digest"]
+        )
+        assert (
+            cell.h.output_parser_digest
+            == live["output_parser_implementation_digest"]
+        )
+    evaluator_digest = live["deterministic_evaluator_implementation_digest"]
+    assert spec.evaluator_digest == evaluator_digest
+    assert spec.evaluator.evaluator_digest == evaluator_digest
+    assert spec.spec_digest == spec._compute_digest()
+    assert spec.digest() == spec.spec_digest
+    assert spec.model.model_id == "qwen3.5:4b"
+    assert spec.model.model_digest == (
+        "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd"
+    )
+    assert spec.model.base_url == "http://charltons-mini.home.lan:11434/v1"
+    assert spec.model.inference_parameters["temperature"] == 0.0
+    assert spec.model.inference_parameters["thinking"] is False
+
+
+def test_model_contract_accepts_only_loopback_or_pinned_local_runtime_host():
+    raw = _model().model_dump(mode="python")
+    raw["base_url"] = "http://charltons-mini.home.lan:11434/v1"
+    assert ModelContract.model_validate(raw).base_url == raw["base_url"]
+    raw["base_url"] = "http://unapproved-runtime.home.lan:11434/v1"
+    with pytest.raises(
+        (CampaignContractError, ValidationError), match="pinned local runtime host",
+    ):
+        ModelContract.model_validate(raw)
 
 
 @pytest.mark.parametrize(

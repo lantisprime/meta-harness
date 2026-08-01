@@ -159,13 +159,13 @@
       "h": {
         "corpus_digest": "sha256:224968eb2c0f6018db8a9730dfcb39b75d7700620248357037f9164bd6b04d5a",
         "memory_snapshot_hash": null,
-        "output_parser_digest": "sha256:9847069e1fd60792bbd5e5c7a97abb626d9dd1a6269a5d981a398339f5cd57dc",
+        "output_parser_digest": "sha256:61e51f5734bceb7e808044db3a1438b8b86452b91343175b8218b73bf02661e7",
         "policy_digest": "sha256:88e75ceaa66c1c8409614a5224d0c17ce5fa7e01abb4f9cb6fb6d3504de4106d",
         "resolver_digest": "sha256:e8c29bdbefda8f5035aa4ec8edec691ecfd795dac6fc8d7655ed4ed9b26f8684",
         "retrieval_policy_digest": null,
         "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
         "task_template_digest": "sha256:4f06d2d54090907e35569200bc28ff223ffa7374d3f94bc8095c85866b28af1a",
-        "worker_implementation_digest": "sha256:f6be6bd58b61c353ac1fb0662bbf3ce4d60f1f4f25df2c070d49f4d80e9aad26",
+        "worker_implementation_digest": "sha256:c0fdee8f973c0367f88ad319469f6744579d31f143d1daaf51ed38d6a61cb1f1",
         "wrapper_digest": "sha256:d930a756ab019de4369d90229a8b787f55b40fdd0a8a0e7821fafdce276625ae"
       },
       "name": "no_external_memory",
@@ -301,13 +301,13 @@
       "h": {
         "corpus_digest": "sha256:224968eb2c0f6018db8a9730dfcb39b75d7700620248357037f9164bd6b04d5a",
         "memory_snapshot_hash": "sha256:7850b8c837364c042d1839e78a965a99e178212f7e182a5e046056bb9c473831",
-        "output_parser_digest": "sha256:9847069e1fd60792bbd5e5c7a97abb626d9dd1a6269a5d981a398339f5cd57dc",
+        "output_parser_digest": "sha256:61e51f5734bceb7e808044db3a1438b8b86452b91343175b8218b73bf02661e7",
         "policy_digest": "sha256:88e75ceaa66c1c8409614a5224d0c17ce5fa7e01abb4f9cb6fb6d3504de4106d",
         "resolver_digest": "sha256:e8c29bdbefda8f5035aa4ec8edec691ecfd795dac6fc8d7655ed4ed9b26f8684",
         "retrieval_policy_digest": "sha256:961c7b0a03c98028dbb863b1d9a7426bb83b659f880bd86396ed554dc91e22c0",
         "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
         "task_template_digest": "sha256:4f06d2d54090907e35569200bc28ff223ffa7374d3f94bc8095c85866b28af1a",
-        "worker_implementation_digest": "sha256:f6be6bd58b61c353ac1fb0662bbf3ce4d60f1f4f25df2c070d49f4d80e9aad26",
+        "worker_implementation_digest": "sha256:c0fdee8f973c0367f88ad319469f6744579d31f143d1daaf51ed38d6a61cb1f1",
         "wrapper_digest": "sha256:d930a756ab019de4369d90229a8b787f55b40fdd0a8a0e7821fafdce276625ae"
       },
       "name": "base_scaffold",
@@ -320,13 +320,13 @@
       "h": {
         "corpus_digest": "sha256:224968eb2c0f6018db8a9730dfcb39b75d7700620248357037f9164bd6b04d5a",
         "memory_snapshot_hash": "sha256:b1ed7831c518f7259c65a656372f8e5a0acff9ad0963c0e548a0ad15f7c28815",
-        "output_parser_digest": "sha256:9847069e1fd60792bbd5e5c7a97abb626d9dd1a6269a5d981a398339f5cd57dc",
+        "output_parser_digest": "sha256:61e51f5734bceb7e808044db3a1438b8b86452b91343175b8218b73bf02661e7",
         "policy_digest": "sha256:88e75ceaa66c1c8409614a5224d0c17ce5fa7e01abb4f9cb6fb6d3504de4106d",
         "resolver_digest": "sha256:e8c29bdbefda8f5035aa4ec8edec691ecfd795dac6fc8d7655ed4ed9b26f8684",
         "retrieval_policy_digest": "sha256:ea494ce0d62618cfd42e5c8b0e83bef12fb33af82a2302b175980cfc2a012647",
         "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
         "task_template_digest": "sha256:4f06d2d54090907e35569200bc28ff223ffa7374d3f94bc8095c85866b28af1a",
-        "worker_implementation_digest": "sha256:f6be6bd58b61c353ac1fb0662bbf3ce4d60f1f4f25df2c070d49f4d80e9aad26",
+        "worker_implementation_digest": "sha256:c0fdee8f973c0367f88ad319469f6744579d31f143d1daaf51ed38d6a61cb1f1",
         "wrapper_digest": "sha256:d930a756ab019de4369d90229a8b787f55b40fdd0a8a0e7821fafdce276625ae"
       },
       "name": "optimized_scaffold",
@@ -461,7 +461,7 @@
   "environment_digest": "sha256:06a8072953593fb7011cf12fb7d14356a3cf1c0e60a907363482fc86ab5a1275",
   "evaluator": {
     "authority_id": "meta34-protected-evaluator",
-    "evaluator_digest": "sha256:95772e5bf4345637c3d8dcb898ee5e1934dec6bac55c8a8349b948b0f81a18a9",
+    "evaluator_digest": "sha256:be74d4674c755f9b3c7dab70451259a67b61a3c0206fe36db2f7497bb6d6d13a",
     "evaluator_ref": "meta34-protected-deterministic-evaluator-v1",
     "verifiers": [
       "equals",
@@ -469,10 +469,10 @@
       "one_of"
     ]
   },
-  "evaluator_digest": "sha256:95772e5bf4345637c3d8dcb898ee5e1934dec6bac55c8a8349b948b0f81a18a9",
+  "evaluator_digest": "sha256:be74d4674c755f9b3c7dab70451259a67b61a3c0206fe36db2f7497bb6d6d13a",
   "goal_family": "memory-management",
   "model": {
-    "base_url": "http://127.0.0.1:11434/v1",
+    "base_url": "http://charltons-mini.home.lan:11434/v1",
     "inference_parameters": {
       "extra_body": {
         "reasoning_effort": "none",
@@ -483,8 +483,8 @@
       "temperature": 0.0,
       "thinking": false
     },
-    "model_digest": "sha256:6e73b30f8f1cfa06b979c842ba222ae21dad1e55e7c6748a7d8acad46fb340c4",
-    "model_id": "qwen3.5:35b-a3b-coding-nvfp4"
+    "model_digest": "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "model_id": "qwen3.5:4b"
   },
   "protected_package_digests": {
     "development": "sha256:75b0c63b9cb426e5eefb65175f2d6a1a119cbcdc8a8007b13c3f605ae48ddab5",
@@ -515,7 +515,7 @@
     "uses_holdout": false,
     "uses_validation": false
   },
-  "spec_digest": "bf55bb54b261ab6f21ae4c898da8fcc280870563133d721b23298ba8169a7de1",
+  "spec_digest": "5b73687aebd846dea16fdeebe8eaa443283b755d70f9c375027cee66e7d1f547",
   "task_model_portfolio_digest": "sha256:6e73b30f8f1cfa06b979c842ba222ae21dad1e55e7c6748a7d8acad46fb340c4",
   "task_model_portfolio_ref": "portfolio-qwen3-5-35b-a3b-coding-nvfp4",
   "w_refs": [
