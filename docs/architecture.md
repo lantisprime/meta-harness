@@ -176,7 +176,7 @@ orchestrator fills it from protected evidence after the run. Any eligible
 result still requires a later human promotion decision before META-10 can be
 qualified, and this prerequisite does not authorize META-10 or W training.
 Real task adapters must expose immutable `model_frozen_config` transport
-attestation (model, loopback base URL, temperature, max tokens, thinking, and
+attestation (model, loopback or the pinned local runtime host base URL, temperature, max tokens, thinking, and
 extra body) before inference. The campaign derives that same projection from
 the repository's concrete `OpenAICompatWorker` public frozen fields; all other
 unattested adapters fail closed. The only exception is the explicitly marked

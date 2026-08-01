@@ -45,6 +45,24 @@ def run_campaign(*args, **kwargs):
     return _run_campaign(*args, **kwargs)
 
 
+def _install_holdout_non_text_read_spies(monkeypatch, holdout_path, events):
+    original_read_bytes = Path.read_bytes
+    original_open = Path.open
+
+    def read_bytes_spy(path, *args, **kwargs):
+        if path == holdout_path:
+            events.append("holdout-read-bytes")
+        return original_read_bytes(path, *args, **kwargs)
+
+    def open_spy(path, *args, **kwargs):
+        if path == holdout_path:
+            events.append("holdout-open")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes_spy)
+    monkeypatch.setattr(Path, "open", open_spy)
+
+
 # ---------------------------------------------------------------------------
 # Shared fixtures and helpers (single canonical block)
 # ---------------------------------------------------------------------------
@@ -1022,6 +1040,8 @@ def test_spec_rejects_non_h_snapshot_drift_between_base_and_optimized():
         redaction_marker="[DRIFTED]",
     )
     raw = _spec().model_dump(mode="python")
+    raw["spec_digest"] = ""
+    raw["runner_configuration_digest"] = ""
     raw["cells"] = (
         raw["cells"][0],
         {
@@ -1204,7 +1224,7 @@ def test_runner_factory_must_not_choose_outcomes_by_cell_name(tmp_path):
         holdout_input_path=holdout_path, evidence_root=tmp_path / "evidence",
         ledger_root=tmp_path / "ledger", runner_factory=factory,
     )
-    assert result["status"] == "eligible_pending_human_promotion"
+    assert result["status"] == "eligible_pending_human_promotion", result
 
 
 def test_selection_advice_chain_guard_rejects_byte_identical_base_optimized_advice(tmp_path):
@@ -1533,6 +1553,22 @@ def test_campaign_spec_rejects_each_frozen_axis_mutation():
     base = _spec()
     raw = base.model_dump(mode="python")
     mutations = [
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "wrapper_digest": _hash("other")}),
+         "wrapper_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "resolver_digest": _hash("other")}),
+         "resolver_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "corpus_digest": _hash("other")}),
+         "corpus_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "policy_digest": _hash("other")}),
+         "policy_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "system_digest": _hash("other")}),
+         "system_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "task_template_digest": _hash("other")}),
+         "task_template_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "worker_implementation_digest": _hash("other")}),
+         "worker_implementation_digest"),
+        (_mutate_cell(raw, 0, h={**raw["cells"][0]["h"], "output_parser_digest": _hash("other")}),
+         "output_parser_digest"),
         (_mutate_cell(raw, 1, h={**raw["cells"][1]["h"], "wrapper_digest": _hash("other")}),
          "wrapper_digest"),
         (_mutate_cell(raw, 1, h={**raw["cells"][1]["h"], "resolver_digest": _hash("other")}),
@@ -1632,6 +1668,7 @@ def test_development_early_failure_never_touches_ledger_or_holdout(
     ledger_root = tmp_path / "ledger"
     evidence_root = tmp_path / "evidence"
     holdout_reads = []
+    _install_holdout_non_text_read_spies(monkeypatch, holdout_path, holdout_reads)
     original_read_text = Path.read_text
 
     def read_text_spy(path, *args, **kwargs):
@@ -1670,6 +1707,7 @@ def test_validation_early_failure_never_touches_ledger_or_holdout(
     ledger_root = tmp_path / "ledger"
     evidence_root = tmp_path / "evidence"
     holdout_reads = []
+    _install_holdout_non_text_read_spies(monkeypatch, holdout_path, holdout_reads)
     original_read_text = Path.read_text
 
     def read_text_spy(path, *args, **kwargs):
@@ -1706,6 +1744,7 @@ def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(
     factory = _verdict_factory(_approval_map(spec), 2)
     ledger_root = tmp_path / "ledger"
     ordered_access = []
+    _install_holdout_non_text_read_spies(monkeypatch, holdout_path, ordered_access)
     original_consume = HoldoutConsumptionLedger.consume
     original_read_text = Path.read_text
 
@@ -1729,6 +1768,13 @@ def test_holdout_consumed_exactly_once_and_second_attempt_fails_before_read(
     assert ordered_access[:2] == ["consume", "holdout-read"]
     keys = list(ledger_root.glob("*.json"))
     assert len(keys) == 1
+    with pytest.raises(HoldoutAlreadyConsumedError):
+        run_campaign(
+            spec, development_input_path=dev_path, validation_input_path=val_path,
+            holdout_input_path=holdout_path, evidence_root=tmp_path / "evidence-repeat",
+            ledger_root=ledger_root,
+            runner_factory=_verdict_factory(_approval_map(spec), 2),
+        )
     ledger = HoldoutConsumptionLedger(ledger_root)
     with pytest.raises(HoldoutAlreadyConsumedError):
         ledger.consume(
@@ -1955,6 +2001,33 @@ def test_openai_compat_worker_public_fields_attest_frozen_contract():
         )
 
 
+@pytest.mark.asyncio
+async def test_openai_worker_records_literal_outbound_seed_body():
+    from metaharness.evals.h_campaign import _attach_request_body_recorder
+    from metaharness.harness.local import OpenAICompatWorker
+
+    worker = _attach_request_body_recorder(OpenAICompatWorker(
+        worker_id="local", base_url="http://127.0.0.1:11434/v1", model="model",
+        extra_body={"seed": 947},
+    ))
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": []}
+
+    class Client:
+        async def post(self, _url, *, json, headers):
+            return Response()
+
+    await worker._post(Client(), {"model": "model", "seed": 947}, {})
+    assert worker.request_bodies[-1]["seed"] == 947
+
+
 def test_model_contract_rejects_worker_that_suppresses_seed_from_request_body():
     from metaharness.evals.h_campaign import _enforce_runner_contract
     from metaharness.harness.local import OpenAICompatWorker
@@ -2038,6 +2111,30 @@ def test_budget_per_cell_token_cost_wall_enforced(tmp_path):
         )
 
 
+def test_full_evidence_row_secret_scan_covers_selected_record_contents():
+    from metaharness.evals.h_campaign import _assert_secret_safe_evidence_row
+
+    with pytest.raises(CampaignContractError, match="worker result contains secret"):
+        _assert_secret_safe_evidence_row({
+            "selected_record_contents": [
+                {"id": "record-1", "content": "token=secret-value"},
+            ],
+        })
+
+
+def test_validation_approved_pair_rejects_byte_identical_advice_chain():
+    from metaharness.evals.h_campaign import _validation_approved_pairs
+
+    rows = []
+    for cell, verdict in (("base_scaffold", "fail"), ("optimized_scaffold", "pass")):
+        rows.append({
+            "case_id": "approved", "cell": cell, "approved_target": True,
+            "repetition": 1, "verdict": verdict,
+            "advice_digest": "same", "inner_task_digest": "same",
+        })
+    assert _validation_approved_pairs(rows) == []
+
+
 def test_deterministic_verify_only_equals_contains_one_of_and_no_forbidden_outputs():
     with pytest.raises(CampaignContractError):
         deterministic_verify("x", {"kind": "model_judge", "value": "v"})
@@ -2064,6 +2161,16 @@ def test_deterministic_verify_only_equals_contains_one_of_and_no_forbidden_outpu
 def test_deterministic_verify_rejects_secret_at_arbitrary_nested_depth():
     actual = {"safe": [{"still_safe": [("token=do-not-leak",)]}]}
     assert not deterministic_verify(actual, {"kind": "equals", "value": actual})
+
+
+def test_secret_in_assertion_value_is_not_emitted_or_authorized():
+    # Assertions are frozen input, not model output. A secret-like expected
+    # value therefore cannot make a safe actual output pass; the actual-output
+    # scanner remains the authority for secret rejection.
+    assert not deterministic_verify(
+        "safe-output",
+        {"kind": "equals", "value": "token=secret-value"},
+    )
 
 
 def test_h_campaign_module_exposes_no_authority_operations():
@@ -2093,7 +2200,9 @@ def test_load_protected_inputs_consumes_ledger_before_opening_file(tmp_path):
     assert package.package_digest == spec.package_digest_for("holdout")
 
 
-def test_verify_campaign_reloads_manifest_evidence_result_no_model_call(tmp_path):
+def test_verify_campaign_reloads_manifest_evidence_result_no_model_call(
+    tmp_path, monkeypatch,
+):
     spec = _matching_spec()
     dev_path = tmp_path / "dev.json"
     val_path = tmp_path / "val.json"
@@ -2110,15 +2219,18 @@ def test_verify_campaign_reloads_manifest_evidence_result_no_model_call(tmp_path
     verified = verify_campaign(spec, evidence_root=tmp_path / "evidence")
     assert verified["status"] == result["status"]
     assert verified["spec_digest"] == spec.digest()
-    # Verify must not invoke the runner factory.
-    factory_calls = {"count": 0}
+    # Verify must not execute a campaign phase or invoke a model runner.
+    phase_calls = {"count": 0}
+    import metaharness.evals.h_campaign as campaign
+    original_phase_execution = campaign._phase_execution
 
-    def counting_factory(*args, **kwargs):
-        factory_calls["count"] += 1
-        return factory(*args, **kwargs)
+    def counting_phase_execution(*args, **kwargs):
+        phase_calls["count"] += 1
+        return original_phase_execution(*args, **kwargs)
 
+    monkeypatch.setattr(campaign, "_phase_execution", counting_phase_execution)
     verify_campaign(spec, evidence_root=tmp_path / "evidence")
-    assert factory_calls["count"] == 0
+    assert phase_calls["count"] == 0
 
 
 def test_verify_campaign_rederives_instead_of_trusting_forged_result_store(
@@ -2161,6 +2273,84 @@ def test_verify_campaign_rederives_instead_of_trusting_forged_result_store(
 
     with pytest.raises(CampaignContractError, match="evidence rederivation"):
         verify_campaign(spec, evidence_root=evidence_root)
+
+
+def test_holdout_failure_persists_aborted_terminal_after_ledger_burn(
+    tmp_path, monkeypatch,
+):
+    import metaharness.evals.h_campaign as campaign
+
+    spec = _matching_spec()
+    paths = {}
+    for split in ("development", "validation", "holdout"):
+        paths[split] = tmp_path / f"{split}.json"
+        _write_package_file(paths[split], spec, split)
+
+    def fail_rederivation(*args, **kwargs):
+        raise RuntimeError("forced protected derivation failure")
+
+    monkeypatch.setattr(campaign, "_rederive_protected_result", fail_rederivation)
+    ledger_root = tmp_path / "ledger"
+    evidence_root = tmp_path / "evidence"
+    with pytest.raises(RuntimeError, match="forced protected derivation failure"):
+        run_campaign(
+            spec,
+            development_input_path=paths["development"],
+            validation_input_path=paths["validation"],
+            holdout_input_path=paths["holdout"],
+            evidence_root=evidence_root,
+            ledger_root=ledger_root,
+            runner_factory=_verdict_factory(_approval_map(spec), 2),
+        )
+    ledger_files = list(ledger_root.glob("*.json"))
+    assert len(ledger_files) == 1
+    aborted = json.loads((evidence_root / "aborted.json").read_text())
+    assert aborted["status"] == "aborted"
+    assert aborted["holdout_ledger_key"] == ledger_files[0].stem
+    assert aborted["error_type"] == "RuntimeError"
+
+
+def test_protected_manifest_case_set_digest_binds_split_case_contracts(tmp_path):
+    from metaharness.evals.artifact_store import (
+        EvaluationReportStore,
+        HAblationResultStore,
+    )
+
+    spec, evidence_root = _run_eligible_fixture(tmp_path)
+    result = HAblationResultStore(
+        evidence_root / "results",
+        report_store=EvaluationReportStore(evidence_root / "reports"),
+    ).get(f"{spec.campaign_id}-result")
+    expected = sha256_hex(canonical_json_bytes(sorted(
+        (
+            case.case_id,
+            case.input_digest,
+            case.mandatory,
+            case.view,
+        )
+        for case in spec.cases if case.split == "validation"
+    )))
+    assert result.campaign.cells[0].manifest.case_set_digest == expected
+
+
+def test_each_cell_binds_complete_seed_schedule_and_identical_budget(tmp_path):
+    from metaharness.evals.artifact_store import (
+        EvaluationReportStore,
+        HAblationResultStore,
+    )
+
+    spec, evidence_root = _run_eligible_fixture(tmp_path)
+    result = HAblationResultStore(
+        evidence_root / "results",
+        report_store=EvaluationReportStore(evidence_root / "reports"),
+    ).get(f"{spec.campaign_id}-result")
+    schedules = [
+        tuple(item.seed for item in cell.manifest.repetition_seed_schedule)
+        for cell in result.campaign.cells
+    ]
+    assert schedules == [spec.repetition_seeds] * len(schedules)
+    budgets = [cell.manifest.budget for cell in result.campaign.cells]
+    assert budgets == [budgets[0]] * len(budgets)
 
 
 def test_evidence_tamper_in_receipt_or_response_or_manifest_rejected(tmp_path):
@@ -2393,8 +2583,14 @@ def test_reload_rejects_coordinated_evidence_tampering(
         )
     elif attack == "worker_error":
         row["worker_result"]["error"] = "attacker suppressed failure"
+        row["worker_result_digest"] = sha256_hex(
+            canonical_json_bytes(row["worker_result"])
+        )
     elif attack == "worker_timed_out":
         row["worker_result"]["timed_out"] = True
+        row["worker_result_digest"] = sha256_hex(
+            canonical_json_bytes(row["worker_result"])
+        )
     elif attack == "worker_metrics":
         row["worker_result"]["tokens_in"] += 1
     else:  # pragma: no cover - parametrization exhaustiveness guard
@@ -2765,6 +2961,25 @@ def test_runtime_guard_recomputes_secret_scanner_after_attestation_creation(
         )
 
 
+def test_runtime_guard_rejects_substituted_transitive_secret_scanner(monkeypatch):
+    import metaharness.evals.h_campaign as campaign
+    import metaharness.portable.integrity as integrity
+    from metaharness.evals.h_campaign import (
+        _enforce_runtime_attestation,
+        _test_runtime_attestation,
+    )
+
+    spec = _matching_spec()
+    attestation = _test_runtime_attestation(spec)
+
+    def substituted_assert_secret_safe(value, *, location):
+        return None
+
+    monkeypatch.setattr(integrity, "assert_secret_safe", substituted_assert_secret_safe)
+    with pytest.raises(CampaignContractError, match="installed"):
+        _enforce_runtime_attestation(attestation, spec=spec, stores=None)
+
+
 def test_public_runtime_rejects_config_compatible_substituted_worker_before_inference(
     tmp_path, monkeypatch,
 ):
@@ -2908,6 +3123,7 @@ def test_runtime_attestation_must_match_declared_h_and_e_axes(
     if axis == "evaluator":
         raw["evaluator"]["evaluator_digest"] = _hash("wrong-evaluator")
         raw["evaluator_digest"] = _hash("wrong-evaluator")
+        raw["runner_configuration_digest"] = ""
     else:
         field = {
             "wrapper": "wrapper_digest",
@@ -2999,8 +3215,31 @@ def test_committed_campaign_spec_matches_live_runtime_implementations():
         "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd"
     )
     assert spec.model.base_url == "http://charltons-mini.home.lan:11434/v1"
+    assert spec.task_model_portfolio_ref == "portfolio-qwen3-5-4b"
+    assert spec.task_model_portfolio_digest == spec.model.model_digest
+    assert spec.w_refs == (spec.model.model_digest,)
+    assert spec.runner_configuration_digest == "sha256:" + sha256_hex(canonical_json_bytes({
+        "runner_id": spec.runner_id,
+        "model_id": spec.model.model_id,
+        "model_digest": spec.model.model_digest,
+        "base_url": spec.model.base_url,
+        "inference_parameters": spec.model.inference_parameters,
+        "environment_digest": spec.environment_digest,
+        "evaluator_digest": spec.evaluator_digest,
+        "w_refs": list(spec.w_refs),
+    }))
     assert spec.model.inference_parameters["temperature"] == 0.0
     assert spec.model.inference_parameters["thinking"] is False
+
+
+def test_campaign_spec_rejects_supplied_runner_configuration_digest_drift():
+    raw = _matching_spec().model_dump(mode="python")
+    raw["spec_digest"] = ""
+    raw["runner_configuration_digest"] = _hash("wrong-runner-config")
+    with pytest.raises(
+        (CampaignContractError, ValidationError), match="runner_configuration_digest",
+    ):
+        CampaignSpec.model_validate(raw)
 
 
 def test_model_contract_accepts_only_loopback_or_pinned_local_runtime_host():
@@ -3042,6 +3281,38 @@ def test_model_contract_requires_strict_complete_inference_fields(
         ModelContract.model_validate(raw)
 
 
+def test_served_model_digest_resolver_reads_pinned_ollama_tags(monkeypatch):
+    import httpx
+    from metaharness.evals.h_campaign import _resolve_served_model_digest
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3.5:4b", "digest": "2a" * 32}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url):
+            assert url == "http://charltons-mini.home.lan:11434/api/tags"
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", lambda timeout: Client())
+    model = ModelContract(
+        model_id="qwen3.5:4b",
+        model_digest="sha256:" + "2a" * 32,
+        base_url="http://charltons-mini.home.lan:11434/v1",
+        inference_parameters=_model().inference_parameters,
+    )
+    assert _resolve_served_model_digest(model) == model.model_digest
+
+
 def test_model_contract_rejects_missing_reasoning_effort():
     raw = _model().model_dump(mode="python")
     raw["inference_parameters"]["extra_body"].pop("reasoning_effort")
@@ -3055,6 +3326,7 @@ def test_spec_rejects_duplicate_precommit_sets_and_split_mandatory_gap():
     duplicate_w = spec.model_dump(mode="python")
     duplicate_w["spec_digest"] = ""
     duplicate_w["w_refs"] = (spec.w_refs[0], spec.w_refs[0])
+    duplicate_w["runner_configuration_digest"] = ""
     with pytest.raises((CampaignContractError, ValidationError), match="unique"):
         CampaignSpec.model_validate(duplicate_w)
 

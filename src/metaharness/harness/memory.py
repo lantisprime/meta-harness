@@ -53,6 +53,7 @@ from metaharness.memory.records import MemoryRecord
 from metaharness.portable.integrity import (
     PortableIntegrityError,
     assert_secret_safe,
+    canonical_json_bytes,
 )
 
 
@@ -61,10 +62,7 @@ class MemoryAdviceError(RuntimeError):
 
 
 def _digest(value: Any) -> str:
-    raw = json.dumps(
-        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
-    ).encode()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -194,6 +192,10 @@ class MemoryAwareRunner(Runner):
         if receipt.skill_id != self.snapshot.skill_id:
             raise MemoryAdviceError(
                 "receipt skill_id does not match the declared snapshot"
+            )
+        if receipt.scope != self.snapshot.scope:
+            raise MemoryAdviceError(
+                "receipt scope does not match the declared snapshot"
             )
         if receipt.context_id != self.context_id:
             raise MemoryAdviceError(

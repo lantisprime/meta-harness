@@ -33,10 +33,7 @@ __all__ = [
     "HAblationResult", "HAblationResultStore", "ProtectedCaseResult",
     "ProtectedEvaluationReportRef", "ProtectedRunContextManifest",
     "RepetitionSeed", "build_protected_evidence_row",
-    "evaluate_protected_h_ablation",
-    "ExactSuiteEvaluator", "IsolatedCaseExecution", "SandboxedCaseRunner",
-    "create_tuning_proposal", "apply_tuning_proposal_to_draft",
-    "CampaignContractError", "CampaignSpec", "CaseContract", "CellContract",
+    "CampaignContractError", "CampaignEvidenceError", "CampaignSpec", "CaseContract", "CellContract",
     "EvaluatorContract", "HSurface", "HoldoutAlreadyConsumedError",
     "HoldoutConsumptionLedger", "ModelContract", "ProtectedInputPackage",
     "SelectionDeclaration", "deterministic_verify", "load_protected_inputs",
@@ -94,7 +91,7 @@ def __getattr__(name: str):
 
         return getattr(tuning, name)
     campaign_names = {
-        "CampaignContractError", "CampaignSpec", "CaseContract", "CellContract",
+        "CampaignContractError", "CampaignEvidenceError", "CampaignSpec", "CaseContract", "CellContract",
         "EvaluatorContract", "HSurface", "HoldoutAlreadyConsumedError",
         "HoldoutConsumptionLedger", "ModelContract", "ProtectedInputPackage",
         "SelectionDeclaration", "deterministic_verify", "load_protected_inputs",

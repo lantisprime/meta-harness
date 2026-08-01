@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
+import copy
 import json
 import os
 import re
@@ -517,6 +517,37 @@ class CampaignSpec(CampaignModel):
         _require_hash(self.environment_digest, "environment_digest")
         if self.evaluator_digest != self.evaluator.evaluator_digest:
             raise CampaignContractError("top-level evaluator_digest mismatch")
+        expected_portfolio_ref = _sanitize_id(
+            f"portfolio-{self.model.model_id}"
+        )
+        if self.task_model_portfolio_ref and (
+            self.task_model_portfolio_ref != expected_portfolio_ref
+        ):
+            raise CampaignContractError(
+                "task_model_portfolio_ref does not match the model pin"
+            )
+        if self.task_model_portfolio_digest and (
+            self.task_model_portfolio_digest != self.model.model_digest
+        ):
+            raise CampaignContractError(
+                "task_model_portfolio_digest does not match the model pin"
+            )
+        expected_runner_configuration_digest = "sha256:" + sha256_hex(canonical_json_bytes({
+            "runner_id": self.runner_id,
+            "model_id": self.model.model_id,
+            "model_digest": self.model.model_digest,
+            "base_url": self.model.base_url,
+            "inference_parameters": self.model.inference_parameters,
+            "environment_digest": self.environment_digest,
+            "evaluator_digest": self.evaluator_digest,
+            "w_refs": list(self.w_refs),
+        }))
+        if self.runner_configuration_digest and (
+            self.runner_configuration_digest != expected_runner_configuration_digest
+        ):
+            raise CampaignContractError(
+                "runner_configuration_digest does not match the frozen runner config"
+            )
         if not self.w_refs:
             raise CampaignContractError("w_refs must declare at least one reference")
         if len(set(self.w_refs)) != len(self.w_refs):
@@ -1098,10 +1129,12 @@ def _verdict_from_verifier(run_output: Any, assertion: dict[str, Any]) -> str:
     return "pass" if deterministic_verify(run_output, assertion) else "fail"
 
 
-def _assert_secret_safe_worker_result(value: dict[str, Any]) -> None:
+def _assert_secret_safe_evidence_row(value: dict[str, Any]) -> None:
     """Fail closed before nested model output or raw text reaches evidence."""
     from metaharness.portable.integrity import PortableIntegrityError, assert_secret_safe
 
+    if _actual_contains_secret_material(value):
+        raise CampaignContractError("worker result contains secret-like material")
     try:
         assert_secret_safe(value, location="worker result evidence")
     except PortableIntegrityError as exc:
@@ -1111,6 +1144,19 @@ def _assert_secret_safe_worker_result(value: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Runner configuration / assertion enforcement on the factory output
 # ---------------------------------------------------------------------------
+
+
+def _attach_request_body_recorder(worker: Any) -> Any:
+    """Attach the in-slice transport recorder to a concrete worker instance."""
+    worker.request_bodies = []
+    original_post = worker._post
+
+    async def recording_post(client: Any, body: dict[str, Any], headers: dict[str, Any]):
+        worker.request_bodies.append(copy.deepcopy(body))
+        return await original_post(client, body, headers)
+
+    worker._post = recording_post
+    return worker
 
 
 def _enforce_runner_contract(
@@ -1528,6 +1574,24 @@ def _phase_execution(
                     )
                 finally:
                     runtime_guard()
+                request_body = None
+                request_body_digest = None
+                if (
+                    inner := getattr(runner, "inner", None)
+                ) is not None and type(inner).__name__ == "OpenAICompatWorker":
+                    request_bodies = getattr(inner, "request_bodies", None)
+                    if (
+                        not isinstance(request_bodies, list)
+                        or not request_bodies
+                        or request_bodies[-1].get("seed") != seed
+                    ):
+                        raise CampaignContractError(
+                            "concrete worker outbound request body seed drift"
+                        )
+                    request_body = copy.deepcopy(request_bodies[-1])
+                    request_body_digest = sha256_hex(
+                        canonical_json_bytes(request_body)
+                    )
                 _enforce_worker_result_contract(
                     result, spec=spec, task=task,
                 )
@@ -1586,7 +1650,7 @@ def _phase_execution(
                 # the output field. Raw protected output must survive in
                 # the protected evidence row.
                 worker_result_dump = result.model_dump(mode="json")
-                _assert_secret_safe_worker_result(worker_result_dump)
+                _assert_secret_safe_evidence_row(worker_result_dump)
                 receipts_dump = []
                 for receipt in receipts:
                     if hasattr(receipt, "model_dump"):
@@ -1607,6 +1671,8 @@ def _phase_execution(
                     "verdict": verdict,
                     "assertion": assertion,
                     "request_digest": request_digest,
+                    "request_body": request_body,
+                    "request_body_digest": request_body_digest,
                     "request_config_digest": request_config_digest,
                     "runner_config": runner_config,
                     "metrics": metrics.model_dump(mode="json"),
@@ -1648,6 +1714,7 @@ def _phase_execution(
                     "runner_model_attestation_digest": attestation_digest,
                     "runtime_attestation_digest": runtime_attestation.digest(),
                 }
+                _assert_secret_safe_evidence_row(row)
                 raw_rows.append(row)
                 by_cell_view[cell][case.view].setdefault(case_id, []).append(row)
         _enforce_total_budget(spec, total_metrics[cell])
@@ -1740,9 +1807,17 @@ def _build_protected_manifests(
             "scaffold_h_snapshot_hash": scaffold_hash,
             "evaluator_ref": {"id": spec.evaluator.evaluator_ref, "version": 1},
             "evaluator_digest": _strip_sha256_prefix(spec.evaluator.evaluator_digest),
-            "case_set_digest": sha256_hex(
-                (split + ":" + spec.campaign_id).encode("utf-8")
-            ),
+            "case_set_digest": sha256_hex(canonical_json_bytes(
+                sorted(
+                    (
+                        case.case_id,
+                        case.input_digest,
+                        case.mandatory,
+                        case.view,
+                    )
+                    for case in spec.cases if case.split == split
+                )
+            )),
             "runner_id": spec.runner_id,
             "runner_configuration_digest": _strip_sha256_prefix(spec.runner_configuration_digest),
             "task_model_portfolio_ref": {"id": spec.task_model_portfolio_ref, "version": 1},
@@ -1979,6 +2054,12 @@ def _validation_approved_pairs(val_rows: list[dict[str, Any]]) -> list[str]:
             continue
         if not all(r["verdict"] == "pass" for r in opt):
             continue
+        if not all(
+            o.get("advice_digest") != b.get("advice_digest")
+            and o.get("inner_task_digest") != b.get("inner_task_digest")
+            for b, o in zip(base, opt)
+        ):
+            continue
         approved.append(case_id)
     return approved
 
@@ -2171,7 +2252,7 @@ def _report_refs(
 # ---------------------------------------------------------------------------
 
 
-def _run_ordered_campaign(
+def _run_ordered_campaign_impl(
     spec: CampaignSpec,
     *,
     development_input_path: str | Path,
@@ -2342,6 +2423,66 @@ def _run_ordered_campaign(
         runtime_guard=runtime_guard,
         holdout_ledger_key=holdout_key,
     )
+def _persist_aborted_terminal(
+    *,
+    evidence_root: Path,
+    spec: CampaignSpec,
+    holdout_ledger_key: str,
+    error: BaseException,
+) -> None:
+    """Create the auditable terminal receipt for a burned holdout slot."""
+    evidence_root.mkdir(parents=True, exist_ok=True)
+    path = evidence_root / "aborted.json"
+    if path.exists():
+        return
+    payload = {
+        "campaign_id": spec.campaign_id,
+        "spec_digest": spec.digest(),
+        "status": "aborted",
+        "phase": "holdout",
+        "holdout_ledger_key": holdout_ledger_key,
+        "error_type": type(error).__name__,
+        "error_message": str(error),
+        "timestamp": time.time(),
+    }
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _run_ordered_campaign(
+    spec: CampaignSpec,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    ledger_root = Path(kwargs["ledger_root"]).expanduser().resolve()
+    holdout_key = HoldoutConsumptionLedger._key(
+        campaign_id=spec.campaign_id,
+        spec_digest=spec.digest(),
+        holdout_package_digest=spec.package_digest_for("holdout"),
+        evaluator_digest=spec.evaluator_digest,
+    )
+    ledger_path = ledger_root / f"{holdout_key}.json"
+    consumed_before = ledger_path.exists()
+    try:
+        return _run_ordered_campaign_impl(spec, **kwargs)
+    except Exception as exc:
+        if not consumed_before and ledger_path.exists():
+            try:
+                _persist_aborted_terminal(
+                    evidence_root=Path(kwargs["evidence_root"]).resolve(),
+                    spec=spec,
+                    holdout_ledger_key=holdout_key,
+                    error=exc,
+                )
+            except Exception:
+                # Preserve the original failure; the ledger remains the
+                # authoritative burn receipt even if artifact persistence fails.
+                pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -2418,13 +2559,13 @@ def _run_hermetic_campaign(
 
 
 def _implementation_digest(value: Any) -> str:
-    try:
-        source = inspect.getsource(value)
-    except (OSError, TypeError) as exc:
-        raise CampaignContractError(
-            f"cannot attest installed implementation {value!r}"
-        ) from exc
-    return "sha256:" + sha256_hex(source.encode("utf-8"))
+    """Digest executable bytecode projections, not mutable source text."""
+    projection = (
+        _class_projection(value)
+        if isinstance(value, type)
+        else _callable_projection(value)
+    )
+    return "sha256:" + sha256_hex(canonical_json_bytes(projection))
 
 
 def _code_projection(code: types.CodeType) -> dict[str, Any]:
@@ -2439,7 +2580,7 @@ def _code_projection(code: types.CodeType) -> dict[str, Any]:
                 "type": f"{type(value).__module__}.{type(value).__qualname__}",
                 "repr": repr(value),
             })
-    return {
+    projection = {
         "argcount": code.co_argcount,
         "posonlyargcount": code.co_posonlyargcount,
         "kwonlyargcount": code.co_kwonlyargcount,
@@ -2451,6 +2592,22 @@ def _code_projection(code: types.CodeType) -> dict[str, Any]:
         "freevars": code.co_freevars,
         "cellvars": code.co_cellvars,
     }
+    for name in ("co_exceptiontable", "co_linetable"):
+        value = getattr(code, name, None)
+        if value is not None:
+            projection[name] = value.hex()
+    if hasattr(code, "co_qualname"):
+        projection["co_qualname"] = code.co_qualname
+    return projection
+
+
+def _canonical_default(value: Any) -> Any:
+    try:
+        return json.loads(canonical_json_bytes(value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CampaignContractError(
+            f"callable default is not canonically serializable: {value!r}"
+        ) from exc
 
 
 def _callable_projection(value: Any) -> dict[str, Any]:
@@ -2467,8 +2624,8 @@ def _callable_projection(value: Any) -> dict[str, Any]:
         "module": getattr(value, "__module__", ""),
         "qualname": getattr(value, "__qualname__", ""),
         "code": _code_projection(code),
-        "defaults": repr(getattr(value, "__defaults__", None)),
-        "kwdefaults": repr(getattr(value, "__kwdefaults__", None)),
+        "defaults": _canonical_default(getattr(value, "__defaults__", None)),
+        "kwdefaults": _canonical_default(getattr(value, "__kwdefaults__", None)),
     }
 
 
@@ -2618,6 +2775,8 @@ _TASK_TEMPLATE_CONTRACT_VERSION = "task-template-case-digest:v1"
 
 
 def _runtime_implementation_fields() -> dict[str, str]:
+    from metaharness.portable.integrity import assert_secret_safe
+
     return {
         "resolver_implementation_digest": _implementation_digest(
             _resolve_indexed_record
@@ -2639,12 +2798,13 @@ def _runtime_implementation_fields() -> dict[str, str]:
         ),
         "deterministic_evaluator_implementation_digest": "sha256:" + sha256_hex(
             canonical_json_bytes({
-                "deterministic_verify": _implementation_digest(
+                "deterministic_verify": _callable_projection(
                     deterministic_verify
                 ),
-                "secret_scanner": _implementation_digest(
+                "secret_scanner": _callable_projection(
                     _actual_contains_secret_material
                 ),
+                "assert_secret_safe": _callable_projection(assert_secret_safe),
                 "secret_fragment_pattern": _SECRET_FRAGMENT.pattern,
                 "secret_fragment_flags": _SECRET_FRAGMENT.flags,
                 "secret_scan_kinds": tuple(
@@ -2765,6 +2925,41 @@ def _enforce_runtime_attestation(
         raise CampaignContractError("runtime corpus/store projection drift")
 
 
+def _resolve_served_model_digest(model: ModelContract) -> str:
+    """Resolve the exact model digest advertised by the pinned Ollama host."""
+    from urllib.parse import urlsplit
+
+    import httpx
+
+    parsed = urlsplit(model.base_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise CampaignContractError("model base_url cannot resolve served-model endpoint")
+    tags_url = f"{parsed.scheme}://{parsed.netloc}/api/tags"
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(tags_url)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        raise CampaignContractError(
+            "served-model verification failed: Ollama /api/tags unavailable"
+        ) from exc
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        raise CampaignContractError("served-model verification returned malformed tags")
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("name", entry.get("model")) == model.model_id:
+            digest = entry.get("digest")
+            if isinstance(digest, str) and digest:
+                return digest if digest.startswith("sha256:") else f"sha256:{digest}"
+            raise CampaignContractError("served-model entry lacks an exact digest")
+    raise CampaignContractError(
+        f"served model {model.model_id!r} is absent from Ollama /api/tags"
+    )
+
+
 def run_campaign(
     spec: CampaignSpec | str | Path,
     *,
@@ -2774,11 +2969,15 @@ def run_campaign(
     evidence_root: str | Path,
     ledger_root: str | Path,
     memory_stores: Mapping[str, MemoryStore],
-    model_digest_resolver: Callable[[ModelContract], str],
+    model_digest_resolver: Callable[[ModelContract], str] | None = None,
 ) -> dict[str, Any]:
     """Production-only entry point; it owns the worker/broker topology."""
     exact = load_spec(spec)
-    actual_model_digest = model_digest_resolver(exact.model)
+    actual_model_digest = (
+        model_digest_resolver(exact.model)
+        if model_digest_resolver is not None
+        else _resolve_served_model_digest(exact.model)
+    )
     if actual_model_digest != exact.model.model_digest:
         raise CampaignContractError("model digest preflight mismatch")
     runtime_attestation, record_index = _production_runtime_attestation(
@@ -2793,15 +2992,20 @@ def run_campaign(
     runtime_guard()
 
     def factory(cell: str, repetition: int, seed: int, config: dict[str, Any]) -> MemoryAwareRunner:
+        expected_config = _build_worker_config(exact, cell, repetition, seed)
+        if config != expected_config:
+            raise CampaignContractError(
+                "runner factory configuration does not match the frozen worker config"
+            )
         from metaharness.harness.local import OpenAICompatWorker
 
-        inner = OpenAICompatWorker(
+        inner = _attach_request_body_recorder(OpenAICompatWorker(
             worker_id=exact.runner_id, base_url=exact.model.base_url,
             model=exact.model.model_id, temperature=exact.model.inference_parameters.get("temperature"),
             max_tokens=exact.model.inference_parameters.get("max_tokens"),
             thinking=exact.model.inference_parameters.get("thinking"),
             extra_body={**(exact.model.inference_parameters.get("extra_body") or {}), "seed": seed},
-        )
+        ))
         if cell == "no_external_memory":
             return MemoryAwareRunner(inner=inner, memory_enabled=False)
         snapshot = next(
@@ -3065,12 +3269,12 @@ def _verify_campaign(
         exact, reports=validation_reports, split="validation",
     )
     base_snapshot = next(
-        cell.base_snapshot
-        for cell in exact.cells if cell.name == "base_scaffold"
+        (cell.base_snapshot for cell in exact.cells if cell.name == "base_scaffold"),
+        None,
     )
     optimized_snapshot = next(
-        cell.optimized_snapshot
-        for cell in exact.cells if cell.name == "optimized_scaffold"
+        (cell.optimized_snapshot for cell in exact.cells if cell.name == "optimized_scaffold"),
+        None,
     )
     if base_snapshot is None or optimized_snapshot is None:
         raise CampaignContractError(
@@ -3215,6 +3419,7 @@ def _verify_evidence_rows(
         "cell", "case_id", "view", "split", "mandatory",
         "approved_target", "repetition", "seed", "verdict", "assertion",
         "request_digest", "request_config_digest", "runner_config",
+        "request_body", "request_body_digest",
         "metrics", "worker_result", "worker_result_digest", "output",
         "receipts", "advice_digest", "advice_changed",
         "inner_task_digest", "outer_task_digest", "base_task_digest",
@@ -3229,7 +3434,7 @@ def _verify_evidence_rows(
     for row in rows:
         if not isinstance(row, dict) or set(row) != expected_row_fields:
             raise CampaignContractError("evidence row schema is not exact")
-        _assert_secret_safe_worker_result(row)
+        _assert_secret_safe_evidence_row(row)
         cell, case_id, repetition = row.get("cell"), row.get("case_id"), row.get("repetition")
         marker = (cell, case_id, repetition)
         if marker not in expected or marker in seen:
@@ -3375,6 +3580,18 @@ def _verify_evidence_rows(
         }))
         if expected_request != row.get("request_digest"):
             raise CampaignContractError("request digest mismatch")
+        request_body = row.get("request_body")
+        request_body_digest = row.get("request_body_digest")
+        if request_body is None:
+            if request_body_digest is not None:
+                raise CampaignContractError("request body digest lacks a body")
+        elif (
+            not isinstance(request_body, dict)
+            or request_body.get("seed") != row["seed"]
+            or request_body_digest
+            != sha256_hex(canonical_json_bytes(request_body))
+        ):
+            raise CampaignContractError("literal request body evidence mismatch")
         from metaharness.memory import MemoryActionReceipt
 
         receipt_by_hash: dict[str, MemoryActionReceipt] = {}
@@ -3444,6 +3661,15 @@ def _verify_evidence_rows(
             if not isinstance(selected_hashes, list) or [entry.get("id") for entry in selected_hashes] != row.get("selected_record_ids"):
                 raise CampaignContractError("selected-record hashes are incomplete or unordered")
             supplied = dict(receipt_by_hash[consulted].before_content_hashes)
+            row_before = row.get("consult_receipt_before_content_hashes")
+            expected_before = [
+                {"id": rid, "hash": rhash}
+                for rid, rhash in receipt_by_hash[consulted].before_content_hashes
+            ]
+            if row_before != expected_before:
+                raise CampaignContractError(
+                    "consult receipt before-content hashes are not bound"
+                )
             for entry in selected_hashes:
                 if not isinstance(entry, dict) or entry.get("id") not in row.get("selected_record_ids", []):
                     raise CampaignContractError("selected-record hash chain is malformed")
@@ -3468,6 +3694,16 @@ def _verify_evidence_rows(
             log = receipt_by_hash.get(log_hash)
             if log is None or log.phase != "log" or log.operation != "create_candidate":
                 raise CampaignContractError("LOG receipt chain mismatch")
+            if (
+                log.snapshot_id != snapshot.snapshot_id
+                or log.snapshot_content_hash != snapshot.content_hash
+                or log.skill_id != snapshot.skill_id
+                or log.scope != snapshot.scope
+                or log.context_id != "memory-aware-runner"
+            ):
+                raise CampaignContractError(
+                    "LOG receipt differs from exact cell snapshot contract"
+                )
         expected_phases = ["consult"] if cell != "no_external_memory" else []
         if row.get("log_receipt_hash") is not None:
             expected_phases.append("log")

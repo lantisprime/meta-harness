@@ -59,7 +59,7 @@ pre-frozen JSON spec and separately supplied protected input:
 
 - strict, frozen, self-hashing models for the goal-family/case/run
   precommitment, including exact local model ID+digest, base URL limited to
-  loopback, inference parameters, evaluator ref+digest+authority, W refs,
+  loopback or the pinned local runtime host, inference parameters, evaluator ref+digest+authority, W refs,
   environment digest, case split/view/mandatory/approved-target membership,
   repetition seeds, per-cell equal budgets, a development-only optimized-H
   selection declaration, base+optimized snapshot hashes, and rollback hash;
