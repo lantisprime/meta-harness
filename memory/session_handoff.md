@@ -1,3 +1,84 @@
+# Session Handoff — meta-harness (2026-08-02, session 62: META-34 resumed, fixed, one review gate from campaign)
+
+## State in one line
+
+META-34 card `TASK-20260801-027` is **in review** at board revision **178** with
+reviewFreeze head `e21e5002d4560a88d52e438e14910148867c59f1` on
+`dev/meta-34-real-protected-h-campaign` (pushed); the only open gate is the
+**delta review** of `9770d11f..e21e5002`, blocked because the litellm GLM lane's
+upstream weekly quota is exhausted until **2026-08-05 08:38 UTC**.
+
+## What happened
+
+1. **Recovery.** META-34's July-26 work was never lost — it lived on
+   charltons-mbp (different host from this charltons-mini). MBP pushed the
+   branch once; frozen GLM-approved head `d9bc2dd` recovered intact. Board
+   revisions 171–177 and the uncommitted P2/P3 corrections did not survive;
+   corrections were re-derived from the Linear disposition record.
+2. **Fresh card.** `TASK-20260801-027` qualified/claimed/started
+   (revisions 170→174), definition `.agents/meta34r-definition.json`
+   (worktree `~/Developer/worktrees/meta-harness-meta34` — durable path, not
+   /private/tmp). Runtime amended by operator: `ollama qwen3.5:4b`, digest
+   `sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd`,
+   installed and smoke-tested on charltons-mini (`think:false` required).
+3. **Fixes.** Builder seat (pi/MiniMax-M3 via herdr, no commits) reapplied the
+   six original GLM dispositions (`9770d11`), then a fresh mandatory GLM-5.2
+   review ran (route deviation, operator-directed: pi → litellm gateway → glm;
+   NeuralWatt is 402/no credits). Verdict **APPROVE, no P0/P1** + 5 chunk
+   cross-check passes. 28 further findings dispositioned
+   (`.review-store/meta34r-dispositions.md` on the branch); accepted fixes
+   applied in two batches → head `e21e500`. One out-of-slice edit
+   (harness/local.py) was caught and reverted to byte-identical.
+4. **Verification (all green, coordinator-run):** focused 129/129, full
+   **1995 passed + 1 xfailed**, workplan 155/155, `git diff --check` clean.
+5. **Board:** block→resume→re-submit at `e21e500` (revisions 175→178), every
+   transition committed and pushed to main. Branch tip `eab130d` is a
+   docs-only commit (review artifact + dispositions) on top of the frozen head
+   — reviewFreeze correctly points at `e21e500`.
+6. **Review artifact:** `.review-store/meta34-glm-5.2-review-r2.txt`
+   (`sha256:89c711aa86fc2112d2959c2030e83330655c75496088c8cf7810556a006414e3`),
+   committed on the branch. Linear META-34 carries checkpoints for all of the
+   above including the incident/correction record.
+
+## The one open gate, and exactly how to close it
+
+Delta review of `git diff 9770d11f..e21e5002` (2,335 lines — applies the
+APPROVE review's own accepted dispositions; base already reviewed).
+
+- **Transport is litellm ONLY** (operator rule, now in auto-memory):
+  `NODE_EXTRA_CA_CERTS=~/Developer/projects/home-network/configs/homelab-internal-ca.pem`
+  and `pi --provider litellm --model glm …` once quota resets (2026-08-05
+  08:38 UTC), or `--model kimi-k3` (operator authorized as alternate; K3 is the
+  repo's sanctioned primary reviewer per META-9 evaluatorAuthority). A K3 run
+  was in flight at handoff and was stopped for a clean cutover — rerun fresh.
+- Review brief pattern: charter invariants + P0-P3 + single `VERDICT:` line
+  (see Linear checkpoints; prior brief content summarized there).
+- **GLM is slow (~40 min) — never kill a running review; use
+  `perl -e 'alarm 2400; exec @ARGV' --` wrappers (macOS has no `timeout`).**
+- On APPROVE: `workplan.mjs integrate` + `accept` (distinct coordinator actor
+  string, NOT the claude owner), each transition committed+pushed, then run the
+  one-time protected campaign per `.agents/meta34-campaign-spec.json`
+  (`ollama serve` via brew services; spec pins charltons-mini endpoint).
+  Terminal verdict → Linear → STOP at human-promotion boundary (gates META-10,
+  then META-11).
+- On REQUEST_CHANGES: disposition → builder seat → new freeze → repeat.
+
+## Cautions for the next session (all in auto-memory, load-bearing today)
+
+litellm is the only model transport (blocked lane = show gateway answer, STOP);
+verify before claiming (wrong-host "loss", false "running"/"dead" reports);
+hard timeouts + monitors on everything (10.5h silent hang happened); never
+bare-pattern pkill (killed a sibling session's seat); launch pi seats with
+`--no-extensions --no-skills --no-prompt-templates --no-session`; two-host
+setup (mini 16GB / MBP has the big models); pi -p buffers output (blind) —
+prefer herdr seats for steerable/slow work.
+
+## Non-META-34 residue
+
+- Linear MCP now connected in Claude Code (OAuth; root cause of the auth saga
+  was macOS Lockdown Mode breaking linear.app in Safari — per-site exemption).
+- `~/.pi/agent/models.json` gained a `neuralwatt` provider entry (harmless).
+- Herdr private session `drv-meta34r-85671` torn down at handoff.
 # Session Handoff — meta-harness (2026-07-26, session 61: META-33 fully landed)
 
 ## State in one line
