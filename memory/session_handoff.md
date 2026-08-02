@@ -5,9 +5,12 @@
 META-34 card `TASK-20260801-027` is **`done`** at board revision **180** (now
 **181** after filing successor `TASK-20260802-028`); the one-time protected
 campaign `meta34-real-h-20260726-v1` is **permanently void** — its three
-protected input packages are lost (operator confirmed) — and **PR #83**
-(`integrate/meta34` → main, the accepted implementation) awaits CI + operator
-merge.
+protected input packages are lost (operator confirmed) — and **PR #83 is
+merged as `100db584`** (CI pass) — main carries the accepted implementation.
+Linear META-34 is **Done**; META-35 was filed then **canceled** (operator:
+no Linear issues); the successor work is tracked only by backlog card
+`TASK-20260802-028`. Card worktree removed; dev + integrate branches deleted
+(fully merged). Session fully closed; nothing outstanding.
 
 ## What happened
 
@@ -57,10 +60,8 @@ merge.
 
 ## Repo state / next steps
 
-1. **PR #83**: merge on CI green (operator decision). After merge, worktree
-   `~/Developer/worktrees/meta-harness-meta34` (detached at `e538ca80`, card
-   done) is deletable; branches `dev/meta-34-real-protected-h-campaign` and
-   `integrate/meta34` become fully merged.
+1. DONE this session: PR #83 merged as `100db584`; worktree and merged
+   branches removed; Linear META-34 Done, META-35 canceled per operator.
 2. `TASK-20260802-028` is the only non-done open card (backlog); qualifying it
    is a coordinator action **only after the operator decides to resume** the
    campaign path. Do not start it unprompted.
