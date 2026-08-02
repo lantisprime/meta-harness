@@ -175,6 +175,16 @@ operation. A real campaign status is intentionally not asserted here; the
 orchestrator fills it from protected evidence after the run. Any eligible
 result still requires a later human promotion decision before META-10 can be
 qualified, and this prerequisite does not authorize META-10 or W training.
+
+The first precommitted campaign, `meta34-real-h-20260726-v1`, is permanently
+**void**: its three protected input packages were lost before any evidence
+was collected (its sealed holdout was never opened and no ledger entry was
+written, so nothing was burned). Its successor, `meta35-real-h-20260802-v1`
+(`.agents/meta35-campaign-spec.json`, TASK-20260802-029), re-pins the same
+live implementations with a new campaign identity, new protected package
+digests, and durable off-repository package storage. No campaign outcome is
+asserted here until the one-time protected run has produced its terminal
+evidence.
 Real task adapters must expose immutable `model_frozen_config` transport
 attestation (model, loopback or the pinned local runtime host base URL, temperature, max tokens, thinking, and
 extra body) before inference. The campaign derives that same projection from

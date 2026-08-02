@@ -1,0 +1,526 @@
+{
+  "blueprint_digest": "sha256:4a87e13509cb19217c6ca33423363f8c81e700c2bede1edde3a92fbf95a2b7e9",
+  "blueprint_ref": "meta35-real-h-blueprint",
+  "budget": {
+    "cost_usd_limit": 0.0,
+    "token_limit": 100000,
+    "wall_time_s_limit": 7200.0
+  },
+  "campaign_id": "meta35-real-h-20260802-v1",
+  "cases": [
+    {
+      "approved_target": false,
+      "case_id": "development-approved-target",
+      "input_digest": "sha256:b84c46fd4aabb67c295121b3db59e344075f382ed3b7c1d158f294fd658f9ec6",
+      "mandatory": true,
+      "split": "development",
+      "view": "approved_target"
+    },
+    {
+      "approved_target": false,
+      "case_id": "development-transfer",
+      "input_digest": "sha256:6b0af98cf35b32fb9b59ca59e9b986dd1891008ace96292fcccbb883b9376115",
+      "mandatory": true,
+      "split": "development",
+      "view": "transfer"
+    },
+    {
+      "approved_target": false,
+      "case_id": "development-replay-retention",
+      "input_digest": "sha256:5477fd9c8b3f87dcf1608eacd075a7eea77d416fdfa9d1e50a03cebf7b85f11a",
+      "mandatory": true,
+      "split": "development",
+      "view": "replay_retention"
+    },
+    {
+      "approved_target": false,
+      "case_id": "development-privacy",
+      "input_digest": "sha256:f541462fbbbbc55eea0f18c04588d03adb07b20f8ecb61379c8ac97ad5ac0ac3",
+      "mandatory": true,
+      "split": "development",
+      "view": "privacy"
+    },
+    {
+      "approved_target": false,
+      "case_id": "development-safety",
+      "input_digest": "sha256:7ae71338f4d98a276a160d4587725cd4bcd0faf1c39efeb7deddc5267b2aab5d",
+      "mandatory": true,
+      "split": "development",
+      "view": "safety"
+    },
+    {
+      "approved_target": false,
+      "case_id": "development-efficiency",
+      "input_digest": "sha256:99e1e042400d9ef2e74cd77b49d686ca8c49f3d9e91439b6713309201d30fcdc",
+      "mandatory": true,
+      "split": "development",
+      "view": "efficiency"
+    },
+    {
+      "approved_target": true,
+      "case_id": "validation-approved-target",
+      "input_digest": "sha256:2a92013b7b097d44e2695a79c8d369212faecf2293fcebe4f500ab8f168763b1",
+      "mandatory": true,
+      "split": "validation",
+      "view": "approved_target"
+    },
+    {
+      "approved_target": false,
+      "case_id": "validation-transfer",
+      "input_digest": "sha256:1b7c29a352af57b324ec99293e6fe88ef324a079a230427c3bc9da55700bf4c0",
+      "mandatory": true,
+      "split": "validation",
+      "view": "transfer"
+    },
+    {
+      "approved_target": false,
+      "case_id": "validation-replay-retention",
+      "input_digest": "sha256:078a4b81724653043e473b938dcfcc5ec18bfc33716e4d122ad1fa049f2fc91f",
+      "mandatory": true,
+      "split": "validation",
+      "view": "replay_retention"
+    },
+    {
+      "approved_target": false,
+      "case_id": "validation-privacy",
+      "input_digest": "sha256:8c491bc3ac1c650b701508dfe4f6bd8560db0596fa73f1b9d51c5f12c43ae8d4",
+      "mandatory": true,
+      "split": "validation",
+      "view": "privacy"
+    },
+    {
+      "approved_target": false,
+      "case_id": "validation-safety",
+      "input_digest": "sha256:dba8e3febd4cd18683182fd6b8ef0b16ba84c6c912be8be95be75c4b54cc9952",
+      "mandatory": true,
+      "split": "validation",
+      "view": "safety"
+    },
+    {
+      "approved_target": false,
+      "case_id": "validation-efficiency",
+      "input_digest": "sha256:5d066f40a9dc28660cd7ab5b54e5cec2900ca1845185ef296d16c63f84892519",
+      "mandatory": true,
+      "split": "validation",
+      "view": "efficiency"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-approved-target",
+      "input_digest": "sha256:30945fe27550b6d65fbfa7759350d17a3125563cc6157d9647d80a043102f473",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "approved_target"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-transfer",
+      "input_digest": "sha256:f041dd525e01bf21f490e6d5cd90fa22cfdb679acee991c7240f7daeaae4b5ea",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "transfer"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-replay-retention",
+      "input_digest": "sha256:3abbfb5414a262b65dd377a6ade876e0930b72d76d3f6f8855a81a1fe405c908",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "replay_retention"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-privacy",
+      "input_digest": "sha256:e7b8667a7469da116799f045738557f2ccfee60a5b6d61b0dd4128f62aebdbfe",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "privacy"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-safety",
+      "input_digest": "sha256:bd674a73a479c645bcbba52eb69edf40c3145d8bb9534727bbe3ed577f3b4b55",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "safety"
+    },
+    {
+      "approved_target": false,
+      "case_id": "holdout-efficiency",
+      "input_digest": "sha256:c74fbddf9b275f951fa7111555f0c7ab62b6db9a0a28bf2274d6880d257bd323",
+      "mandatory": true,
+      "split": "holdout",
+      "view": "efficiency"
+    }
+  ],
+  "cells": [
+    {
+      "base_snapshot": null,
+      "h": {
+        "corpus_digest": "sha256:6205f372b46589cfa9efbc990eca438ad26558f27559c166cc96c795d61f5439",
+        "memory_snapshot_hash": null,
+        "output_parser_digest": "sha256:1d619f7ded94315f4a08c951ed3e7f7c33244da5312155bf67a7ebb11edb5c5b",
+        "policy_digest": "sha256:b2b0ea054e6c03d67c7c8a80697a5f655022f0361097db221322c8afb514dd2e",
+        "resolver_digest": "sha256:36f64d699d5aeab853a0cc766a9bcdb5abaf7ab307f36aaf3457a61d56db2662",
+        "retrieval_policy_digest": null,
+        "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "task_template_digest": "sha256:2719c9575b11716d4dfdd187ace71a192ed42407f5fd12504b4bbdab921fff9e",
+        "worker_implementation_digest": "sha256:208b961183d6d06fe147d1622765061eadc523a0852025b80321bcfca063b5b7",
+        "wrapper_digest": "sha256:e8617d3f1d3c58b3018efe69b3ec3abc4adb746d9cd6db0fb0c0fc83b5eed42e"
+      },
+      "name": "no_external_memory",
+      "optimized_snapshot": null,
+      "parent_snapshot_hash": null,
+      "rollback_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad"
+    },
+    {
+      "base_snapshot": {
+        "allowed_actions": [
+          "search",
+          "read",
+          "create_candidate",
+          "append",
+          "upsert",
+          "revise_candidate",
+          "link",
+          "compress_candidate"
+        ],
+        "allowed_sensitivities": [
+          "public",
+          "internal"
+        ],
+        "compression_max_tokens": 256,
+        "compression_strategy": "deterministic_prefix",
+        "content_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad",
+        "context_budget_tokens": 1024,
+        "deterministic_fallback": "reject-with-receipt; consult-empty-on-no-match; no-model-call",
+        "forbidden_payload_keys": [
+          "api_key",
+          "credential",
+          "credentials",
+          "password",
+          "raw_secret",
+          "secret",
+          "token"
+        ],
+        "goal_families": [
+          "memory-management"
+        ],
+        "lifecycle_state": "active",
+        "parent_snapshot_hash": null,
+        "phase_contracts": [
+          {
+            "allowed_operations": [
+              "create_candidate",
+              "append",
+              "link"
+            ],
+            "declaration": "post-observation candidate writes only",
+            "phase": "log"
+          },
+          {
+            "allowed_operations": [
+              "search",
+              "read",
+              "create_candidate",
+              "append",
+              "upsert",
+              "revise_candidate",
+              "link",
+              "compress_candidate"
+            ],
+            "declaration": "scoped reads and append-only candidate maintenance",
+            "phase": "maintain"
+          },
+          {
+            "allowed_operations": [
+              "search",
+              "read"
+            ],
+            "declaration": "pre-action scoped reads only",
+            "phase": "consult"
+          }
+        ],
+        "policy_versions": [
+          [
+            "compression",
+            "compression:v1"
+          ],
+          [
+            "context_budget",
+            "context-budget:v1"
+          ],
+          [
+            "query",
+            "query:v1"
+          ],
+          [
+            "ranking",
+            "ranking:v1"
+          ],
+          [
+            "redaction",
+            "redaction:v1"
+          ],
+          [
+            "retention",
+            "retention:v1"
+          ]
+        ],
+        "query_lifecycle_states": [
+          "candidate",
+          "active"
+        ],
+        "query_max_results": 1,
+        "query_min_lexical_score": 1,
+        "ranking_stable_keys": [
+          "lexical_score_desc",
+          "confidence_desc",
+          "creation_seq_asc",
+          "record_id_asc",
+          "store_name_asc"
+        ],
+        "ranking_strategy": "lexical_overlap",
+        "redaction_marker": "[REDACTED]",
+        "retention_expiry_observations": null,
+        "retention_max_candidates": 1000,
+        "roles": [
+          "task-runner"
+        ],
+        "schema_version": 1,
+        "scope": {
+          "attempt_id": null,
+          "lineage_id": null,
+          "project_id": "meta35-real-h-20260802-v1",
+          "run_id": null,
+          "task_id": null
+        },
+        "skill_id": "meta35-memory-management-v1",
+        "snapshot_id": "meta35-base-snapshot-v1"
+      },
+      "h": {
+        "corpus_digest": "sha256:6205f372b46589cfa9efbc990eca438ad26558f27559c166cc96c795d61f5439",
+        "memory_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad",
+        "output_parser_digest": "sha256:1d619f7ded94315f4a08c951ed3e7f7c33244da5312155bf67a7ebb11edb5c5b",
+        "policy_digest": "sha256:b2b0ea054e6c03d67c7c8a80697a5f655022f0361097db221322c8afb514dd2e",
+        "resolver_digest": "sha256:36f64d699d5aeab853a0cc766a9bcdb5abaf7ab307f36aaf3457a61d56db2662",
+        "retrieval_policy_digest": "sha256:961c7b0a03c98028dbb863b1d9a7426bb83b659f880bd86396ed554dc91e22c0",
+        "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "task_template_digest": "sha256:2719c9575b11716d4dfdd187ace71a192ed42407f5fd12504b4bbdab921fff9e",
+        "worker_implementation_digest": "sha256:208b961183d6d06fe147d1622765061eadc523a0852025b80321bcfca063b5b7",
+        "wrapper_digest": "sha256:e8617d3f1d3c58b3018efe69b3ec3abc4adb746d9cd6db0fb0c0fc83b5eed42e"
+      },
+      "name": "base_scaffold",
+      "optimized_snapshot": null,
+      "parent_snapshot_hash": null,
+      "rollback_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad"
+    },
+    {
+      "base_snapshot": null,
+      "h": {
+        "corpus_digest": "sha256:6205f372b46589cfa9efbc990eca438ad26558f27559c166cc96c795d61f5439",
+        "memory_snapshot_hash": "sha256:a079cbe74c7b4e1c57b556171d5710e08b22f2008bcc06e981a0d7201ce74d81",
+        "output_parser_digest": "sha256:1d619f7ded94315f4a08c951ed3e7f7c33244da5312155bf67a7ebb11edb5c5b",
+        "policy_digest": "sha256:b2b0ea054e6c03d67c7c8a80697a5f655022f0361097db221322c8afb514dd2e",
+        "resolver_digest": "sha256:36f64d699d5aeab853a0cc766a9bcdb5abaf7ab307f36aaf3457a61d56db2662",
+        "retrieval_policy_digest": "sha256:ea494ce0d62618cfd42e5c8b0e83bef12fb33af82a2302b175980cfc2a012647",
+        "system_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "task_template_digest": "sha256:2719c9575b11716d4dfdd187ace71a192ed42407f5fd12504b4bbdab921fff9e",
+        "worker_implementation_digest": "sha256:208b961183d6d06fe147d1622765061eadc523a0852025b80321bcfca063b5b7",
+        "wrapper_digest": "sha256:e8617d3f1d3c58b3018efe69b3ec3abc4adb746d9cd6db0fb0c0fc83b5eed42e"
+      },
+      "name": "optimized_scaffold",
+      "optimized_snapshot": {
+        "allowed_actions": [
+          "search",
+          "read",
+          "create_candidate",
+          "append",
+          "upsert",
+          "revise_candidate",
+          "link",
+          "compress_candidate"
+        ],
+        "allowed_sensitivities": [
+          "public",
+          "internal"
+        ],
+        "compression_max_tokens": 256,
+        "compression_strategy": "deterministic_prefix",
+        "content_hash": "sha256:a079cbe74c7b4e1c57b556171d5710e08b22f2008bcc06e981a0d7201ce74d81",
+        "context_budget_tokens": 1024,
+        "deterministic_fallback": "reject-with-receipt; consult-empty-on-no-match; no-model-call",
+        "forbidden_payload_keys": [
+          "api_key",
+          "credential",
+          "credentials",
+          "password",
+          "raw_secret",
+          "secret",
+          "token"
+        ],
+        "goal_families": [
+          "memory-management"
+        ],
+        "lifecycle_state": "active",
+        "parent_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad",
+        "phase_contracts": [
+          {
+            "allowed_operations": [
+              "create_candidate",
+              "append",
+              "link"
+            ],
+            "declaration": "post-observation candidate writes only",
+            "phase": "log"
+          },
+          {
+            "allowed_operations": [
+              "search",
+              "read",
+              "create_candidate",
+              "append",
+              "upsert",
+              "revise_candidate",
+              "link",
+              "compress_candidate"
+            ],
+            "declaration": "scoped reads and append-only candidate maintenance",
+            "phase": "maintain"
+          },
+          {
+            "allowed_operations": [
+              "search",
+              "read"
+            ],
+            "declaration": "pre-action scoped reads only",
+            "phase": "consult"
+          }
+        ],
+        "policy_versions": [
+          [
+            "compression",
+            "compression:v1"
+          ],
+          [
+            "context_budget",
+            "context-budget:v1"
+          ],
+          [
+            "query",
+            "query:v1"
+          ],
+          [
+            "ranking",
+            "ranking:v1"
+          ],
+          [
+            "redaction",
+            "redaction:v1"
+          ],
+          [
+            "retention",
+            "retention:v1"
+          ]
+        ],
+        "query_lifecycle_states": [
+          "candidate",
+          "active"
+        ],
+        "query_max_results": 2,
+        "query_min_lexical_score": 1,
+        "ranking_stable_keys": [
+          "lexical_score_desc",
+          "confidence_desc",
+          "creation_seq_asc",
+          "record_id_asc",
+          "store_name_asc"
+        ],
+        "ranking_strategy": "lexical_overlap",
+        "redaction_marker": "[REDACTED]",
+        "retention_expiry_observations": null,
+        "retention_max_candidates": 1000,
+        "roles": [
+          "task-runner"
+        ],
+        "schema_version": 1,
+        "scope": {
+          "attempt_id": null,
+          "lineage_id": null,
+          "project_id": "meta35-real-h-20260802-v1",
+          "run_id": null,
+          "task_id": null
+        },
+        "skill_id": "meta35-memory-management-v1",
+        "snapshot_id": "meta35-optimized-snapshot-v1"
+      },
+      "parent_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad",
+      "rollback_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad"
+    }
+  ],
+  "environment_digest": "sha256:cded9d2c19b52fee0bd069a1a2d1b32cba79cc9144419601ee933791c3b0c14a",
+  "evaluator": {
+    "authority_id": "meta35-protected-evaluator",
+    "evaluator_digest": "sha256:5b47caf8d92469bda1daf537d08d599d76e0a258c58b9a537937b801a1d10b7d",
+    "evaluator_ref": "meta35-protected-deterministic-evaluator-v1",
+    "verifiers": [
+      "equals",
+      "contains",
+      "one_of"
+    ]
+  },
+  "evaluator_digest": "sha256:5b47caf8d92469bda1daf537d08d599d76e0a258c58b9a537937b801a1d10b7d",
+  "goal_family": "memory-management",
+  "model": {
+    "base_url": "http://127.0.0.1:11434/v1",
+    "inference_parameters": {
+      "extra_body": {
+        "reasoning_effort": "none",
+        "top_k": 1,
+        "top_p": 1.0
+      },
+      "max_tokens": 32,
+      "temperature": 0.0,
+      "thinking": false
+    },
+    "model_digest": "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "model_id": "qwen3.5:4b"
+  },
+  "protected_package_digests": {
+    "development": "sha256:cafde166712742987150bbbf4510eca42f1c055ce154358fdf25937b8e5b22c2",
+    "holdout": "sha256:a4f371b6227a5c6f0e5a6df41bb8edcc2d909d7c436e8d4e7c22ba983c5f2fbe",
+    "validation": "sha256:405b9274e4066f2875479720ed44caa7ec4a0400de96868577d9d76187ea660f"
+  },
+  "repetition_seeds": [
+    211,
+    877
+  ],
+  "required_views": [
+    "approved_target",
+    "transfer",
+    "replay_retention",
+    "privacy",
+    "safety",
+    "efficiency"
+  ],
+  "runner_configuration_digest": "sha256:cafcbeef1595a7d28298088d55c284e136eec084c94cce20f2d61fd8bb622b8c",
+  "runner_id": "memory-aware-runner",
+  "schema_version": 1,
+  "selection": {
+    "evidence_case_ids": [
+      "development-approved-target"
+    ],
+    "selected_cell": "optimized_scaffold",
+    "source_split": "development",
+    "uses_holdout": false,
+    "uses_validation": false
+  },
+  "spec_digest": "c5e92f2140cdd9688fd4251f0991ba8e97f3c43bc8056ae64b281377694d9ece",
+  "task_model_portfolio_digest": "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+  "task_model_portfolio_ref": "portfolio-qwen3-5-4b",
+  "w_refs": [
+    "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd"
+  ],
+  "workflow_digest": "sha256:5bb925124b58c026462dbecaf9664093a3ec5faedff6388904b47bf253e3cb29",
+  "workflow_ref": "meta35-real-h-workflow"
+}
