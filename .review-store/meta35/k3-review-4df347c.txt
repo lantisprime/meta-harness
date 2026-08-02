@@ -1,0 +1,27 @@
+## Frozen-diff review (round 2) — TASK-20260802-029
+
+Diff reviewed: `d9e628b..4df347c` (delta on top of the already-reviewed `da3a98e..d9e628b`; 7 files, +223/−2, all non-code). `git status` clean at frozen head `4df347c`; `git diff --check da3a98e` clean. The delta does not touch the campaign spec, drift test, or any code (`git diff --name-only` confirms), so the prior review's clean verdict on those stands.
+
+### Disposition verification
+
+**P1-1 (review-lane authorization) — RESOLVED in substance, with a new citation-accuracy finding (P2-1 below).**
+- `.agents/meta35-definition.json` is now on the branch; its `evaluatorAuthority` names "kimi-k3 via the litellm gateway (operator-authorized alternate while the GLM lane quota is exhausted until 2026-08-05 08:38 UTC…)" — dated and scoped (verified in-file).
+- Both cited commits are ancestors of `origin/main` (`git merge-base --is-ancestor` passes for `71fbe32` and `1c9c14a`), and the quoted authorization content exists at both: `git show 71fbe32:memory/session_handoff.md` lines 48–53 ("`--model kimi-k3` (operator authorized as alternate; K3 is the repo's sanctioned primary reviewer per META-9 evaluatorAuthority)"), and `git show 1c9c14a:memory/session_handoff.md` lines 14–20 (META-34 delta review "reviewed by pi → litellm → **kimi-k3** (operator-authorized alternate)", accepted and merged via PR #83).
+- `.agents/meta9-definition.json` `evaluatorAuthority` verified verbatim: "Herdr-driven Pi using kimi-coding/k3 performs the primary plan and frozen-diff review read-only."
+- The predecessor's downgrade condition ("dated, scoped authorization artifact produced → downgrade to P3") is substantively met.
+
+**P2-1 (dangling definition reference) — RESOLVED.** Worktree `.agents/meta35-definition.json` sha256 `5c03a55c4826f4a891a14833dfa21f7521173ff3cdceac7f4fd6a2443b9b4d38` is byte-identical to `git show origin/main:.agents/meta35-definition.json` (same digest), matching the dispositions' claim; the build-spec reference (`.agents/meta35-build-spec.md:5-8`) now resolves to a committed path.
+
+**P3-1 (docs paragraph gluing) — RESOLVED.** Blank line added at `docs/architecture.md:188`, confirmed in the delta diff.
+
+### New findings in the delta
+
+**P0 — none. P1 — none.**
+
+**P2-1 (new) — Wrong line numbers in the authorization-evidence artifact.** `.review-store/meta35/review-lane-authorization.md:9` cites `memory/session_handoff.md:123` at `71fbe32`, but line 123 there is "- Focused pytest: 48 passed, 1 expected xfail."; the quoted authorization text is actually at lines 51–52. Similarly `.review-store/meta35/review-lane-authorization.md:15` cites `memory/session_handoff.md:18` at `1c9c14a`, but line 18 is "adopting. 1 P2 + 5 P3, all dispositioned **DEFER**…"; the quoted text is at line 15. The commits, quotes, and substance all verify — an auditor can recover the evidence by grep — but 2 of 4 file:line citations in an artifact whose entire purpose is verifiable gate evidence point to unrelated lines. Suggested disposition: **ACCEPT** (correct `:123`→`:51` and `:18`→`:15`) or **DEFER** with the correct locations recorded from this review; non-blocking under the repo's P0/P1-blocking convention (meta34 precedent: P2s dispositioned post-APPROVE), since the authorization itself is verified above.
+
+**P3 — none.**
+
+Charter invariants: the delta adds no code, no claimed outcomes, no evaluator/promotion authority changes; the review-lane substitution is declared, scoped, dated, and now auditable from committed history — evaluator non-self-approval and full-fidelity evidence are preserved.
+
+VERDICT: APPROVE
