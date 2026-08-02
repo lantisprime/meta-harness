@@ -185,6 +185,7 @@ live implementations with a new campaign identity, new protected package
 digests, and durable off-repository package storage. No campaign outcome is
 asserted here until the one-time protected run has produced its terminal
 evidence.
+
 Real task adapters must expose immutable `model_frozen_config` transport
 attestation (model, loopback or the pinned local runtime host base URL, temperature, max tokens, thinking, and
 extra body) before inference. The campaign derives that same projection from

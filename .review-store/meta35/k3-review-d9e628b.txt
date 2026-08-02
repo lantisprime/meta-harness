@@ -1,0 +1,36 @@
+## Frozen-diff review — TASK-20260802-029 (meta35 successor campaign)
+
+Diff reviewed: `da3a98e2..d9e628ba` (4 files, +720, all additive). I independently re-ran the focused suite at the frozen head: **130 passed** (`tests/test_real_h_campaign.py`), and `git diff --check` is clean. I also cross-checked the spec JSON against the meta34 spec and the production validator in `src/metaharness/evals/h_campaign.py`.
+
+### Verified clean (no findings)
+
+- **Sole-axis attribution**: base→optimized snapshots differ only in `query_max_results` (1→2) plus identity fields (`snapshot_id`, `parent_snapshot_hash`, `content_hash`) — exactly the `_ALLOWED_DELTA_FIELDS` enforced at `src/metaharness/evals/h_campaign.py:693-708`; spec loads under that validator.
+- **Selection/eligibility discipline**: 18 cases, all `mandatory`; `approved_target=true` only on `validation-approved-target` (identical shape to meta34); selection preregistered to `development-approved-target`, `uses_validation=false`, `uses_holdout=false` (spec lines under `"selection"`).
+- **Deterministic evaluator only**: `equals/contains/one_of`, evaluator digest `5b47caf8…` identical to meta34; no model judge; no status/promotion/activation/W-start fields anywhere in the diff.
+- **Live-implementation pinning**: all seven per-cell implementation digests are byte-identical to meta34's (which the pre-existing drift test pins to `_runtime_implementation_fields()`), and the new test re-pins them to live plus recomputes `spec_digest` and `runner_configuration_digest`.
+- **Supersession pins**: new `campaign_id`, all three package digests differ from the void meta34 spec (verified in JSON and asserted in the test, `tests/test_real_h_campaign.py:3302-3314`).
+- **Loopback pin**: `http://127.0.0.1:11434/v1` passes `ModelContract._approved_local_host` (`h_campaign.py:361-371`); docs wording ("loopback or the pinned local runtime host") remains accurate.
+- **Docs**: `docs/architecture.md:179-188` asserts void + successor identity only, explicitly no outcome — no claimed capability or result.
+- Build-spec smoke math is consistent (6 views × 2 splits × 3 cells × 2 seeds = 72); all digests quoted in the build spec match the spec JSON.
+
+### P0 — none found.
+
+### P1
+
+**P1-1 — Review-gate lane substitution recorded without verifiable authorization.**
+`.agents/meta35-build-spec.md:29-33`: the build record states the independent review is "kimi-k3 via litellm, operator-authorized alternate while the GLM lane quota is exhausted". AGENTS.md (repository root) mandates Pi/NeuralWatt GLM-5.2 for this gate and states that if that lane is unavailable the card stays in Review/Blocked — it contains no alternate-reviewer provision, and "never silently substitute". The substitution here is declared (not silent), but no authorization artifact is cited in the diff, the workplan card, or `.review-store/`, and I cannot verify it from the repository. Why it matters: this commit's own build record defines which review satisfies the evaluator non-self-approval gate for a one-time, burn-once protected campaign; an unverifiable gate-lane substitution is exactly the class of drift the charter forbids. Suggested disposition: **NEEDS-EVIDENCE** — coordinator attaches the operator authorization (dated, scoped to this card/lane substitution) to the Linear card and/or `.review-store/`; if produced, downgrade to P3. If not producible, the GLM-lane gate per AGENTS.md remains formally unmet and this review's verdict should not be treated as discharging it.
+
+### P2
+
+**P2-1 — Dangling reference: `.agents/meta35-definition.json` does not exist.**
+`.agents/meta35-build-spec.md:5-6` cites "Definition: `.agents/meta35-definition.json` (`sha256:894b…`)" as a repository path, but `git ls-files | grep meta35` returns only `meta35-build-spec.md` and `meta35-campaign-spec.json`, and the file is absent from the worktree. The card's own path set (`WORKPLAN.md:10`) lists `.agents/meta35-definition.json`, and the meta34 precedent (`.agents/meta34-definition.json`) committed the definition. Why it matters: the committed build record cites a digest-pinned artifact that no future auditor can retrieve from the repository; either the definition belongs in the commit or the reference must state its actual (protected-storage) location. Suggested disposition: **ACCEPT** — commit the definition file (it contains no sealed content; meta34's is committed) or amend the reference to point at protected storage with an explicit note.
+
+### P3
+
+**P3-1 — Markdown paragraph gluing.** `docs/architecture.md:188`: the inserted paragraph ends with no blank line before the following "Real task adapters must expose…" paragraph, so renderers merge them. The base file had the same gluing between the two original paragraphs, so this is consistent with pre-existing style, not a regression — but a blank line after line 188 would read better. Disposition: **DEFER** (cosmetic; matches file's existing state).
+
+---
+
+**Summary**: The campaign spec, supersession pins, drift test, and docs note are correct, internally consistent, validator-clean, and faithful to every charter invariant I could check — no P0s. Two items block a clean approval: the unverifiable review-lane substitution recorded in the build spec (P1-1, needs operator-authorization evidence) and the dangling definition-file reference (P2-1).
+
+VERDICT: REQUEST_CHANGES

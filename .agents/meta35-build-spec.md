@@ -2,8 +2,11 @@
 
 Card: `TASK-20260802-029` (supersedes `TASK-20260802-028`; board rev 182+).
 Base: `da3a98e2cde4934bcd60afea879c6f9f7812e38a`.
-Definition: `.agents/meta35-definition.json`
-(`sha256:894b0d58e01da489f083768522b0d177b14993471078d0ab06bc8b495ac2c1bc`).
+Definition: `.agents/meta35-definition.json` (committed on this branch and,
+at qualification, on main at board rev 182->183; canonical definitionHash
+`sha256:894b0d58e01da489f083768522b0d177b14993471078d0ab06bc8b495ac2c1bc`).
+Review-lane authorization citations:
+`.review-store/meta35/review-lane-authorization.md`.
 
 ## Scope and role
 
