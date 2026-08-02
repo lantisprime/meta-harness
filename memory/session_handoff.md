@@ -1,3 +1,74 @@
+# Session Handoff — meta-harness (2026-08-02, session 63: META-34 card done at board 181; campaign VOID — packages lost)
+
+## State in one line
+
+META-34 card `TASK-20260801-027` is **`done`** at board revision **180** (now
+**181** after filing successor `TASK-20260802-028`); the one-time protected
+campaign `meta34-real-h-20260726-v1` is **permanently void** — its three
+protected input packages are lost (operator confirmed) — and **PR #83**
+(`integrate/meta34` → main, the accepted implementation) awaits CI + operator
+merge.
+
+## What happened
+
+1. **Delta review gate closed: APPROVE, no P0/P1.** `9770d11f..e21e5002`
+   reviewed by pi → litellm → **kimi-k3** (operator-authorized alternate; GLM
+   lane quota resets 2026-08-05 08:38 UTC). ~5-minute review; coordinator
+   spot-checked its file:line citations against the frozen tree before
+   adopting. 1 P2 + 5 P3, all dispositioned **DEFER** (grounded rationale in
+   `.review-store/meta34r-dispositions.md`). Artifact
+   `.review-store/meta34-k3-delta-review-e21e5002.txt`
+   (`sha256:9fb6ed40…0020`), committed on the dev branch (`efed473`, pushed).
+2. **Integrate:** coordinator merge `e538ca80` on `integrate/meta34` (pushed;
+   frozen head verified ancestor), `workplan integrate` 178→179, actor
+   `coordinator:charltons-mini.home.lan:meta34-integrate-20260802`, committed
+   `5e6ba65` + pushed.
+3. **Accept:** all four frozen commands green at `e538ca80` in the card
+   worktree venv — focused 129; full **1995 passed + 1 xfailed**; workplan
+   155/155; diff-check clean. Receipt `.workplan/meta34r-acceptance.json`
+   (`sha256:35a6482f…ef7c`), accept 179→180, committed `a848aac` + pushed.
+4. **Campaign blocked, then VOID.** The three ProtectedInputPackage files
+   (dev `75b0c63b…`, val `cd006803…`, holdout `8fb484c8…`) existed only in
+   charltons-mbp's `/private/tmp` worktree and are **lost** (operator
+   confirmed). Exhaustive search of mini (disk, git history, Spotlight) found
+   no copy; no generator was ever committed, so re-derivation to the frozen
+   digests is impossible. **Nothing burned:** holdout never opened, no ledger,
+   no evidence collected. Linear META-34 carries the full correction record.
+5. **Successor filed:** `TASK-20260802-028` (backlog, unqualified, rev 181,
+   pushed): author NEW packages + NEW precommitted spec (new campaign_id),
+   durable storage (never `/private/tmp`), sealed holdout supplied separately,
+   then freeze → review → one-time campaign → STOP at human-promotion boundary
+   gating META-10.
+6. **PR #83** opened (`integrate/meta34` → main, accepted implementation +
+   review artifacts; board records already on main). CI watch was running at
+   handoff. Merge is the operator's call.
+
+## Operator interaction lessons (recorded in auto-memory)
+
+- **Disabled access is a decision, not a gap** (new memory
+  `disabled-access-is-a-decision.md`): I wrongly asked the operator to enable
+  Remote Login on charltons-mbp to fetch the packages; operator refused
+  ("cannot approve"). Never propose enabling a disabled access path; move the
+  computation to the data or let the operator choose their own channel. Also:
+  don't phrase options as instructions to the operator.
+- Review-seat pattern that worked: pi one-shot (`-p`) to a file with
+  `perl -e 'alarm 2400; exec @ARGV' --` hard cap + background notification +
+  5/10-min CPU liveness sampler; verify the pi CHILD process, not the wrapper.
+
+## Repo state / next steps
+
+1. **PR #83**: merge on CI green (operator decision). After merge, worktree
+   `~/Developer/worktrees/meta-harness-meta34` (detached at `e538ca80`, card
+   done) is deletable; branches `dev/meta-34-real-protected-h-campaign` and
+   `integrate/meta34` become fully merged.
+2. `TASK-20260802-028` is the only non-done open card (backlog); qualifying it
+   is a coordinator action **only after the operator decides to resume** the
+   campaign path. Do not start it unprompted.
+3. The six DEFER findings (1 P2 + 5 P3, K3 delta review) are recorded in the
+   acceptance receipt + dispositions; fold into the successor card's scope
+   when it is qualified.
+4. META-10 remains gated on real protected evidence + human promotion; the
+   deterministic fixture and this accepted implementation are NOT evidence.
 # Session Handoff — meta-harness (2026-08-02, session 62: META-34 resumed, fixed, one review gate from campaign)
 
 ## State in one line
