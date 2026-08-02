@@ -43,3 +43,34 @@ Coordinator dispositions per CLAUDE.md categories, each verified against the wor
 ## Pending
 - Full-diff reviewer verdict + any cross-file findings (running, herdr w3:p1).
 - C2 findings #7+ (file truncated in my summary pass — full text in findings-C2.txt, all items carried into the fix brief).
+
+---
+
+# Delta review 9770d11f..e21e5002 — Kimi K3 via litellm (2026-08-02) — coordinator dispositions
+
+Reviewer: pi / kimi-k3 via litellm gateway (operator-authorized alternate while the
+GLM lane's weekly quota is exhausted until 2026-08-05; K3 is the repo's sanctioned
+primary reviewer per META-9 evaluatorAuthority). Verdict **APPROVE — no P0/P1**;
+1 P2 + 5 P3. Verbatim artifact `.review-store/meta34-k3-delta-review-e21e5002.txt`
+(sha256:9fb6ed405cb37318157242d1b643cd04292d69014c694bb54cbff7ab44120020).
+Coordinator spot-checked the reviewer's citations against the frozen tree
+(wrapper h_campaign.py:2455+, validator :519-548, `_populate_frozen_axes` :712+,
+tests:2278, spec:520) before adopting the verdict.
+
+| # | Finding | Disposition |
+|---|---|---|
+| P2-1 | `blueprint_digest`/`workflow_digest` still trusted verbatim when supplied (disposition #4 partial) | **DEFER** — impact assessed low by the reviewer: both digests are self-referential (`sha256(ref)`), and the committed spec is anchored by its self-hash plus the hermetic drift test, so a mismatched supplied digest in the committed spec cannot survive. Fixing reopens freeze+review; record as post-campaign hardening with the existing deferred attestation items. |
+| P3-1 | Validator does not tie `w_refs` to the model pin | **DEFER** — committed spec pinned by `tests/test_real_h_campaign.py:3218` (`spec.w_refs == (spec.model.model_digest,)`); general-validator gap only. |
+| P3-2 | Missing citing test for supplied-mismatched `spec_digest` rejection | **DEFER** — rejection exists (`h_campaign.py:744-746`); test-only hardening. |
+| P3-3 | Aborted-terminal wrapper edges: `KeyboardInterrupt`/`SystemExit` uncaught; ledger-path resolution asymmetry | **DEFER** — failure-path-only audit-receipt edges; the ledger remains the authoritative burn record in every case (reviewer-confirmed no masking / no double-write on the main path). |
+| P3-4 | No campaign-level negative test for live per-attempt seed check | **DEFER** — enforcement exists (`h_campaign.py:1578-1593`) with a recorder unit test; verify-side row check pinned by the tamper suite. |
+| P3-5 | Verify tolerates stripped `request_body` (additive evidence deletable) | **DEFER** — reviewer-confirmed no weakening vs the approved base; seed remains bound via `request_config_digest`/`request_digest` recomputation. |
+
+No ACCEPT items → no fix batch → the frozen head `e21e5002` stands as reviewed.
+All six deferrals to be carried into the acceptance receipt and the Linear
+checkpoint record.
+
+Resolution of the prior "Pending" section: the full-diff GLM verdict landed as
+APPROVE (r2 artifact above) before this delta round; the C3 NEEDS-EVIDENCE item
+(model attestation vs HTTP body) is resolved by the request-recorder
+implementation confirmed load-bearing in this delta review (finding A / P2 #6).
