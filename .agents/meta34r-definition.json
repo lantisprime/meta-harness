@@ -1,0 +1,29 @@
+{
+  "sourceRevision": "git:24a489134f9fd0e9a5780fbe3110a650f91ed013;linear:META-34;recovered-frozen-head:d9bc2ddc86e5e2c9f4f1b2618de0b5b1dff2f911;incident+amendment:Linear META-34 comment 7231461e-38f1-4f8c-8f4c-eb145f46e862 (2026-08-01)",
+  "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
+  "worktreePath": "/Users/charltonho/Developer/worktrees/meta-harness-meta34",
+  "branch": "dev/meta-34-real-protected-h-campaign",
+  "baseCommit": "24a489134f9fd0e9a5780fbe3110a650f91ed013",
+  "currentHead": "d9bc2ddc86e5e2c9f4f1b2618de0b5b1dff2f911",
+  "plane": "development",
+  "frozenAxes": [
+    "H",
+    "E",
+    "W"
+  ],
+  "budget": "Resume META-34 from the recovered GLM-approved frozen head d9bc2dd after host loss of board revisions 171-177 and the uncommitted correction worktree. Scope: (1) reapply the six accepted GLM-5.2 dispositions recorded verbatim in Linear META-34 (recompute all implementation digests on every runtime guard; hermetic committed-spec drift test; per-attempt seed asserted in the actual request body; recursive verifier secret scan bound into the evaluator implementation digest; real read-spy holdout non-read assertion or explicit ledger proof; eligible-reload reconstructs the validation ablation and reruns protected derivation); (2) regenerate the campaign precommit spec against the operator-amended task model ollama qwen3.5:4b digest sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd on host charltons-mini.home.lan, replacing the retired qwen3.5:35b-a3b-coding-nvfp4 pin, with exact inference parameters and think:false recorded before any evidence collection; (3) full verification; (4) freeze a new commit for fresh mandatory review. Three-cell design (no_external_memory, base_scaffold, optimized_scaffold), deterministic non-self-approving evaluators, partitions, sealed holdout, equal budgets and seed schedules across cells, and the human-promotion boundary before META-10 are unchanged. Push the branch and the control root after every checkpoint; no worktree under /private/tmp.",
+  "stopCondition": "Stop on any edit outside the reserved writable slice; opening, reading, or consuming the sealed holdout before the reviewed protected campaign; W training, model or adapter installation beyond the pinned task model, live activation, evaluator evolution, active-pointer mutation, promotion, or deployment; change to E or W contracts; evaluator self-approval; aggregate-only promotion; mandatory-case regression; lineage, report, receipt, budget, digest, or rollback mismatch; non-deterministic fixed-input digest; unresolved P0/P1 review finding; focused, full, workplan, or diff-check failure; any control-root transition left uncommitted or branch checkpoint left unpushed.",
+  "evaluatorAuthority": "The implementing seat cannot self-approve. Mandatory read-only Pi / NeuralWatt GLM-5.2 frozen-diff review of the exact new frozen base/head with file-and-line evidence and P0-P3 classification; verbatim artifact stored under .review-store and its digest recorded. Every substantive finding is dispositioned; accepted fixes require a new frozen commit and fresh review. A distinct coordinator integrates and accepts. The campaign terminal verdict may only be eligible_pending_human_promotion or ineligible; a human decision after evidence is required before META-10 can be qualified. No reviewer or candidate receives promotion, merge, deployment, credential, or runtime authority.",
+  "acceptanceCommands": [
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q tests/test_real_h_campaign.py",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && node --test scripts/workplan.test.mjs",
+    "git -C /Users/charltonho/Developer/worktrees/meta-harness-meta34 diff --check 24a489134f9fd0e9a5780fbe3110a650f91ed013"
+  ],
+  "nextCheckpoint": "All six dispositions reapplied with citing tests; campaign spec regenerated hermetically against the pinned qwen3.5:4b digest with the committed-spec drift test green; focused and full suites plus workplan tests pass; new frozen commit pushed and receives mandatory Pi/NeuralWatt GLM-5.2 review with no unresolved P0/P1; then the one-time protected campaign runs and the terminal verdict is checkpointed to Linear, stopping at the human-promotion boundary.",
+  "allowedOwnerNamespaces": [
+    "claude",
+    "codex",
+    "pi"
+  ]
+}

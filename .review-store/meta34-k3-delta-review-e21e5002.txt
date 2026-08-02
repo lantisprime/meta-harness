@@ -1,0 +1,52 @@
+## META-34 delta review — TASK-20260801-027 — frozen delta 9770d11f..e21e5002
+
+Reviewer: independent read-only delta gate. Base 9770d11f (GLM-5.2 APPROVE, `.review-store/meta34-glm-5.2-review-r2.txt`), head e21e5002. I reviewed the full 2,335-line diff plus the new-head sources and tests.
+
+### Findings
+
+**P2-1 — Disposition #4 only partially implemented: `blueprint_digest`/`workflow_digest` still trusted verbatim when supplied.**
+`src/metaharness/evals/h_campaign.py:722-731` (`_populate_frozen_axes`) derives both digests only when empty; the new `_contract` checks (`h_campaign.py:519-548`) validate `task_model_portfolio_ref`, `task_model_portfolio_digest`, and `runner_configuration_digest` against their derivations, but no equivalent `sha256(ref)` check exists for supplied `blueprint_digest`/`workflow_digest`, and no test covers a supplied-mismatch for them. Disposition #4 was ACCEPT for "validate supplied sub-digests against derivations where derivable" and explicitly named `blueprint_digest`. Impact is low (self-referential digests, anchored by committed-spec self-hash + drift test), hence P2.
+
+**P3-1 — Validator does not tie `w_refs` to the model pin.**
+`h_campaign.py:519-548`: portfolio ref/digest are bound to `model.model_id`/`model.model_digest`, but `w_refs` is only bound into the `runner_configuration_digest` derivation (which is computed from `self.w_refs`, so a crafted spec is self-consistent). The committed spec is pinned by `tests/test_real_h_campaign.py:3218` (`spec.w_refs == (spec.model.model_digest,)`), so the campaign itself is correct; the general validator gap remains (partial vs disposition #2's "ref↔digest↔model consistency").
+
+**P3-2 — Disposition #5's requested citing test is missing.**
+The supplied-mismatched-`spec_digest` rejection exists (`h_campaign.py:744-746`, "campaign spec digest mismatch after default population") but no test asserts it; only the blank-digest case is covered (`tests/test_real_h_campaign.py:3162`, `test_file_spec_requires_explicit_precommitted_digest`).
+
+**P3-3 — Aborted-terminal wrapper edge cases.**
+`h_campaign.py:2457-2484`: (a) only `Exception` is caught — `KeyboardInterrupt`/`SystemExit` after ledger consume burns the holdout slot with no `aborted.json`; (b) the wrapper resolves `ledger_root` via `expanduser().resolve()` while `_run_ordered_campaign_impl` hands the raw value to `HoldoutConsumptionLedger` — a relative/`~` path could make the burn-detection path and the ledger path diverge. Both are failure-path-only; the main path (test at `tests/test_real_h_campaign.py:2278`) is correct: no masking (original exception always re-raised), no double-write (`aborted.json` via O_EXCL + exists-check, `h_campaign.py:2448`), ledger remains authoritative.
+
+**P3-4 — No negative test for the live per-attempt seed check.**
+`h_campaign.py:1578-1593` raises on outbound-body seed drift, but only the recorder unit test (`tests/test_real_h_campaign.py:2005`) exists; no campaign-level test drives a seed-dropping worker through `_phase_execution`. The verify-side row check (`h_campaign.py:3583-3594`) is pinned indirectly by the tamper suite.
+
+**P3-5 — Verify tolerates stripped `request_body`.**
+`h_campaign.py:3583-3586`: `request_body: null` + `request_body_digest: null` passes reload, so the new additive literal-body evidence can be deleted from a row undetected. No weakening vs the approved base (seed remains bound via `request_config_digest`/`request_digest` recomputation).
+
+### A. Disposition fidelity
+
+- **P1 #1 (ACCEPT)** — Implemented: `_run_ordered_campaign_impl`/`_persist_aborted_terminal`/`_run_ordered_campaign` wrapper (`h_campaign.py:2255-2484`). Citing test `test_holdout_failure_persists_aborted_terminal_after_ledger_burn` (tests:2278) fails post-consume rederivation and asserts ledger key + `aborted.json`; fails if the wrapper is reverted. **Complete** (edges in P3-3).
+- **P1 #2 (ACCEPT)** — Spec regenerated: `portfolio-qwen3-5-4b`, portfolio digest = qwen3.5:4b digest `sha256:2a654d98…4eefd`, `w_refs[0]` matches (`.agents/meta34-campaign-spec.json:518-523`, model block :474-487). Validator added (`h_campaign.py:519-548`); drift test extended (tests:3217-3231) and would fail on any revert. **Complete except w_refs not validator-bound (P3-1).**
+- **P2 #3** — `case_set_digest` now hashes sorted (case_id, input_digest, mandatory, view) per split (`h_campaign.py:1810-1819`); pinned by `test_protected_manifest_case_set_digest_binds_split_case_contracts` (tests:2321). **Complete.**
+- **P2 #4** — Partial: see P2-1 above.
+- **P2 #5 (REJECT w/ note)** — Binding confirmed present; citing test missing (P3-2).
+- **P2 #6 (ACCEPT-WITH-MOD)** — `_attach_request_body_recorder` (`h_campaign.py:1149-1161`) records the real outbound body per `_post`; per-attempt seed asserted in `_phase_execution` (:1578-1593); body+digest stored in the row and re-verified on reload (:3583-3594). **Complete** (test gap P3-4, optionality P3-5).
+- **P2 #7** — Screen widened: `_assert_secret_safe_evidence_row` now pre-scans via `_actual_contains_secret_material` and is applied to the full row pre-append (:1717) and on reload (:3437); `test_full_evidence_row_secret_scan_covers_selected_record_contents` is load-bearing (old screen would not raise on `content`-keyed `token=…`).
+- **P2 #8** — Reload test now monkeypatches `_phase_execution` with a counting spy and asserts zero calls (tests:2219-2233); fails if verify executes phases. **Fixed.**
+- **P2 #9** — LOG binding added both sides: wrapper rejects scope mismatch (`harness/memory.py:196-199`) and verify checks snapshot_id/content_hash/skill_id/scope/context_id (`h_campaign.py:3697-3706`); consult before-content-hash row cross-check added (:3664-3672).
+- **P3 list** — `next(…, None)` (:3271-3278) ✓; read_bytes/open spies (tests:48-65, wired into all three holdout tests) ✓; cell-0 frozen-axis mutations (tests:1556-1571) ✓; loopback prose fixed (`.agents/meta34-build-spec.md:62`, `docs/architecture.md:179`) ✓; `CampaignEvidenceError` export (`evals/__init__.py:36,94`) ✓; campaign-level double-consume test (tests:1771-1777) ✓; factory config equality asserted (`h_campaign.py:2995-2999`) ✓; secret-in-assertion distinct case (tests:2166) ✓; per-cell seed/budget manifest test (tests:2358) ✓; served-model digest via `/api/tags` with default resolver (`h_campaign.py:2928-2959, 2978-2982`) + test (tests:3284) ✓; test renames/body strengthening ✓. DEFER/NEEDS-EVIDENCE items handled as recorded.
+
+### B. No new defects
+The aborted-artifact path cannot mask (original exception re-raised) or double-write (O_EXCL, consumed-before guard) a terminal artifact; the ledger stays consistent. The regenerated spec is internally consistent with qwen3.5:4b and enforced by the new validators plus the drift test. The request recorder observes the literal outbound body per attempt (last `_post` body, fail-closed on empty/drift). The widened secret screen now covers every evidence-row field, including `selected_record_contents` and `request_body`. The `_implementation_digest` switch to bytecode projections (with co_exceptiontable/co_linetable/co_qualname and canonical defaults) is strictly stronger than the approved base's source-text digests, and the committed spec digests were regenerated to match, enforced by the drift test. No new nondeterminism in campaign outputs (`time.time()` appears only in the failure receipt).
+
+### C. Test integrity
+New/renamed tests are load-bearing: each would fail against the pre-fix code (spot-verified for the aborted-terminal, case-set-digest, runner-config-drift, validation-advice-chain, secret-row-scan, recorder, and transitive-scanner tests). No vacuous spies remain in the reload test. Gaps noted in P3-2/P3-4.
+
+### D. Slice discipline
+All eight touched files are inside the writable slice. No `harness/local.py` residue anywhere in the delta (grep-verified); the earlier out-of-slice edit left no trace.
+
+### E. Charter
+Invariant 1: canonical three-cell check and spec-level budgets/seeds untouched; new test pins per-cell schedule/budget symmetry. Invariant 2: evaluators remain deterministic; attestation strengthened. Invariant 3: holdout sealing strengthened (consume-before-read preserved, burn now auditable, spies cover read_bytes/open). Invariant 4: terminal verdicts remain only eligible_pending_human_promotion/ineligible; `aborted.json` is an exception-path audit receipt, not a verdict, and no promotion/activation/deployment path was added. Invariant 5: model pin corrected to qwen3.5:4b with the exact digest, think:false, temperature 0.0, plus live served-model verification. No invariant is touched adversely.
+
+No P0 findings. No P1 findings.
+
+VERDICT: APPROVE
