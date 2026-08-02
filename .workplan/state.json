@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 187,
+  "revision": 188,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -5602,7 +5602,7 @@
     {
       "id": "TASK-20260802-029",
       "title": "Supersedes backlog TASK-20260802-028 (path set too narrow; backlog cards cannot be blocked, predecessor remains as record). Author NEW protected case packages (development/validation/holdout) and a NEW precommitted campaign spec superseding void campaign meta34-real-h-20260726-v1, whose input packages were lost with charltons-mbp's /private/tmp. Requirements: packages stored durably (primary ~/Developer/protected/meta35 on charltons-mini; off-host sealed-archive copy to deb@10.18.8.40 home directory per operator direction 2026-08-02); sealed holdout authored and supplied separately, never committed, never executed before the reviewed campaign; spec regenerated against the live implementations at or after accepted head e538ca80 with new campaign_id and digests; committed-spec drift test extended to pin the new spec and green; then freeze, mandatory review, one-time protected campaign, terminal verdict, STOP at human-promotion boundary gating META-10.",
-      "status": "blocked",
+      "status": "in_progress",
       "owner": "claude:charltons-mini.home.lan:meta35-20260802",
       "paths": [
         ".agents/meta35-campaign-spec.json",
@@ -5709,9 +5709,24 @@
           },
           "prevEntryHash": "sha256:3630c47ddd6c8c25a4db3d07eb56a4948f7bf0ef9eca0e0f6bd4505e7f44e80d",
           "entryHash": "sha256:6cb521f317787d6dfb2ef70ab1c4ebc57f3131224fb96c55fb477fe4d8472425"
+        },
+        {
+          "from": "blocked",
+          "to": "in_progress",
+          "actor": "claude:charltons-mini.home.lan:meta35-20260802",
+          "revisionFrom": 187,
+          "revisionTo": 188,
+          "at": "2026-08-02T10:12:48.179Z",
+          "evidence": {
+            "blockedFrom": "review",
+            "reason": "review REQUEST_CHANGES at d9e628b: accepted fixes (definition on branch, lane-authorization record, docs blank line) require a new frozen head 4df347c and fresh review",
+            "retainPaths": true
+          },
+          "prevEntryHash": "sha256:6cb521f317787d6dfb2ef70ab1c4ebc57f3131224fb96c55fb477fe4d8472425",
+          "entryHash": "sha256:ded96129cd01202b4ca62b2627609a4d46dbebe4a7f1d9ca9637860695c3c46f"
         }
       ],
-      "receiptCount": 5,
+      "receiptCount": 6,
       "claimSnapshot": {
         "owner": "claude:charltons-mini.home.lan:meta35-20260802",
         "definitionHash": "sha256:894b0d58e01da489f083768522b0d177b14993471078d0ab06bc8b495ac2c1bc",
@@ -5753,10 +5768,7 @@
         "revisionFrom": 185,
         "revisionTo": 186,
         "at": "2026-08-02T10:02:20.485Z"
-      },
-      "blockedFrom": "review",
-      "blockReason": "review REQUEST_CHANGES at d9e628b: accepted fixes (definition on branch, lane-authorization record, docs blank line) require a new frozen head 4df347c and fresh review",
-      "retainPaths": true
+      }
     }
   ]
 }
