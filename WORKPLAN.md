@@ -2,10 +2,11 @@
 
 > Bootstrap exception: Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.
 
-Revision: 180
+Revision: 181
 
 | ID | Title | Status | Owner | Paths |
 |---|---|---|---|---|
+| TASK-20260802-028 | Author NEW protected case packages (development/validation/holdout) and a NEW precommitted campaign spec superseding void campaign meta34-real-h-20260726-v1, whose input packages were lost with charltons-mbp's /private/tmp. Requirements: packages stored durably (never under /private/tmp; off-host copy or sealed archive per operator direction); sealed holdout authored and supplied separately, never committed; spec regenerated against the live implementations at or after accepted head e538ca80 with new campaign_id and digests; committed-spec drift test green; then freeze, mandatory review, one-time protected campaign, terminal verdict, STOP at human-promotion boundary gating META-10. | backlog | workplan:add | `.agents/meta35-campaign-spec.json`; `.agents/meta35-definition.json` |
 | TASK-20260726-024 | Update META5 MEM-011 corpus metadata after promotion-boundary implementation | blocked | pi:charltons-mbp.home.lan:meta33-build-20260726 | `tests/fixtures/meta5/corpus.json`; `tests/adversarial/test_memory_skill_boundaries.py`; `.agents/meta33-review-brief-glm.md`; `.review-store/meta33-glm-5.2-review.txt` |
 | TASK-20260714-001 | Build and test the worktree-aware atomic Kanban control root | done |  |  |
 | TASK-20260714-002 | Freeze typed context, evidence, memory, lineage, and H/E/W contracts plus shadow manifests | done | codex:charltons-mbp.home.lan:codex-meta4-20260715 |  |
