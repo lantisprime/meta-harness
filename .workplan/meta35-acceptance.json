@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mini.home.lan:meta35-accept-20260802",
+  "definitionHash": "sha256:894b0d58e01da489f083768522b0d177b14993471078d0ab06bc8b495ac2c1bc",
+  "integrationCommit": "3ec781457a659a47ab7261418c81c7929209376f",
+  "commands": [
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta35 && .venv/bin/python -m pytest -q tests/test_real_h_campaign.py",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta35 && .venv/bin/python -m pytest -q",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta35 && node --test scripts/workplan.test.mjs",
+    "git -C /Users/charltonho/Developer/worktrees/meta-harness-meta35 diff --check da3a98e2cde4934bcd60afea879c6f9f7812e38a"
+  ],
+  "evidenceRefs": [
+    "git:integration:3ec781457a659a47ab7261418c81c7929209376f",
+    "git:review-head:4df347c1f78b2cc6b8ca8eb3043fa785671e1410",
+    "git:base:da3a98e2cde4934bcd60afea879c6f9f7812e38a",
+    "pytest:focused:integration:130-passed",
+    "pytest:full:integration:1927-passed-4-skipped-1-xfailed",
+    "node-test:integration:155-pass-0-fail",
+    "git-diff-check:integration-clean",
+    "review:.review-store/meta35/k3-review-d9e628b.txt:sha256:21025f2cd8561a4cdb6e52fc41a1a483558223d554e60a7b4f0c11d3afc4e173:litellm-kimi-k3-round1-request-changes-0-p0-1-p1-1-p2-1-p3",
+    "review:.review-store/meta35/k3-review-4df347c.txt:sha256:16f71c7ffd57eb71942de37a4acc5080439af9a88ee34607b6c4fdfa2e279c18:litellm-kimi-k3-round2-approve-no-p0-p1",
+    "dispositions:.review-store/meta35/dispositions-d9e628b.md:p1-accept-with-mod-p2-accept-p3-accept",
+    "dispositions:.review-store/meta35/dispositions-4df347c.md:round2-p2-citation-lines-accept-post-approve",
+    "authorization:.review-store/meta35/review-lane-authorization.md:kimi-k3-litellm-lane",
+    "smoke:dev-val-only:72-attempts-required-pattern-holds:holdout-never-touched",
+    "packages:durable:~/Developer/protected/meta35:dev-cafde166-val-405b9274-holdout-a4f371b6"
+  ],
+  "receiptHash": "sha256:8e6f31755af39d715a4f2f25d67ef973d704decc6e208f41f390e927c8a3ab37"
+}
