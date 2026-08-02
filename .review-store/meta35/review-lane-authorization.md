@@ -5,14 +5,14 @@ dated, scoped authorization artifact for substituting the Pi/NeuralWatt
 GLM-5.2 review lane. The authorization predates this card and is verifiable
 in committed repository history:
 
-1. `memory/session_handoff.md:123` (committed on main as `71fbe32`,
+1. `memory/session_handoff.md:51` (at commit `71fbe32` on main,
    session-62 handoff, 2026-08-02): "`--model kimi-k3` (operator authorized
    as alternate; K3 is the repo's sanctioned primary reviewer per META-9
    evaluatorAuthority)" — recorded when the operator directed the
    substitution during META-34's delta-review gate, with the GLM lane's
    upstream weekly quota exhausted until 2026-08-05 08:38 UTC and the
    NeuralWatt lane returning 402/no-credits.
-2. `memory/session_handoff.md:18` (committed on main as `1c9c14a`,
+2. `memory/session_handoff.md:15` (at commit `1c9c14a` on main,
    session-63 handoff, 2026-08-02): the same lane was USED for META-34's
    delta review ("reviewed by pi → litellm → kimi-k3 (operator-authorized
    alternate)") and that review was accepted into board revision 180 and
