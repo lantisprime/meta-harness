@@ -56,4 +56,14 @@ __all__ = [
     "SubscriptionWorker",
     "SUBSCRIPTION_CLIS",
     "subscription_status",
+    "MemoryAwareRunner",
+    "MemoryAdviceError",
+    "MemoryRunEvidence",
 ]
+
+
+def __getattr__(name):
+    if name in {"MemoryAdviceError", "MemoryAwareRunner", "MemoryRunEvidence"}:
+        from metaharness.harness import memory
+        return getattr(memory, name)
+    raise AttributeError(name)
