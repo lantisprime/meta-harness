@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "verdict": "pass",
+  "evaluator": "coordinator:charltons-mini.home.lan:meta34-integrate-20260802",
+  "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
+  "integrationCommit": "e538ca80820a8ecf4bbeddba07aae9ffc9cd0a31",
+  "commands": [
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q tests/test_real_h_campaign.py",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && .venv/bin/python -m pytest -q",
+    "cd /Users/charltonho/Developer/worktrees/meta-harness-meta34 && node --test scripts/workplan.test.mjs",
+    "git -C /Users/charltonho/Developer/worktrees/meta-harness-meta34 diff --check 24a489134f9fd0e9a5780fbe3110a650f91ed013"
+  ],
+  "evidenceRefs": [
+    "git:integration:e538ca80820a8ecf4bbeddba07aae9ffc9cd0a31",
+    "git:review-head:e21e5002d4560a88d52e438e14910148867c59f1",
+    "git:base:24a489134f9fd0e9a5780fbe3110a650f91ed013",
+    "pytest:focused:integration:129-passed",
+    "pytest:full:integration:1995-passed-1-xfailed",
+    "node-test:integration:155-pass-0-fail",
+    "git-diff-check:integration-clean",
+    "review:.review-store/meta34-glm-5.2-review-r2.txt:sha256:89c711aa86fc2112d2959c2030e83330655c75496088c8cf7810556a006414e3:litellm-glm-5.2-approve-no-p0-p1",
+    "review:.review-store/meta34-k3-delta-review-e21e5002.txt:sha256:9fb6ed405cb37318157242d1b643cd04292d69014c694bb54cbff7ab44120020:litellm-kimi-k3-delta-approve-no-p0-p1",
+    "dispositions:.review-store/meta34r-dispositions.md:delta-round-1-p2-5-p3-all-defer",
+    "deferred:P2-1-supplied-blueprint-workflow-digests-unvalidated",
+    "deferred:P3-w_refs-validator-binding;spec-digest-citing-test;aborted-wrapper-edges;seed-negative-test;stripped-request-body-tolerance"
+  ],
+  "receiptHash": "sha256:35a6482f2e1e022661cf563e88eaf903919ecbdbac8eddc6d3c1ae5f4fcaef7c"
+}
