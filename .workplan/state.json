@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 178,
+  "revision": 179,
   "bootstrapException": "Coordinator bootstrap after META-1 shipped without init/import or canonical state. TASK-20260714-001 is seeded Done from merged PR #32 (a48fa4a3766f655feeb3c780a9a9c1974fce9da7), GitHub CI success, and 115/115 local Node tests; no synthetic lifecycle receipts are claimed.",
   "cards": [
     {
@@ -5280,7 +5280,7 @@
     {
       "id": "TASK-20260801-027",
       "title": "Resume META-34 real protected H campaign from recovered frozen head d9bc2dd: reapply the six accepted GLM dispositions, regenerate the campaign spec against the operator-amended qwen3.5:4b pin on charltons-mini, freeze, fresh mandatory GLM review, one-time protected campaign, stop at the human-promotion boundary",
-      "status": "review",
+      "status": "verifying",
       "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
       "paths": [
         "src/metaharness/evals/h_campaign.py",
@@ -5426,9 +5426,25 @@
           },
           "prevEntryHash": "sha256:1b67735eb2513a6906fc049ddc0ee88bc42574c420760e6b6db4599b8055aaff",
           "entryHash": "sha256:27109d322a6515b700d2242c487776bcd88b5a5e4a05a5a695b94cb4c2f29322"
+        },
+        {
+          "from": "review",
+          "to": "verifying",
+          "actor": "coordinator:charltons-mini.home.lan:meta34-integrate-20260802",
+          "revisionFrom": 178,
+          "revisionTo": 179,
+          "at": "2026-08-02T01:35:27.917Z",
+          "evidence": {
+            "reviewBranch": "dev/meta-34-real-protected-h-campaign",
+            "reviewHead": "e21e5002d4560a88d52e438e14910148867c59f1",
+            "integrationCommit": "e538ca80820a8ecf4bbeddba07aae9ffc9cd0a31",
+            "integrationReceiptHash": "sha256:fcc80dbf15a360fb031b8659cf41899f2b9ed6d91c3ec82896077eb1ba2ddf85"
+          },
+          "prevEntryHash": "sha256:27109d322a6515b700d2242c487776bcd88b5a5e4a05a5a695b94cb4c2f29322",
+          "entryHash": "sha256:99780442c087732e73df7babb5f6b580a9e3c1d0194bad7504cf2824bfa32fdd"
         }
       ],
-      "receiptCount": 7,
+      "receiptCount": 8,
       "claimSnapshot": {
         "owner": "claude:charltons-mini.home.lan:meta34-resume-20260801",
         "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
@@ -5475,6 +5491,16 @@
         "revisionFrom": 177,
         "revisionTo": 178,
         "at": "2026-08-01T15:56:56.888Z"
+      },
+      "integrationReceipt": {
+        "actor": "coordinator:charltons-mini.home.lan:meta34-integrate-20260802",
+        "reviewBranch": "dev/meta-34-real-protected-h-campaign",
+        "reviewHead": "e21e5002d4560a88d52e438e14910148867c59f1",
+        "integrationCommit": "e538ca80820a8ecf4bbeddba07aae9ffc9cd0a31",
+        "definitionHash": "sha256:fe27be6f92e52ee8f46721ebb9a991fc9dbc2fb146a31fa993e5007941df8aeb",
+        "revisionFrom": 178,
+        "revisionTo": 179,
+        "at": "2026-08-02T01:35:27.917Z"
       }
     }
   ]
