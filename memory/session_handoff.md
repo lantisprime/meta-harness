@@ -1,3 +1,82 @@
+# Session Handoff — meta-harness (2026-08-02, session 64: META-35 successor campaign COMPLETE — eligible_pending_human_promotion; STOP at human-promotion boundary)
+
+## State in one line
+
+`TASK-20260802-029` (successor campaign card, superseding `-028`) is **`done`**
+at board revision **191**; the one-time protected campaign
+`meta35-real-h-20260802-v1` ran to terminal status
+**`eligible_pending_human_promotion`** (result digest `7b97ff44…620eb`,
+holdout ledger key `8366f972…ca85`, consumed exactly once); **PR #84 is open**
+(integrate/meta35 → main, accepted at `3ec7814`) — merge is the operator's
+call; the sealed archive is copied off-host (sha256 `f140d868…9791` verified
+on `deb@10.18.8.40`). **The next gating step is a HUMAN promotion decision
+on this evidence before META-10 can be qualified. Nothing here authorizes
+META-10, W training, promotion, activation, or deployment.**
+
+## What happened
+
+1. **Board surgery**: `-028`'s two-path reservation was too narrow (drift
+   test + docs); backlog cards cannot be blocked, so replacement
+   `TASK-20260802-029` was filed with the full path set (rev 182,
+   precedent -024→-025) and `-028` remains in backlog as a superseded
+   record. Qualify 183 (definition frozen,
+   `sha256:894b0d58…c1bc`), claim+start 185, submit 186, block/resume/
+   re-submit 187-189 (re-freeze), integrate 190, accept 191. Worktree
+   `~/Developer/worktrees/meta-harness-meta35` (durable), branch
+   `dev/meta-35-real-protected-h-campaign`, base `da3a98e`.
+2. **Authoring** (coordinator-owned per META-34 role split; recorded in
+   `.agents/meta35-build-spec.md`): generator + corpus (24 records) +
+   snapshot pair (`query_max_results` 1→2 sole delta) + three NEW packages,
+   all in durable `~/Developer/protected/meta35` (holdout sealed 0600,
+   never committed, never model-touched pre-campaign). Committed spec
+   `.agents/meta35-campaign-spec.json` (spec digest `c5e92f21…d9ece`,
+   qwen3.5:4b pinned by digest, loopback base_url — Ollama binds localhost
+   only). Case design validated by live dev/val-only smoke (72 attempts,
+   required pattern held: approved-target base-fail→opt-pass; safety
+   injection potent in base, resisted in optimized). Additive drift test
+   pins the meta35 spec + supersession (new campaign_id/package digests vs
+   void meta34).
+3. **Review gate** (kimi-k3 via litellm; authorization citations committed
+   in `.review-store/meta35/review-lane-authorization.md`): round 1 at
+   `d9e628b` REQUEST_CHANGES (0 P0, 1 P1 authorization-not-auditable,
+   1 P2 definition-not-on-branch, 1 P3) — root cause: definition landed on
+   main after branch fork; all dispositioned+fixed. Round 2 at frozen
+   `4df347c` **APPROVE, no P0/P1** (1 P2 citation-line fix applied
+   post-approve per reviewer-sanctioned meta34 convention). Artifacts +
+   sha256s in `.review-store/meta35/`.
+4. **Acceptance** at integration merge `3ec7814`: focused 130; full 1927
+   passed/4 skipped/1 xfailed; workplan 155/155; diff-check clean. Receipt
+   `.workplan/meta35-acceptance.json` (`sha256:8e6f3175…ab37`), evaluator
+   distinct from owner.
+5. **Campaign**: dev selection held (all reps), validation approved pair
+   confirmed, holdout consumed ONCE and confirmed; 0 regressed mandatory,
+   0 unverified. Model-call-free `verify_campaign` re-derivation reproduces
+   the identical verdict/digests. Verdict checkpointed to Linear META-34
+   (comment `adc3a6f2`; META-35 issue was canceled by operator — card-only
+   tracking).
+6. **Storage**: primary `~/Developer/protected/meta35` (+ campaign
+   evidence, ledger, terminal output); off-host sealed archive
+   `~/meta35-sealed-archive-20260802.tar.gz` on `deb@10.18.8.40`
+   (sha256 verified match). No sole copies in volatile paths.
+
+## Repo state / next steps
+
+1. **Operator decisions pending**: (a) merge PR #84; (b) the HUMAN
+   promotion decision on the protected evidence — the gate for META-10.
+   Do not qualify META-10 without it.
+2. Only non-done card: `TASK-20260802-028` (backlog, superseded record,
+   reserves nothing). Board otherwise clean at 191.
+3. Worktree `~/Developer/worktrees/meta-harness-meta35` kept until PR #84
+   merges (it is on `integrate/meta35` at the accepted commit); then
+   deletable, and dev+integrate branches deletable once merged.
+4. Footnote for a future card: `python -m metaharness.evals.h_campaign
+   verify` self-invalidates (module runs as `__main__`, shifting
+   implementation-digest projections → false "resolver mismatch");
+   verify via `from metaharness.evals.h_campaign import verify_campaign`.
+   Pre-existing behavior, out of this card's scope.
+
+---
+
 # Session Handoff — meta-harness (2026-08-02, session 63: META-34 card done at board 181; campaign VOID — packages lost)
 
 ## State in one line
