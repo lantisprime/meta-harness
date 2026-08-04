@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "record": "human-promotion-decision",
+  "decision": "promote",
+  "decidedBy": "operator (me@charltonho.com)",
+  "decidedAt": "2026-08-04",
+  "instruction": "merhe it and promote it (operator, in-session, 2026-08-04; 'merhe' = merge)",
+  "subject": {
+    "campaign_id": "meta35-real-h-20260802-v1",
+    "promoted_cell": "optimized_scaffold",
+    "spec_digest": "c5e92f2140cdd9688fd4251f0991ba8e97f3c43bc8056ae64b281377694d9ece",
+    "protected_result_id": "meta35-real-h-20260802-v1-result",
+    "protected_result_digest": "7b97ff44e5f5a654f51af71f27511232587295b1cb8378f276e57d26bac620eb",
+    "terminal_status": "eligible_pending_human_promotion",
+    "holdout_ledger_key": "8366f972383a3eb04b697e997c164a82ed5aaff1ebbe6d07deae4afba2e4ca85",
+    "rollback_snapshot_hash": "sha256:66604f260ea52962308ed86fcd855505c8efebd13b67aca5e28b34c104998dad"
+  },
+  "evidence": [
+    "acceptance:.workplan/meta35-acceptance.json:sha256:8e6f31755af39d715a4f2f25d67ef973d704decc6e208f41f390e927c8a3ab37",
+    "merge:PR-84:69f78153e84dc8dc40eb08938953b1d05303f925",
+    "review:.review-store/meta35/k3-review-4df347c.txt:approve-no-p0-p1",
+    "verify:model-free-verify_campaign-rederivation:identical-verdict-and-digests",
+    "linear:META-34:comment-adc3a6f2-0148-4f1e-aa77-4ec7f70c291d"
+  ],
+  "effect": "Closes the human-promotion boundary for this campaign's protected evidence: META-10 may now be qualified. This record does NOT itself activate, deploy, train W, or mutate any active pointer; exact rollback remains the recorded rollback_snapshot_hash.",
+  "recordHash": "sha256:b91439d95f91512f0d24e6b33b95806fedc19106f2ae8c0f5b144e38afc230f2"
+}
