@@ -3232,6 +3232,85 @@ def test_committed_campaign_spec_matches_live_runtime_implementations():
     assert spec.model.inference_parameters["thinking"] is False
 
 
+def test_committed_meta35_campaign_spec_matches_live_runtime_implementations():
+    """The successor precommitted spec (campaign meta35-real-h-20260802-v1,
+    TASK-20260802-029) superseding void campaign meta34-real-h-20260726-v1:
+    same live-implementation pinning as the meta34 drift test, plus the
+    supersession pins — a NEW campaign_id and NEW protected package digests,
+    per the successor card's requirements."""
+    from metaharness.evals.h_campaign import (
+        _runtime_implementation_fields,
+        load_spec,
+    )
+
+    spec = load_spec(
+        Path(__file__).resolve().parents[1]
+        / ".agents"
+        / "meta35-campaign-spec.json"
+    )
+    live = _runtime_implementation_fields()
+    for cell in spec.cells:
+        assert cell.h.resolver_digest == live["resolver_implementation_digest"]
+        assert (
+            cell.h.task_template_digest
+            == live["task_template_implementation_digest"]
+        )
+        assert (
+            cell.h.wrapper_digest
+            == live["memory_aware_runner_implementation_digest"]
+        )
+        assert cell.h.policy_digest == live["broker_policy_implementation_digest"]
+        assert (
+            cell.h.worker_implementation_digest
+            == live["openai_worker_implementation_digest"]
+        )
+        assert (
+            cell.h.output_parser_digest
+            == live["output_parser_implementation_digest"]
+        )
+    evaluator_digest = live["deterministic_evaluator_implementation_digest"]
+    assert spec.evaluator_digest == evaluator_digest
+    assert spec.evaluator.evaluator_digest == evaluator_digest
+    assert spec.spec_digest == spec._compute_digest()
+    assert spec.digest() == spec.spec_digest
+    assert spec.campaign_id == "meta35-real-h-20260802-v1"
+    assert spec.model.model_id == "qwen3.5:4b"
+    assert spec.model.model_digest == (
+        "sha256:2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd"
+    )
+    # Loopback pin: the campaign runs on charltons-mini itself and the
+    # local Ollama runtime binds localhost only.
+    assert spec.model.base_url == "http://127.0.0.1:11434/v1"
+    assert spec.task_model_portfolio_ref == "portfolio-qwen3-5-4b"
+    assert spec.task_model_portfolio_digest == spec.model.model_digest
+    assert spec.w_refs == (spec.model.model_digest,)
+    assert spec.runner_configuration_digest == "sha256:" + sha256_hex(canonical_json_bytes({
+        "runner_id": spec.runner_id,
+        "model_id": spec.model.model_id,
+        "model_digest": spec.model.model_digest,
+        "base_url": spec.model.base_url,
+        "inference_parameters": spec.model.inference_parameters,
+        "environment_digest": spec.environment_digest,
+        "evaluator_digest": spec.evaluator_digest,
+        "w_refs": list(spec.w_refs),
+    }))
+    assert spec.model.inference_parameters["temperature"] == 0.0
+    assert spec.model.inference_parameters["thinking"] is False
+    # Supersession: the void meta34 campaign's identity and protected
+    # package digests must not be reused.
+    void_spec = load_spec(
+        Path(__file__).resolve().parents[1]
+        / ".agents"
+        / "meta34-campaign-spec.json"
+    )
+    assert spec.campaign_id != void_spec.campaign_id
+    for split in ("development", "validation", "holdout"):
+        assert (
+            spec.protected_package_digests[split]
+            != void_spec.protected_package_digests[split]
+        )
+
+
 def test_campaign_spec_rejects_supplied_runner_configuration_digest_drift():
     raw = _matching_spec().model_dump(mode="python")
     raw["spec_digest"] = ""
