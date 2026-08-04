@@ -59,16 +59,20 @@ META-10, W training, promotion, activation, or deployment.**
    `~/meta35-sealed-archive-20260802.tar.gz` on `deb@10.18.8.40`
    (sha256 verified match). No sole copies in volatile paths.
 
-## Repo state / next steps
+## Repo state / next steps (final, updated 2026-08-04)
 
-1. **Operator decisions pending**: (a) merge PR #84; (b) the HUMAN
-   promotion decision on the protected evidence — the gate for META-10.
-   Do not qualify META-10 without it.
-2. Only non-done card: `TASK-20260802-028` (backlog, superseded record,
-   reserves nothing). Board otherwise clean at 191.
-3. Worktree `~/Developer/worktrees/meta-harness-meta35` kept until PR #84
-   merges (it is on `integrate/meta35` at the accepted commit); then
-   deletable, and dev+integrate branches deletable once merged.
+1. DONE 2026-08-04: **PR #84 merged as `69f78153`**; **operator human
+   promotion decision recorded** — `.workplan/meta35-promotion-decision.json`
+   on main (recordHash `sha256:b91439d9…30f2`), replicated to protected
+   storage and `deb@10.18.8.40` (sha256 verified); Linear META-34 comment
+   `c5198708`. **META-10 is now qualifiable.** The promotion record
+   performs no activation/deployment/W-start; exact rollback remains
+   `sha256:66604f26…8dad`.
+2. Card worktree removed; dev + integrate branches deleted local and
+   remote (fully merged). Board clean at 191; only superseded records
+   `-024` (blocked, historic) and `-028` (backlog) remain non-done.
+3. Next product step: coordinator qualifies META-10 when the operator
+   directs — the promotion prerequisite is satisfied.
 4. Footnote for a future card: `python -m metaharness.evals.h_campaign
    verify` self-invalidates (module runs as `__main__`, shifting
    implementation-digest projections → false "resolver mismatch");
